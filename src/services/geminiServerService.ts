@@ -1,14 +1,15 @@
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold, ThinkingLevel } from "@google/genai";
 import { ATHENA_LEGAL_CORPUS } from "./legalCorpusSource";
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
+const getAI = () => new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || "",
   httpOptions: {
     headers: {
       'User-Agent': 'aistudio-build',
     }
   }
 });
+const ai = getAI();
 
 // Cache Registry para Context Caching do Corpus Jurídico 2026
 interface CacheEntry {
@@ -281,10 +282,10 @@ export async function askATHENA(
   // - Custo operacional ~90% mais baixo
   // - Elevadíssima precisão na transcrição e formulação de perguntas
   const modelAttempts = [
+    { model: "gemini-3.6-flash", useThinking: false },
     { model: "gemini-flash-latest", useThinking: false },
-    { model: "gemini-2.0-flash", useThinking: false },
-    { model: "gemini-3.1-pro-preview", useThinking: true },
-    { model: "gemini-3.5-flash", useThinking: true }
+    { model: "gemini-3.5-flash", useThinking: true },
+    { model: "gemini-3.1-pro-preview", useThinking: true }
   ];
 
   let lastError: any = null;
@@ -425,9 +426,9 @@ Forneça sua correção detalhada em formato markdown elegante contendo sugestõ
     // Discursivas e Provas Orais exigem raciocínio analítico profundo de banca de concurso.
     // Usamos modelos com Thinking Level HIGH para notas precisas e espelho de correção detalhado.
     const modelAttempts = [
+      { model: "gemini-3.6-flash", useThinking: false },
       { model: "gemini-3.1-pro-preview", useThinking: true },
       { model: "gemini-flash-latest", useThinking: false },
-      { model: "gemini-2.0-flash", useThinking: false },
       { model: "gemini-3.5-flash", useThinking: true }
     ];
 

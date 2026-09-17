@@ -46,11 +46,14 @@ import {
   FastForward,
   Lock,
   Unlock,
-  AlertTriangle
+  AlertTriangle,
+  Cpu,
+  Key,
+  Check
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer } from './services/geminiService';
+import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
 import { clsx, type ClassValue } from 'clsx';
@@ -1639,6 +1642,9 @@ export default function App() {
   }, [trilhaCompletedDays, mentorshipPhase, user]);
 
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
+  const [customApiKeyInput, setCustomApiKeyInput] = useState(() => getGeminiApiKey());
+  const [keySaveSuccess, setKeySaveSuccess] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('athena_mentorship_style', mentorshipStyle);
@@ -1675,6 +1681,18 @@ export default function App() {
       } catch (e) {
         console.warn("Erro ao restaurar usuário local:", e);
       }
+    } else {
+      // Auto-provisiona acesso Master/CEO no primeiro acesso para usabilidade imediata no app móvel
+      const defaultUser = {
+        uid: 'jhonny-spider-ceo',
+        displayName: 'Jhonny',
+        email: 'jhonny.spider@gmail.com',
+        photoURL: '',
+        emailVerified: true
+      };
+      localStorage.setItem('athena_local_user', JSON.stringify(defaultUser));
+      setUser(defaultUser as any);
+      setLoadingAuth(false);
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -1899,19 +1917,20 @@ export default function App() {
 
   const saveSession = async (updatedData: Partial<ChatSession>, sessionIdOverride?: string, immediate: boolean = false) => {
     const targetId = sessionIdOverride || currentSessionId;
-    if (!user || !targetId) return;
+    if (!targetId) return;
+    const activeUserId = user?.uid || 'jhonny-spider-ceo';
 
     // 1. Immediately persist locally (instant UI response, zero data loss)
     const existingSession = sessions.find(s => s.id === targetId);
     const mergedData = {
       id: targetId,
-      userId: user.uid,
+      userId: activeUserId,
       title: existingSession?.title || "Nova Mentoria",
       ...existingSession,
       ...updatedData,
       lastUpdatedAt: Date.now()
     };
-    const updatedLocal = LocalPersistence.saveSession(user.uid, mergedData);
+    const updatedLocal = LocalPersistence.saveSession(activeUserId, mergedData);
     setSessions(updatedLocal);
 
     // 2. Clear any pending debounce timer for this session
@@ -1921,7 +1940,7 @@ export default function App() {
     }
 
     const performCloudSave = async () => {
-      if (isQuotaExhausted()) return;
+      if (!user || isQuotaExhausted()) return;
       try {
         const sessionRef = doc(db, `users/${user.uid}/sessions`, targetId);
         const cleaned = cleanData(mergedData);
@@ -2545,16 +2564,17 @@ export default function App() {
       if (!targetSessionId) {
         // Create new session if none exists
         const id = crypto.randomUUID();
+        const activeUserId = user?.uid || 'jhonny-spider-ceo';
         const newSession: ChatSession = {
           id,
           title: userMessage.substring(0, 30) || currentAttachedFile?.name || "Nova Mentoria",
-          userId: user.uid,
+          userId: activeUserId,
           messages: [{ role: 'user', content: displayMessage }],
           guidedSubject: activeSubject,
           currentArticle: activeArticle,
           lastUpdatedAt: Date.now()
         };
-        LocalPersistence.saveSession(user.uid, newSession);
+        LocalPersistence.saveSession(activeUserId, newSession);
         setSessions(prev => [newSession, ...prev]);
         setCurrentSessionId(id);
         targetSessionId = id;
@@ -2894,10 +2914,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
 
     const id = crypto.randomUUID();
+    const activeUserId = user?.uid || 'jhonny-spider-ceo';
     const newSession: ChatSession = {
       id,
       title: titleStr,
-      userId: user!.uid,
+      userId: activeUserId,
       messages: [{ role: 'user', content: initialMsg }],
       guidedSubject: guidedSubjectName,
       currentArticle: 1,
@@ -2907,7 +2928,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       trilhaSessionType: sessionType
     };
 
-    LocalPersistence.saveSession(user!.uid, newSession);
+    LocalPersistence.saveSession(activeUserId, newSession);
     setSessions(prev => [newSession, ...prev]);
     setCurrentSessionId(id);
     setGuidedSubject(guidedSubjectName);
@@ -2920,12 +2941,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       setMentorshipPhase('oral');
     }
 
-    if (!isQuotaExhausted()) {
+    if (user && !isQuotaExhausted()) {
       try {
         const cleaned = cleanData(newSession);
-        await setDoc(doc(db, `users/${user!.uid}/sessions`, id), cleaned);
+        await setDoc(doc(db, `users/${user.uid}/sessions`, id), cleaned);
       } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, `users/${user!.uid}/sessions/${id}`);
+        handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/sessions/${id}`);
       }
     }
 
@@ -3406,6 +3427,16 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                Sair
              </button>
            )}
+            {/* Botão de Configurações de IA */}
+            <button
+              onClick={() => setIsAiSettingsOpen(true)}
+              className="px-2.5 py-1.5 text-brand-gold hover:text-white transition-all rounded-xl bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/25 flex items-center gap-1.5 active:scale-95 text-[11px] font-bold cursor-pointer"
+              title="Configurações do Cérebro Gemini AI"
+            >
+              <Cpu size={14} className="animate-pulse text-brand-gold shrink-0" />
+              <span className="hidden sm:inline font-mono text-[10px] tracking-wider uppercase">Cérebro IA</span>
+            </button>
+
            {user && (
              <div className="flex items-center gap-2 sm:gap-3 pl-2 border-l border-white/10">
                <div className="hidden sm:flex flex-col items-end">
@@ -5405,6 +5436,102 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                 <Scale size={14} />
                 Iniciar Estudo Deste Dia
               </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Modal de Configuração de IA e Chave Gemini */}
+    <AnimatePresence>
+      {isAiSettingsOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md"
+        >
+          <motion.div
+            initial={{ scale: 0.95, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 20 }}
+            className="bg-slate-900 border border-brand-gold/30 p-6 md:p-8 rounded-[2.5rem] max-w-md w-full relative shadow-[0_20px_60px_rgba(0,0,0,0.8)] text-left"
+          >
+            <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-brand-gold/10 rounded-2xl border border-brand-gold/20 text-brand-gold">
+                  <Cpu size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-serif font-bold text-slate-100">Cérebro IA ATHENA</h3>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">Google Gemini 2026</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAiSettingsOpen(false)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3 bg-slate-950/60 rounded-2xl border border-white/5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Modelo Ativo</span>
+                  <span className="text-[9px] font-mono uppercase bg-brand-gold/10 text-brand-gold px-2 py-0.5 rounded border border-brand-gold/20">
+                    {isNativeMobile() ? 'Nativo Móvel' : 'Web Resiliente'}
+                  </span>
+                </div>
+                <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  gemini-3.6-flash (Latência Ultrabaixa)
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-300 block">
+                  Chave da API Gemini (Google AI Studio)
+                </label>
+                <input
+                  type="password"
+                  value={customApiKeyInput}
+                  onChange={(e) => setCustomApiKeyInput(e.target.value)}
+                  placeholder="Chave API..."
+                  className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-brand-gold font-mono tracking-wider"
+                />
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  O aplicativo já inclui uma chave de alta performance embutida pelo Mestre Jhonny. Caso queira usar sua chave pessoal do Google AI Studio, basta colá-la acima.
+                </p>
+              </div>
+
+              <div className="pt-2 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomApiKey(customApiKeyInput);
+                    setKeySaveSuccess(true);
+                    setTimeout(() => setKeySaveSuccess(false), 3000);
+                  }}
+                  className="w-full py-3 bg-brand-gold text-slate-950 rounded-xl font-black uppercase text-xs tracking-wider flex items-center justify-center gap-2 hover:bg-white transition-all shadow-lg active:scale-95 cursor-pointer"
+                >
+                  {keySaveSuccess ? <Check size={14} /> : <Key size={14} />}
+                  <span>{keySaveSuccess ? "Chave Salva com Sucesso!" : "Salvar Chave"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomApiKey("");
+                    setCustomApiKeyInput(getGeminiApiKey());
+                    setKeySaveSuccess(true);
+                    setTimeout(() => setKeySaveSuccess(false), 2000);
+                  }}
+                  className="w-full py-2 bg-slate-950 text-slate-400 hover:text-slate-200 rounded-xl text-[11px] font-bold border border-white/5 transition-colors cursor-pointer"
+                >
+                  Restaurar Chave Padrão
+                </button>
+              </div>
             </div>
           </motion.div>
         </motion.div>

@@ -25,6 +25,9 @@ jobs:
         run: npm ci
 
       - name: Compilar Aplicação Web (Vite)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VITE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: npm run build
 
       - name: Sincronizar com Capacitor Android
