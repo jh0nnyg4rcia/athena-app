@@ -3127,26 +3127,17 @@ Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de
 No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas normais, apresente uma única ARGUIÇÃO ORAL (Pergunta de Exame Oral) formal de banca examinadora, instruindo o aluno a utilizar gravação de áudio ou digitação por ditado de voz para responder verbalmente sob pressão à banca. Aguarde a sustentação para proferir nota oficial de oratória jurídica.`;
     }
 
-    let extraSource = '';
-    if (dayItem && dayItem.fonteCompleta) {
-      extraSource = `\n\n[DIRETRIZ DE PARETO (80/20) & MATERIAL BASE DO DIA ${dayNum} PARA SEU SUPORTE EM RESPOSTA]:
-As diretivas abaixo são o material doutrinário e de lei seca base do dia compilados pelo mentor. 
---------------------------------------------------
-${dayItem.fonteCompleta}
---------------------------------------------------
-INSTRUÇÕES CRÍTICAS DE METODOLOGIA PARA A IA ATHENA:
-1. Este material NÃO deve ser acessado diretamente pelo usuário; você deve consumi-lo e agir como a ponte pedagógica complementar.
-2. Utilize-o como a base estrutural irrefutável e COMPLEMENTE-O intensamente com sua inteligência artificial.
-3. Aplique o PRINCÍPIO DE PARETO (80/20): com base nas provas anteriores de Magistratura/MP e afins, elabore e selecione os temas a serem estudados que de fato possuem maior recorrência mecânica em provas. Concentre o material de estudo estrito nos 20% do conteúdo mais cobrados por bancas pretéritas que produzem 80% das questões.
-4. Faça uma abordagem cirúrgica, enriquecida com pegadinhas, precedentes e doutrina de apoio com base em provas anteriores para tornar o material o mais completo e eficiente do Brasil.${hybridDirective}`;
-    }
+    let extraSource = `\n\n[DIRETRIZ DE PARETO (80/20) - ESTRATÉGIA DE ALTA PERFORMANCE PARA O DIA ${dayNum}]:
+1. Aplique o PRINCÍPIO DE PARETO (80/20): com base nas provas de concursos jurídicos de elite (Magistratura, MP, Defensoria e Delegado), concentre o estudo nos temas de maior recorrência prática e cobrança em provas para ${currentMat.nome} (${currentMat.conteudo}).
+2. Faça uma abordagem cirúrgica, enriquecida com pegadinhas, precedentes vinculantes do STF/STJ, súmulas e divergências doutrinárias de ponta.
+3. Decodifique os conceitos e artigos no formato de 6 blocos pedagógicos estruturados.${hybridDirective}`;
 
     return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos estudar de forma PARTICIONADA o tema do DIA ${dayNum} (Semana ${semana}) para garantir profundidade monumental sem sobrecarga de processamento.
 
 Dentre os temas programados para hoje, este comando refere-se especificamente à seguinte parte:
 **Parte ${materialIndex + 1} de ${totalMaterials}**: **${currentMat.nome}**: ${currentMat.conteudo}${extraSource}
 
-Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo específico, com base na doutrina/normas do material de fonte fornecido e na sua complementação por inteligência artificial sob o Princípio de Pareto aplicável a provas anteriores. Siga rigorosamente o fluxo de estudos em 6 blocos!`;
+Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo específico, com base na melhor doutrina, jurisprudência e na sua complementação por inteligência artificial sob o Princípio de Pareto aplicável a provas anteriores. Siga rigorosamente o fluxo de estudos em 6 blocos!`;
   };
 
   const handleStartTrilhaStudy = async (dayNum: number, sessionType: 'estudo' | 'discursivo' | 'oral' = 'estudo') => {

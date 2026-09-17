@@ -1,5 +1,4 @@
 import { ATHENA_SYSTEM_INSTRUCTION } from "./geminiServerService";
-import { ATHENA_LEGAL_CORPUS } from "./legalCorpusSource";
 
 declare const __ATHENA_BUILD_API_KEY__: string | undefined;
 
@@ -186,12 +185,12 @@ async function askATHENADirectClient(
 
   // Model tiering com modelos de 2026 ativos e timeouts adequados (priorizando o veloz gemini-flash-latest)
   const modelAttempts = [
-    { model: "gemini-flash-latest", timeout: 45000 },
-    { model: "gemini-3.6-flash", timeout: 50000 },
-    { model: "gemini-3.1-flash-lite", timeout: 35000 }
+    { model: "gemini-flash-latest", timeout: 35000 },
+    { model: "gemini-3.1-flash-lite", timeout: 25000 },
+    { model: "gemini-3.6-flash", timeout: 40000 }
   ];
 
-  const systemInstruction = `${ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase)}\n\n${ATHENA_LEGAL_CORPUS}`;
+  const systemInstruction = ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase);
   const contents = [
     ...history,
     { role: 'user', parts }
