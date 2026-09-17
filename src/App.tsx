@@ -3137,10 +3137,15 @@ Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de
 No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas normais, apresente uma única ARGUIÇÃO ORAL (Pergunta de Exame Oral) formal de banca examinadora, instruindo o aluno a utilizar gravação de áudio ou digitação por ditado de voz para responder verbalmente sob pressão à banca. Aguarde a sustentação para proferir nota oficial de oratória jurídica.`;
     }
 
-    let extraSource = `\n\n[DIRETRIZ DE PARETO (80/20) - ESTRATÉGIA DE ALTA PERFORMANCE PARA O DIA ${dayNum}]:
-1. Aplique o PRINCÍPIO DE PARETO (80/20): com base nas provas de concursos jurídicos de elite (Magistratura, MP, Defensoria e Delegado), concentre o estudo nos temas de maior recorrência prática e cobrança em provas para ${currentMat.nome} (${currentMat.conteudo}).
-2. Faça uma abordagem cirúrgica, enriquecida com pegadinhas, precedentes vinculantes do STF/STJ, súmulas e divergências doutrinárias de ponta.
-3. Decodifique os conceitos e artigos no formato de 6 blocos pedagógicos estruturados.${hybridDirective}`;
+    let extraSource = `\n\n[DIRETRIZ DA BASE DE CONHECIMENTO E MENTORIA ATHENA]:
+1. A BASE SOBERANA DE VERDADE são as fontes normativas e doutrinárias programadas para ${currentMat.nome} (${currentMat.conteudo}).
+2. Como mentora pedagógica de apoio a este material, sua missão é estruturar a aula estritamente nos 6 BLOCOS PEDAGÓGICOS OFICIAIS:
+   - [BLOCK_1] (👋 Saudação e Raio-X): Contextualize a importância deste recorte para os concursos de elite (Magistratura, MP, Defensoria e Delegado).
+   - [BLOCK_2] (⚖️ Letra da Lei): Decodifique com rigor pedagógico os artigos do intervalo delimitado (${currentMat.conteudo}), detalhando núcleos do tipo, requisitos, penas, exceções e pegadinhas clássicas de banca examinadora.
+   - [BLOCK_3] (🏛️ Jurisprudência e Súmulas): Aprofunde precedentes vinculantes, Súmulas do STF/STJ e teses de Repercussão Geral com a ratio decidendi e contexto fático.
+   - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase), enriquecida com exemplos práticos do cotidiano forense brasileiro, casuística real e divergências teóricas.
+   - [BLOCK_5] (🎯 Desafio ATHENA): Simulado com questões inéditas de fixação baseadas diretamente nas fontes estudadas hoje.
+   - [BLOCK_6] (📝 Revisão Comprimida): Exatamente 10 tópicos atômicos (bullet points) para memorização rápida (Pareto 80/20).${hybridDirective}`;
 
     return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos estudar de forma PARTICIONADA o tema do DIA ${dayNum} (Semana ${semana}) para garantir profundidade monumental sem sobrecarga de processamento.
 
