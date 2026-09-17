@@ -1282,29 +1282,6 @@ const ChatMessage = memo(({
                   )}
                 </motion.div>
               ))}
-              
-              {msg.blocks && msg.blocks.length > 0 && (msg.currentBlockIndex ?? 0) === msg.blocks.length - 1 && msg.blocks[msg.blocks.length-1]?.toLowerCase().includes("concluído com sucesso") && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="pt-8 border-t border-white/10 flex justify-center"
-                >
-                  <button
-                    onClick={async () => {
-                      if (activeStudyItem) {
-                        await markScheduleItemComplete(activeStudyItem.scheduleId, activeStudyItem.itemIndex);
-                        setActiveStudyItem(null);
-                      }
-                      setActiveTab('schedules');
-                      handleSendMessageRequest("Ótimo, o tema anterior foi concluído. Vamos seguir para o cronograma ou deseja revisitar algum ponto?", true);
-                    }}
-                    className="bg-brand-gold text-slate-950 font-black uppercase tracking-widest text-xs px-8 py-4 rounded-2xl shadow-xl hover:shadow-brand-gold/20 hover:scale-105 active:scale-95 transition-all flex items-center gap-3 border-2 border-slate-950"
-                  >
-                    <Zap size={18} className="animate-pulse" />
-                    Avançar e Concluir Meta
-                  </button>
-                </motion.div>
-              )}
             </>
           ) : (
             <div className="markdown-body">
