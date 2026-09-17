@@ -2,11 +2,14 @@ import { GoogleGenAI, HarmCategory, HarmBlockThreshold, ThinkingLevel } from "@g
 import { ATHENA_SYSTEM_INSTRUCTION } from "./geminiServerService";
 import { ATHENA_LEGAL_CORPUS } from "./legalCorpusSource";
 
+declare const __ATHENA_BUILD_API_KEY__: string | undefined;
+
 /**
  * Obtém dinamicamente a chave da API do Gemini:
  * 1. Chave customizada salva pelo usuário no app (localStorage)
- * 2. Variável de ambiente injetada no build (Vite define process.env.GEMINI_API_KEY)
+ * 2. Constante estática injetada pelo Vite build (__ATHENA_BUILD_API_KEY__)
  * 3. Variável de ambiente VITE_GEMINI_API_KEY
+ * 4. Variável de ambiente process.env.GEMINI_API_KEY
  */
 export const getGeminiApiKey = (): string => {
   try {
@@ -15,8 +18,8 @@ export const getGeminiApiKey = (): string => {
   } catch {}
 
   try {
-    if (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) {
-      return process.env.GEMINI_API_KEY;
+    if (typeof __ATHENA_BUILD_API_KEY__ !== 'undefined' && __ATHENA_BUILD_API_KEY__ && __ATHENA_BUILD_API_KEY__.trim()) {
+      return __ATHENA_BUILD_API_KEY__.trim();
     }
   } catch {}
 
@@ -24,6 +27,13 @@ export const getGeminiApiKey = (): string => {
     const viteKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (viteKey && typeof viteKey === 'string' && viteKey.trim()) {
       return viteKey.trim();
+    }
+  } catch {}
+
+  try {
+    const procKey = process.env.GEMINI_API_KEY;
+    if (procKey && typeof procKey === 'string' && procKey.trim()) {
+      return procKey.trim();
     }
   } catch {}
 
@@ -74,14 +84,7 @@ async function askATHENADirectClient(
     throw new Error("Chave da API Gemini não encontrada. Por favor, configure sua chave no menu.");
   }
 
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'athena-mobile-app',
-      }
-    }
-  });
+  const ai = new GoogleGenAI({ apiKey });
 
   const parts: any[] = [{ text: message }];
   if (file) {
@@ -158,14 +161,7 @@ async function evaluateAnswerDirectClient(
     throw new Error("Chave da API Gemini não encontrada para avaliação.");
   }
 
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'athena-mobile-app',
-      }
-    }
-  });
+  const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `Você é o Presidente da Banca Examinadora de Concursos de Elite de Magistratura e Ministério Público.
 Você deve avaliar a resposta do candidato de forma extremamente rigorosa, realista e profissional jurídica.

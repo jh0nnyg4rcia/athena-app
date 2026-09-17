@@ -1749,7 +1749,11 @@ export default function App() {
       }
     }
 
-    // 2. Attach Firestore onSnapshot listener
+    // 2. Attach Firestore onSnapshot listener only if Firebase Auth is signed in
+    if (!auth.currentUser || isQuotaExhausted()) {
+      return;
+    }
+
     const q = query(
       collection(db, `users/${user.uid}/sessions`),
       where('userId', '==', user.uid),
@@ -1804,6 +1808,11 @@ export default function App() {
 
     const localTrilha = LocalPersistence.getTrilhaProgress(user.uid);
     if (localTrilha.length > 0) setTrilhaCompletedDays(localTrilha);
+
+    // Attach Firestore listeners only if Firebase Auth is signed in
+    if (!auth.currentUser || isQuotaExhausted()) {
+      return;
+    }
 
     // Stats
     const statsRef = collection(db, `users/${user.uid}/stats`);
@@ -1869,7 +1878,7 @@ export default function App() {
 
   // Sync All Mentees (for Mentorandos tab)
   useEffect(() => {
-    if (!user || user.email?.toLowerCase() !== 'jhonny.spider@gmail.com') {
+    if (!auth.currentUser || !user || user.email?.toLowerCase() !== 'jhonny.spider@gmail.com') {
       setMentees([]);
       return;
     }
@@ -1940,7 +1949,7 @@ export default function App() {
     }
 
     const performCloudSave = async () => {
-      if (!user || isQuotaExhausted()) return;
+      if (!auth.currentUser || !user || isQuotaExhausted()) return;
       try {
         const sessionRef = doc(db, `users/${user.uid}/sessions`, targetId);
         const cleaned = cleanData(mergedData);
@@ -1991,7 +2000,7 @@ export default function App() {
     setGamification(updatedGami);
     LocalPersistence.saveGamification(user.uid, updatedGami);
 
-    if (!isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         const gamiRef = doc(db, `users/${user.uid}/gamification`, 'status');
         await setDoc(gamiRef, cleanData(updatedGami), { merge: true });
@@ -2165,7 +2174,7 @@ export default function App() {
       return [...prev, cleaned];
     });
 
-    if (!isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         await setDoc(statRef, cleaned, { merge: true });
 
@@ -2237,7 +2246,7 @@ export default function App() {
     setCurrentArticle(art);
     setActiveTab('chat');
     
-    if (!isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         const cleaned = cleanData(newSession);
         await setDoc(doc(db, `users/${user.uid}/sessions`, id), cleaned);
@@ -2274,7 +2283,7 @@ export default function App() {
     }
     setSessionToDelete(null);
     
-    if (!isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         await deleteDoc(doc(db, `users/${user.uid}/sessions`, id));
       } catch (error) {
@@ -2304,7 +2313,7 @@ export default function App() {
       LocalPersistence.saveSession(user.uid, updatedSession);
       setSessions(prev => prev.map(s => s.id === targetSessionId ? updatedSession : s));
 
-      if (!isQuotaExhausted()) {
+      if (auth.currentUser && !isQuotaExhausted()) {
         const sessionRef = doc(db, `users/${user.uid}/sessions`, targetSessionId);
         const cleaned = cleanData({ reviews: updatedReviews });
         await setDoc(sessionRef, cleaned, { merge: true });
@@ -2493,7 +2502,7 @@ export default function App() {
     setCurrentArticle(initialArticle);
     setActiveTab('chat');
 
-    if (!isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         const cleaned = cleanData(newSession);
         await setDoc(doc(db, `users/${user.uid}/sessions`, id), cleaned);
@@ -2691,7 +2700,7 @@ export default function App() {
     setSchedules(prev => [newSchedule, ...prev]);
     alert("Cronograma salvo com sucesso!");
 
-    if (!isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         const cleaned = cleanData({
           ...newSchedule,
@@ -2708,7 +2717,7 @@ export default function App() {
     if (!user) return;
     LocalPersistence.deleteSchedule(user.uid, id);
     setSchedules(prev => prev.filter(s => s.id !== id));
-    if (!isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         await deleteDoc(doc(db, `users/${user.uid}/schedules`, id));
       } catch (error) {
@@ -2758,7 +2767,7 @@ export default function App() {
       await awardXP(150); // Premium reward of 150 XP!
     }
 
-    if (!isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         await setDoc(doc(db, `users/${user.uid}/trilha`, 'progress'), {
           completedDays: newCompleted,
@@ -2941,7 +2950,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       setMentorshipPhase('oral');
     }
 
-    if (user && !isQuotaExhausted()) {
+    if (auth.currentUser && !isQuotaExhausted()) {
       try {
         const cleaned = cleanData(newSession);
         await setDoc(doc(db, `users/${user.uid}/sessions`, id), cleaned);
@@ -2950,7 +2959,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       }
     }
 
-    await handleSendMessageRequest(initialMsg, true, id, 1, guidedSubjectName);
+    try {
+      await handleSendMessageRequest(initialMsg, true, id, 1, guidedSubjectName);
+    } catch (sendErr) {
+      console.error("[handleStartTrilhaStudy] Error sending initial trilha message:", sendErr);
+    }
   };
 
   const advanceStage = async (msgIdx: number) => {
