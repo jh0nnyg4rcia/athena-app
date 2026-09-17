@@ -50,15 +50,26 @@ import {
   Cpu,
   Key,
   Check,
-  Activity
+  Activity,
+  ShieldCheck,
+  CheckCircle,
+  Edit3,
+  RefreshCw
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
 import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile, testGeminiConnection, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
-import { type UserProfile } from './types';
+import { type UserProfile, type HomologatedLesson } from './types';
 import { getCachedTrilhaPart, setCachedTrilhaPart } from './services/trilhaCacheService';
+import { 
+  getHomologatedLesson, 
+  saveHomologatedLesson, 
+  revokeHomologatedLesson, 
+  getLocalHomologatedLesson, 
+  getLessonDocId 
+} from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { 
@@ -1160,7 +1171,12 @@ const ChatMessage = memo(({
         <div className="space-y-8">
           {!isUser && !isError && (
             <div className="flex items-center gap-2 -mt-1 -mb-3">
-              {(msg.sourceType === 'offline_pareto' || msg.content?.includes("Modo de Alta Disponibilidade Local Ativado (Pareto 80/20)")) ? (
+              {msg.modelName?.includes('Oficial Homologado') ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/10 border border-brand-gold/40 text-[10px] font-mono text-brand-gold shadow-sm">
+                  <ShieldCheck size={12} className="text-brand-gold" />
+                  <span>Conteúdo Oficial Homologado pela Coordenação ATHENA</span>
+                </div>
+              ) : (msg.sourceType === 'offline_pareto' || msg.content?.includes("Modo de Alta Disponibilidade Local Ativado (Pareto 80/20)")) ? (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[10px] font-mono text-amber-300 shadow-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                   <span>Modo Offline • Material Compilado (Pareto 80/20)</span>
@@ -1632,6 +1648,53 @@ export default function App() {
 
   const [tokenExhaustedBanner, setTokenExhaustedBanner] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
+
+  // Estados de Curadoria e Homologação do CEO
+  const [homologatedLessonState, setHomologatedLessonState] = useState<HomologatedLesson | null>(null);
+  const [isSavingHomologation, setIsSavingHomologation] = useState(false);
+  const [isEditingLesson, setIsEditingLesson] = useState(false);
+  const [editingLessonContent, setEditingLessonContent] = useState('');
+  const [homologationSuccessBanner, setHomologationSuccessBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    const activeSess = sessions.find(s => s.id === currentSessionId);
+    if (!activeSess || activeSess.trilhaDay === undefined) {
+      setHomologatedLessonState(null);
+      return;
+    }
+    const day = activeSess.trilhaDay;
+    const part = activeSess.trilhaMaterialIndex ?? 0;
+
+    const local = getLocalHomologatedLesson(day, part);
+    if (local) {
+      setHomologatedLessonState(local);
+    } else {
+      setHomologatedLessonState(null);
+    }
+
+    getHomologatedLesson(day, part).then(res => {
+      if (res) setHomologatedLessonState(res);
+    });
+
+    const onHomologated = (e: any) => {
+      const detail = e.detail as HomologatedLesson;
+      if (detail && detail.day === day && detail.part === part) {
+        setHomologatedLessonState(detail);
+      }
+    };
+    const onRevoked = (e: any) => {
+      const detail = e.detail;
+      if (detail && detail.day === day && detail.part === part) {
+        setHomologatedLessonState(null);
+      }
+    };
+    window.addEventListener('athena-lesson-homologated', onHomologated);
+    window.addEventListener('athena-lesson-revoked', onRevoked);
+    return () => {
+      window.removeEventListener('athena-lesson-homologated', onHomologated);
+      window.removeEventListener('athena-lesson-revoked', onRevoked);
+    };
+  }, [currentSessionId, sessions]);
 
   const [mentorshipStyle, setMentorshipStyle] = useState<'teorico' | 'jurisprudente' | 'pratico' | 'automatico'>(() => {
     return (localStorage.getItem('athena_mentorship_style') as any) || 'automatico';
@@ -3136,7 +3199,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
     if (!dayItem || !dayItem.materias || nextMatIdx >= dayItem.materias.length) return;
     
-    // Check if already in cache
+    // Check if already in cache or homologated
+    if (getLocalHomologatedLesson(dayNum, nextMatIdx)) return;
     if (getCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase)) return;
 
     const nextMat = dayItem.materias[nextMatIdx];
@@ -3227,8 +3291,51 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       setMentorshipPhase('oral');
     }
 
-    // 1. Verificação de Cache Instantâneo (0s de espera)
+    // 0. Prioridade Máxima: Conteúdo Oficial Homologado pelo CEO (0.05s)
     if (sessionType === 'estudo') {
+      const homologated = await getHomologatedLesson(dayNum, 0);
+      if (homologated && homologated.content) {
+        console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte 1! Carregamento imediato.`);
+        const parsed = parseATHENAResponse(homologated.content);
+        const botMessage: Message = {
+          role: 'model',
+          content: parsed.content,
+          challenge: parsed.challenge,
+          blocks: parsed.blocks,
+          currentBlockIndex: 0,
+          subject: guidedSubjectName,
+          article: 1,
+          sourceType: 'gemini',
+          modelName: 'Oficial Homologado pelo CEO'
+        };
+
+        const cachedSession: ChatSession = {
+          ...newSession,
+          messages: [{ role: 'user', content: initialMsg }, botMessage]
+        };
+
+        LocalPersistence.saveSession(activeUserId, cachedSession);
+        setSessions(prev => [cachedSession, ...prev]);
+        setCurrentSessionId(id);
+        setGuidedSubject(guidedSubjectName);
+        setCurrentArticle(1);
+        setMessages([{ role: 'user', content: initialMsg }, botMessage]);
+        setIsLoading(false);
+
+        if (auth.currentUser && !isQuotaExhausted()) {
+          try {
+            const cleaned = cleanData(cachedSession);
+            await setDoc(doc(db, `users/${user.uid}/sessions`, id), cleaned);
+          } catch (error) {
+            handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/sessions/${id}`);
+          }
+        }
+
+        prefetchNextTrilhaPart(dayNum, 1, resolvedPhase, mentorshipStyle);
+        return;
+      }
+
+      // 1. Verificação de Cache Instantâneo (0s de espera)
       const cached = getCachedTrilhaPart(dayNum, 0, resolvedPhase);
       if (cached) {
         console.log(`[ATHENA Cache] Hit para Dia ${dayNum} Parte 1! Carregando instantaneamente (0s).`);
@@ -3365,6 +3472,59 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 } else {
                   resolvedPhase = 'objetiva';
                 }
+              }
+
+              // 0. Prioridade Máxima: Conteúdo Oficial Homologado pelo CEO (0.05s)
+              const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
+              if (homologated && homologated.content) {
+                console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte ${nextMatIdx + 1}! Carregamento imediato.`);
+                const parsed = parseATHENAResponse(homologated.content);
+                const botMessage: Message = {
+                  role: 'model',
+                  content: parsed.content,
+                  challenge: parsed.challenge,
+                  blocks: parsed.blocks,
+                  currentBlockIndex: 0,
+                  subject: nextMat.nome,
+                  article: 1,
+                  sourceType: 'gemini',
+                  modelName: 'Oficial Homologado pelo CEO'
+                };
+                const finalMessages = [...updatedMessages, botMessage];
+                setMessages(finalMessages);
+                setIsLoading(false);
+
+                const updatedSessions = sessions.map(s => {
+                  if (s.id === currentSessionId) {
+                    return {
+                      ...s,
+                      title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                      guidedSubject: nextMat.nome,
+                      trilhaMaterialIndex: nextMatIdx,
+                      messages: finalMessages
+                    };
+                  }
+                  return s;
+                });
+                setSessions(updatedSessions);
+                await saveSession({
+                  title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                  guidedSubject: nextMat.nome,
+                  trilhaMaterialIndex: nextMatIdx,
+                  messages: finalMessages
+                }, currentSessionId);
+
+                setTimeout(() => {
+                  const firstBlock = document.getElementById(`block-${finalMessages.length - 1}-0`);
+                  if (firstBlock) {
+                    firstBlock.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  } else {
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }, 120);
+
+                prefetchNextTrilhaPart(dayNum, nextMatIdx + 1, resolvedPhase, mentorshipStyle);
+                return;
               }
 
               // 1. Verificação Instantânea de Cache (0s)
@@ -3557,6 +3717,125 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         }
       }, 120);
     };
+
+  const handleCeoApproveLesson = async () => {
+    const activeSess = sessions.find(s => s.id === currentSessionId);
+    if (!activeSess || activeSess.trilhaDay === undefined) return;
+    const day = activeSess.trilhaDay;
+    const part = activeSess.trilhaMaterialIndex ?? 0;
+    const lastBotMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
+    if (!lastBotMsg) {
+      alert("Aguarde o conteúdo da lição ser gerado antes de aprovar.");
+      return;
+    }
+
+    setIsSavingHomologation(true);
+    try {
+      const lesson: HomologatedLesson = {
+        id: getLessonDocId(day, part),
+        day,
+        part,
+        subject: activeSess.guidedSubject || 'Direito',
+        topic: lastBotMsg.subject || '',
+        content: lastBotMsg.content,
+        blocks: lastBotMsg.blocks,
+        status: 'approved',
+        approvedBy: 'jhonny.spider@gmail.com',
+        approvedAt: Date.now(),
+        modelUsed: lastBotMsg.modelName || 'gemini-flash-latest',
+        version: 1
+      };
+      await saveHomologatedLesson(lesson);
+      setHomologatedLessonState(lesson);
+      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1}) homologado com sucesso! O material agora está disponível instantaneamente para todos os alunos.`);
+      setTimeout(() => setHomologationSuccessBanner(null), 6000);
+    } catch (err: any) {
+      console.error("Erro ao homologar lição:", err);
+      alert("Não foi possível salvar no Firestore. A lição foi preservada no cache local.");
+    } finally {
+      setIsSavingHomologation(false);
+    }
+  };
+
+  const handleCeoRegenerateLesson = async () => {
+    const activeSess = sessions.find(s => s.id === currentSessionId);
+    if (!activeSess || activeSess.trilhaDay === undefined) return;
+    const day = activeSess.trilhaDay;
+    const part = activeSess.trilhaMaterialIndex ?? 0;
+    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
+    if (!dayItem || !dayItem.materias) return;
+
+    if (!confirm(`Deseja regerar o conteúdo da Parte ${part + 1} do Dia ${day} (${dayItem.materias[part].nome}) com a IA Gemini?`)) return;
+
+    setIsLoading(true);
+    const msg = getTrilhaDayPartitionMessage(day, dayItem.materias, part, dayItem.semana, mentorshipStyle);
+    try {
+      const { text, model } = await askATHENA(msg, [], user?.displayName || "Mestre CEO", undefined, mentorshipStyle, mentorshipPhase);
+      const parsed = parseATHENAResponse(text);
+      const botMessage: Message = {
+        role: 'model',
+        content: parsed.content,
+        challenge: parsed.challenge,
+        blocks: parsed.blocks,
+        currentBlockIndex: 0,
+        subject: dayItem.materias[part].nome,
+        article: 1,
+        sourceType: 'gemini',
+        modelName: `${model} (Regerado pelo CEO)`
+      };
+      const userMsg: Message = { role: 'user', content: msg };
+      setMessages([userMsg, botMessage]);
+      await saveSession({
+        messages: [userMsg, botMessage]
+      }, currentSessionId);
+      setHomologatedLessonState(prev => prev ? { ...prev, status: 'draft' } : null);
+    } catch (err: any) {
+      console.error("Erro ao regerar com IA:", err);
+      alert("Erro ao regerar: " + (err.message || String(err)));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCeoEditOpen = () => {
+    const lastBotMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
+    if (!lastBotMsg) {
+      alert("Nenhum conteúdo disponível para edição.");
+      return;
+    }
+    setEditingLessonContent(lastBotMsg.content);
+    setIsEditingLesson(true);
+  };
+
+  const handleCeoSaveEdit = () => {
+    if (!editingLessonContent.trim()) return;
+    const parsed = parseATHENAResponse(editingLessonContent);
+    const updatedMessages = (messages || []).map((m) => {
+      if (m.role === 'model' && m.blocks && m.blocks.length > 0) {
+        return {
+          ...m,
+          content: parsed.content,
+          challenge: parsed.challenge || m.challenge,
+          blocks: parsed.blocks,
+          modelName: (m.modelName || 'gemini-flash-latest') + ' (Ajustado pelo CEO)'
+        };
+      }
+      return m;
+    });
+    setMessages(updatedMessages);
+    saveSession({ messages: updatedMessages }, currentSessionId);
+    setIsEditingLesson(false);
+  };
+
+  const handleCeoRevokeLesson = async () => {
+    const activeSess = sessions.find(s => s.id === currentSessionId);
+    if (!activeSess || activeSess.trilhaDay === undefined) return;
+    const day = activeSess.trilhaDay;
+    const part = activeSess.trilhaMaterialIndex ?? 0;
+    if (!confirm(`Deseja revogar a homologação e despublicar a Parte ${part + 1} do Dia ${day}?`)) return;
+    await revokeHomologatedLesson(day, part);
+    setHomologatedLessonState(null);
+  };
 
   const skipTrilhaLesson = async (msgIdx: number) => {
     const session = sessions.find(s => s.id === currentSessionId);
@@ -5704,33 +5983,155 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                           );
                         }
                         
-                        return (messages || []).map((msg, msgIdx) => (
-                          <ChatMessage
-                            key={msgIdx}
-                            msg={msg}
-                            msgIdx={msgIdx}
-                            messages={messages}
-                            setMessages={setMessages}
-                            saveSession={saveSession}
-                            updateStats={updateStats}
-                            activeStudyItem={activeStudyItem}
-                            setActiveStudyItem={setActiveStudyItem}
-                            setActiveTab={setActiveTab}
-                            handleSendMessageRequest={handleSendMessageRequest}
-                            advanceStage={advanceStage}
-                            reviews={reviews}
-                            saveReview={saveReview}
-                            currentArticle={currentArticle}
-                            guidedSubject={guidedSubject}
-                            markScheduleItemComplete={markScheduleItemComplete}
-                            saveToSchedules={saveToSchedules}
-                            trilhaDay={tDay}
-                            trilhaMaterialIndex={tMatIdx}
-                            trilhaTotalMaterials={tTotal}
-                            skipTrilhaLesson={skipTrilhaLesson}
-                            retryMessage={retryMessage}
-                          />
-                        ));
+                        return (
+                          <>
+                            {/* Banner de Sucesso de Homologação */}
+                            {homologationSuccessBanner && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mx-auto max-w-4xl w-full mb-6 p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-between gap-3 shadow-lg"
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <CheckCircle size={18} className="text-emerald-400 shrink-0" />
+                                  <span>{homologationSuccessBanner}</span>
+                                </div>
+                                <button onClick={() => setHomologationSuccessBanner(null)} className="text-emerald-400 hover:text-white text-xs p-1 cursor-pointer">✕</button>
+                              </motion.div>
+                            )}
+
+                            {/* Barra de Curadoria do CEO */}
+                            {tDay !== undefined && isCEO && (
+                              <div className="mx-auto max-w-4xl w-full mb-6 p-4 md:p-5 rounded-3xl bg-slate-900/95 border-2 border-brand-gold/40 shadow-[0_10px_35px_rgba(212,175,55,0.15)] backdrop-blur-xl text-left">
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                  <div className="flex items-center gap-3.5">
+                                    <div className="w-10 h-10 rounded-2xl bg-brand-gold/15 border border-brand-gold/40 flex items-center justify-center text-brand-gold shrink-0">
+                                      <Trophy size={20} />
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-2.5 py-0.5 rounded-full border border-brand-gold/25 font-mono">
+                                          👑 Curadoria do CEO
+                                        </span>
+                                        {homologatedLessonState?.status === 'approved' ? (
+                                          <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                            <CheckCircle size={10} /> Homologado e Publicado
+                                          </span>
+                                        ) : (
+                                          <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                            🟡 Rascunho / Aguardando Aprovação
+                                          </span>
+                                        )}
+                                      </div>
+                                      <h4 className="text-sm font-bold text-slate-100 mt-1">
+                                        Dia {tDay} • Parte {(tMatIdx ?? 0) + 1} de {tTotal} ({guidedSubject})
+                                      </h4>
+                                      {homologatedLessonState?.status === 'approved' && homologatedLessonState.approvedAt && (
+                                        <p className="text-[11px] text-slate-400 mt-0.5">
+                                          Aprovado por <span className="text-brand-gold font-mono font-bold">{homologatedLessonState.approvedBy}</span> em {new Date(homologatedLessonState.approvedAt).toLocaleDateString('pt-BR')} às {new Date(homologatedLessonState.approvedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
+                                    <button
+                                      onClick={handleCeoRegenerateLesson}
+                                      disabled={isLoading}
+                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                      title="Regerar lição do zero com a IA Gemini"
+                                    >
+                                      <RotateCw size={14} className={cn(isLoading && "animate-spin")} />
+                                      Regerar IA
+                                    </button>
+
+                                    <button
+                                      onClick={handleCeoEditOpen}
+                                      disabled={isLoading}
+                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                      title="Editar ou refinar o texto antes de homologar"
+                                    >
+                                      <Edit3 size={14} />
+                                      Editar Texto
+                                    </button>
+
+                                    {homologatedLessonState?.status === 'approved' ? (
+                                      <button
+                                        onClick={handleCeoRevokeLesson}
+                                        disabled={isSavingHomologation}
+                                        className="px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-bold border border-rose-500/30 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                        title="Despublicar lição (retornar para rascunho)"
+                                      >
+                                        Despublicar
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={handleCeoApproveLesson}
+                                        disabled={isSavingHomologation || isLoading}
+                                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold hover:brightness-110 text-slate-950 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-[0_4px_15px_rgba(212,175,55,0.3)] active:scale-95 cursor-pointer"
+                                        title="Aprovar e salvar como versão oficial definitiva para todos os alunos"
+                                      >
+                                        <Trophy size={15} />
+                                        {isSavingHomologation ? 'Publicando...' : 'Aprovar e Publicar'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Selo Oficial para o Aluno */}
+                            {tDay !== undefined && !isCEO && homologatedLessonState?.status === 'approved' && (
+                              <div className="mx-auto max-w-4xl w-full mb-6 p-3.5 px-5 rounded-2xl bg-gradient-to-r from-brand-gold/15 via-brand-gold/5 to-transparent border border-brand-gold/30 shadow-lg backdrop-blur-md flex items-center justify-between text-left">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-xl bg-brand-gold/20 flex items-center justify-center border border-brand-gold/40 text-brand-gold shrink-0">
+                                    <ShieldCheck size={18} />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-bold text-slate-100 flex items-center gap-2">
+                                      Material Oficial Homologado pela Coordenação ATHENA
+                                      <span className="text-[10px] bg-brand-gold/20 text-brand-gold px-2 py-0.5 rounded-full font-mono font-bold">100% Edital</span>
+                                    </p>
+                                    <p className="text-[11px] text-slate-400">
+                                      Conteúdo revisado e homologado pelo Mestre CEO para a Trilha de 100 Dias.
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg font-bold shrink-0">
+                                  ✓ Homologado
+                                </span>
+                              </div>
+                            )}
+
+                            {(messages || []).map((msg, msgIdx) => (
+                              <ChatMessage
+                                key={msgIdx}
+                                msg={msg}
+                                msgIdx={msgIdx}
+                                messages={messages}
+                                setMessages={setMessages}
+                                saveSession={saveSession}
+                                updateStats={updateStats}
+                                activeStudyItem={activeStudyItem}
+                                setActiveStudyItem={setActiveStudyItem}
+                                setActiveTab={setActiveTab}
+                                handleSendMessageRequest={handleSendMessageRequest}
+                                advanceStage={advanceStage}
+                                reviews={reviews}
+                                saveReview={saveReview}
+                                currentArticle={currentArticle}
+                                guidedSubject={guidedSubject}
+                                markScheduleItemComplete={markScheduleItemComplete}
+                                saveToSchedules={saveToSchedules}
+                                trilhaDay={tDay}
+                                trilhaMaterialIndex={tMatIdx}
+                                trilhaTotalMaterials={tTotal}
+                                skipTrilhaLesson={skipTrilhaLesson}
+                                retryMessage={retryMessage}
+                              />
+                            ))}
+                          </>
+                        );
                       })()}
                     </AnimatePresence>
             
@@ -6225,6 +6626,70 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   <span>Continuar Estudando (Trial)</span>
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Modal de Edição de Curadoria do CEO */}
+    <AnimatePresence>
+      {isEditingLesson && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md"
+        >
+          <motion.div
+            initial={{ scale: 0.95, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 20 }}
+            className="bg-slate-900 border border-brand-gold/30 p-6 md:p-8 rounded-[2.5rem] max-w-3xl w-full max-h-[85vh] flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.8)] text-left"
+          >
+            <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-brand-gold/10 rounded-2xl border border-brand-gold/20 text-brand-gold">
+                  <Edit3 size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-serif font-bold text-slate-100">Editor de Curadoria do CEO</h3>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold font-mono">Ajustar Texto da Lição Antes de Homologar</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsEditingLesson(false)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-hidden flex flex-col gap-2">
+              <label className="text-xs font-bold text-slate-300">
+                Texto Integral da Lição (Markdown com marcadores [BLOCK_1] a [BLOCK_6]):
+              </label>
+              <textarea
+                value={editingLessonContent}
+                onChange={(e) => setEditingLessonContent(e.target.value)}
+                className="flex-1 w-full bg-slate-950 border border-white/10 rounded-2xl p-4 text-xs font-mono text-slate-200 outline-none focus:border-brand-gold/50 resize-none leading-relaxed"
+                rows={16}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-white/10 mt-4">
+              <button
+                onClick={() => setIsEditingLesson(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCeoSaveEdit}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold text-slate-950 hover:brightness-110 text-xs font-black uppercase tracking-wider transition-all shadow-md active:scale-95 cursor-pointer"
+              >
+                Salvar Ajustes
+              </button>
             </div>
           </motion.div>
         </motion.div>

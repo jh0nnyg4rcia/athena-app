@@ -118,5 +118,10 @@ service cloud.firestore {
         allow create, update: if isOwner(userId) && isValidId(trilhaId) && isValidTrilhaProgress(incoming());
       }
     }
+
+    match /homologated_lessons/{lessonId} {
+      allow get, list: if true;
+      allow write: if isAdmin();
+    }
   }
 }

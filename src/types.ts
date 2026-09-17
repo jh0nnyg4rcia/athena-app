@@ -136,3 +136,18 @@ export interface TrilhaPartCache {
   model: string;
   timestamp: number;
 }
+
+export interface HomologatedLesson {
+  id: string; // ex: "day_1_part_0"
+  day: number;
+  part: number;
+  subject: string;
+  topic?: string;
+  content: string;
+  blocks?: string[];
+  status: 'approved' | 'draft';
+  approvedBy: string;
+  approvedAt: number;
+  modelUsed?: string;
+  version?: number;
+}
