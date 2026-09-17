@@ -57,6 +57,8 @@ import { memo } from 'react';
 import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile, testGeminiConnection, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
+import { type UserProfile } from './types';
+import { getCachedTrilhaPart, setCachedTrilhaPart } from './services/trilhaCacheService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { 
@@ -1409,12 +1411,12 @@ const ChatMessage = memo(({
               className="pt-4 flex flex-wrap gap-3"
             >
               {(msg.currentBlockIndex ?? 0) < msg.blocks.length - 1 ? (
-                <div className="flex flex-wrap gap-3 items-center w-full">
+                <div className="flex flex-wrap gap-3 items-center w-full pt-2">
                   {isError && retryMessage && (
                     <button
                       type="button"
                       onClick={() => retryMessage(msgIdx)}
-                      className="bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 hover:text-white border border-blue-500/40 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer animate-pulse"
+                      className="bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 hover:text-white border border-blue-500/40 px-6 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer animate-pulse"
                     >
                       <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
                       <span>Recarregar Lição</span>
@@ -1423,33 +1425,27 @@ const ChatMessage = memo(({
 
                   {!isError && (
                     <button
-                      onClick={() => advanceStage(msgIdx)}
-                      className="bg-brand-gold/10 hover:bg-brand-gold text-brand-gold hover:text-slate-950 border border-brand-gold/20 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 group shadow-xl active:scale-95 cursor-pointer"
+                      onClick={(e) => {
+                        advanceStage(msgIdx);
+                        setTimeout(() => {
+                          e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                        }, 120);
+                      }}
+                      className="w-full sm:w-auto min-w-[220px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
                     >
-                      <span>AVANÇAR</span>
-                      <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                    </button>
-                  )}
-
-                  {trilhaDay !== undefined && skipTrilhaLesson && (
-                    <button
-                      type="button"
-                      onClick={() => skipTrilhaLesson(msgIdx)}
-                      className="bg-slate-950 hover:bg-red-500/10 text-slate-400 hover:text-red-400 border border-white/5 hover:border-red-500/25 px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer"
-                    >
-                      <FastForward size={14} className="group-hover:translate-x-0.5 transition-transform animate-pulse" />
-                      <span>Pular Lição</span>
+                      <span className="font-extrabold tracking-wider">AVANÇAR BLOCO</span>
+                      <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                     </button>
                   )}
                 </div>
               ) : (
-                <div className="flex flex-col gap-4 w-full">
-                  <div className="flex flex-wrap gap-3">
+                <div className="flex flex-col gap-4 w-full pt-2">
+                  <div className="flex flex-wrap gap-3 items-center">
                     {isError && retryMessage && (
                       <button
                         type="button"
                         onClick={() => retryMessage(msgIdx)}
-                        className="bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 hover:text-white border border-blue-500/40 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer animate-pulse"
+                        className="bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 hover:text-white border border-blue-500/40 px-6 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer animate-pulse"
                       >
                         <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
                         <span>Recarregar Lição</span>
@@ -1458,74 +1454,38 @@ const ChatMessage = memo(({
 
                     {!isError && trilhaDay !== undefined && trilhaMaterialIndex !== undefined && trilhaTotalMaterials !== undefined ? (
                       trilhaMaterialIndex < trilhaTotalMaterials - 1 ? (
-                        <>
-                          <button
-                            onClick={() => advanceStage(msgIdx)}
-                            className="bg-brand-gold/10 hover:bg-brand-gold text-brand-gold hover:text-slate-950 border border-brand-gold/20 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 group shadow-xl active:scale-95 animate-pulse hover:animate-none cursor-pointer"
-                          >
-                            <span>IR PARA PARTE {trilhaMaterialIndex + 2} de {trilhaTotalMaterials}</span>
-                            <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                          </button>
-
-                          {skipTrilhaLesson && (
-                            <button
-                              type="button"
-                              onClick={() => skipTrilhaLesson(msgIdx)}
-                              className="bg-slate-950 hover:bg-red-500/10 text-slate-350 hover:text-red-400 border border-white/5 hover:border-red-500/25 px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-lg active:scale-95 cursor-pointer"
-                            >
-                              <FastForward size={14} className="group-hover:translate-x-0.5 transition-transform" />
-                              <span>Pular Lição</span>
-                            </button>
-                          )}
-                        </>
+                        <button
+                          onClick={(e) => {
+                            advanceStage(msgIdx);
+                            setTimeout(() => {
+                              e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                            }, 120);
+                          }}
+                          className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
+                        >
+                          <span className="font-extrabold tracking-wider">
+                            IR PARA PARTE {trilhaMaterialIndex + 2} DE {trilhaTotalMaterials}
+                          </span>
+                          <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
+                        </button>
                       ) : (
                         <button
                           onClick={() => advanceStage(msgIdx)}
-                          className="bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/20 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 group shadow-xl active:scale-95 cursor-pointer"
+                          className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
                         >
                           <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
-                          <Trophy size={14} className="group-hover:scale-110 transition-transform" />
+                          <Trophy size={18} className="group-hover:scale-110 transition-transform" />
                         </button>
                       )
-                    ) : !isError ? (
-                      <>
-                        {msg.subject ? (
-                          <button
-                            onClick={() => advanceStage(msgIdx)}
-                            className="bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/20 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 group shadow-xl active:scale-95 cursor-pointer"
-                          >
-                            <span>Aprofundar Estudo: Art. {(msg.article || 0) + 1}</span>
-                            <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                          </button>
-                        ) : null}
-
-                        {trilhaDay !== undefined && skipTrilhaLesson && (
-                          <button
-                            type="button"
-                            onClick={() => skipTrilhaLesson(msgIdx)}
-                            className="bg-slate-950 hover:bg-red-500/10 text-slate-350 hover:text-red-400 border border-white/5 hover:border-red-500/25 px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-lg active:scale-95 cursor-pointer"
-                          >
-                            <FastForward size={14} className="group-hover:translate-x-0.5 transition-transform" />
-                            <span>Pular Lição</span>
-                          </button>
-                        )}
-                      </>
-                    ) : null}
-                    
-                    {!isError && msg.blocks.length >= 5 && (
+                    ) : !isError && msg.subject ? (
                       <button
-                        onClick={() => saveReview(msgIdx)}
-                        className={cn(
-                          "px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 group shadow-xl active:scale-95 border",
-                          reviews.some(r => r.article === (msg.article || currentArticle) && r.subject === (msg.subject || guidedSubject))
-                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40 cursor-default"
-                            : "bg-brand-gold/10 hover:bg-white text-slate-100 hover:text-slate-950 border-brand-gold/20"
-                        )}
+                        onClick={() => advanceStage(msgIdx)}
+                        className="w-full sm:w-auto min-w-[240px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
                       >
-                        <Plus size={14} className={reviews.some(r => r.article === (msg.article || currentArticle) && r.subject === (msg.subject || guidedSubject)) ? "hidden" : "block"} />
-                        <span>{reviews.some(r => r.article === (msg.article || currentArticle) && r.subject === (msg.subject || guidedSubject)) ? "✓ Salvo" : "Salvar Revisão"}</span>
+                        <span>Aprofundar Estudo: Art. {(msg.article || 0) + 1}</span>
+                        <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               )}
@@ -1643,30 +1603,59 @@ export default function App() {
     return () => window.removeEventListener('firestore-quota-exceeded', onQuota);
   }, []);
 
+  const CEO_EMAIL = 'jhonny.spider@gmail.com';
+
+  const userProfile: UserProfile | null = useMemo(() => {
+    if (!user) return null;
+    const isCeoUser = user.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+    if (isCeoUser) {
+      return {
+        uid: user.uid,
+        email: user.email || CEO_EMAIL,
+        displayName: user.displayName || 'Mestre CEO (Jhonny)',
+        photoURL: user.photoURL || '',
+        role: 'ceo',
+        profile: 'custom',
+        allowedPhases: ['objetiva', 'subjetiva', 'oral'],
+        isTrialMode: false,
+      };
+    }
+    const savedTrial = localStorage.getItem(`athena_trial_mode_${user.uid}`);
+    const isTrial = savedTrial !== null ? savedTrial === 'true' : true;
+    return {
+      uid: user.uid,
+      email: user.email || '',
+      displayName: user.displayName || 'Aluno ATHENA',
+      photoURL: user.photoURL || '',
+      role: 'default',
+      profile: 'automatic',
+      allowedPhases: ['objetiva'],
+      isTrialMode: isTrial,
+    };
+  }, [user]);
+
+  const isCEO = userProfile?.role === 'ceo' || user?.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+
+  const [tokenExhaustedBanner, setTokenExhaustedBanner] = useState(false);
+  const [showPaywallModal, setShowPaywallModal] = useState(false);
+
   const [mentorshipStyle, setMentorshipStyle] = useState<'teorico' | 'jurisprudente' | 'pratico' | 'automatico'>(() => {
-    return (localStorage.getItem('athena_mentorship_style') as any) || 'teorico';
+    return (localStorage.getItem('athena_mentorship_style') as any) || 'automatico';
   });
 
   const [mentorshipPhase, setMentorshipPhase] = useState<'objetiva' | 'subjetiva' | 'oral'>(() => {
     return (localStorage.getItem('athena_mentorship_phase') as any) || 'objetiva';
   });
 
-  const isCEO = user?.email?.toLowerCase() === 'jhonny.spider@gmail.com';
   const hasCompletedDay50 = trilhaCompletedDays.includes(50) || trilhaCompletedDays.length >= 50;
   const hasCompletedDay75 = trilhaCompletedDays.includes(75) || trilhaCompletedDays.length >= 75;
 
   useEffect(() => {
     if (!user) return;
-    const isCEOUser = user.email?.toLowerCase() === 'jhonny.spider@gmail.com';
-    const hasCompletedD50 = trilhaCompletedDays.includes(50) || trilhaCompletedDays.length >= 50;
-    const hasCompletedD75 = trilhaCompletedDays.includes(75) || trilhaCompletedDays.length >= 75;
-    
-    if (mentorshipPhase === 'subjetiva' && !isCEOUser && !hasCompletedD50) {
-      setMentorshipPhase('objetiva');
-    } else if (mentorshipPhase === 'oral' && !isCEOUser && !hasCompletedD75) {
+    if (mentorshipPhase !== 'objetiva' && !isCEO) {
       setMentorshipPhase('objetiva');
     }
-  }, [trilhaCompletedDays, mentorshipPhase, user]);
+  }, [mentorshipPhase, user, isCEO]);
 
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
@@ -1730,16 +1719,7 @@ export default function App() {
         console.warn("Erro ao restaurar usuário local:", e);
       }
     } else {
-      // Auto-provisiona acesso Master/CEO no primeiro acesso para usabilidade imediata no app móvel
-      const defaultUser = {
-        uid: 'jhonny-spider-ceo',
-        displayName: 'Jhonny',
-        email: 'jhonny.spider@gmail.com',
-        photoURL: '',
-        emailVerified: true
-      };
-      localStorage.setItem('athena_local_user', JSON.stringify(defaultUser));
-      setUser(defaultUser as any);
+      // Nenhum usuário local persistido: aguarda autenticação oficial via Google Sign-In
       setLoadingAuth(false);
     }
 
@@ -2696,6 +2676,16 @@ export default function App() {
 
       setMessages(prev => [...prev, botMessage]);
 
+      if (dayNum !== undefined) {
+        const matIdx = activeSession?.trilhaMaterialIndex ?? 0;
+        setCachedTrilhaPart(dayNum, matIdx, resolvedPhase, {
+          text: responseText,
+          model: usedModel,
+          timestamp: Date.now()
+        });
+        prefetchNextTrilhaPart(dayNum, matIdx + 1, resolvedPhase, mentorshipStyle);
+      }
+
       // Automatically sync dynamic content to IndexedDB for offline viewing
       if (activeSubject && activeArticle !== undefined) {
         cacheArticle(activeSubject, activeArticle, parsed.content);
@@ -2734,6 +2724,9 @@ export default function App() {
     } catch (error: any) {
       console.error("[ATHENA Error]", error);
       const errorMessage = error?.message || error?.toString() || "Erro inesperado";
+      if (errorMessage.includes('[API_TOKEN_EXHAUSTED]') || isQuotaExhausted()) {
+        setTokenExhaustedBanner(true);
+      }
       
       const activeUserId = user?.uid || 'jhonny-spider-ceo';
       const activeSession = sessions.find(s => s.id === (targetSessionId || currentSessionId))
@@ -3140,6 +3133,36 @@ Dentre os temas programados para hoje, este comando refere-se especificamente à
 Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo específico, com base na melhor doutrina, jurisprudência e na sua complementação por inteligência artificial sob o Princípio de Pareto aplicável a provas anteriores. Siga rigorosamente o fluxo de estudos em 6 blocos!`;
   };
 
+  const prefetchNextTrilhaPart = async (dayNum: number, nextMatIdx: number, resolvedPhase: string, mStyle: any) => {
+    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
+    if (!dayItem || !dayItem.materias || nextMatIdx >= dayItem.materias.length) return;
+    
+    // Check if already in cache
+    if (getCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase)) return;
+
+    const nextMat = dayItem.materias[nextMatIdx];
+    const nextMsg = getTrilhaDayPartitionMessage(
+      dayNum,
+      dayItem.materias,
+      nextMatIdx,
+      dayItem.semana,
+      mStyle
+    );
+
+    try {
+      console.log(`[ATHENA Pre-fetch] Disparando em background geração da Parte ${nextMatIdx + 1} de ${dayItem.materias.length} (Dia ${dayNum} - ${nextMat.nome})...`);
+      const { text, model } = await askATHENA(nextMsg, [], user?.displayName || "Mestre", undefined, mStyle, resolvedPhase as any);
+      setCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase, {
+        text,
+        model,
+        timestamp: Date.now()
+      });
+      console.log(`[ATHENA Pre-fetch] Parte ${nextMatIdx + 1} (Dia ${dayNum}) salva em cache local com sucesso!`);
+    } catch (err) {
+      console.warn(`[ATHENA Pre-fetch] Não foi possível pré-carregar Parte ${nextMatIdx + 1}:`, err);
+    }
+  };
+
   const handleStartTrilhaStudy = async (dayNum: number, sessionType: 'estudo' | 'discursivo' | 'oral' = 'estudo') => {
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
     if (!dayItem || !dayItem.materias || dayItem.materias.length === 0) return;
@@ -3171,6 +3194,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       guidedSubjectName = dayItem.materias[materialIndex].nome;
     }
 
+    let resolvedPhase: 'objetiva' | 'subjetiva' | 'oral' = mentorshipPhase;
+    if (sessionType === 'discursivo') {
+      resolvedPhase = 'subjetiva';
+    } else if (sessionType === 'oral') {
+      resolvedPhase = 'oral';
+    } else if (dayNum % 5 === 0) {
+      resolvedPhase = 'subjetiva';
+    } else if (dayNum % 7 === 0 || dayNum % 10 === 3) {
+      resolvedPhase = 'oral';
+    } else {
+      resolvedPhase = 'objetiva';
+    }
+
     const id = crypto.randomUUID();
     const activeUserId = user?.uid || 'jhonny-spider-ceo';
     const newSession: ChatSession = {
@@ -3186,18 +3222,64 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       trilhaSessionType: sessionType
     };
 
+    if (sessionType === 'discursivo') {
+      setMentorshipPhase('subjetiva');
+    } else if (sessionType === 'oral') {
+      setMentorshipPhase('oral');
+    }
+
+    // 1. Verificação de Cache Instantâneo (0s de espera)
+    if (sessionType === 'estudo') {
+      const cached = getCachedTrilhaPart(dayNum, 0, resolvedPhase);
+      if (cached) {
+        console.log(`[ATHENA Cache] Hit para Dia ${dayNum} Parte 1! Carregando instantaneamente (0s).`);
+        const parsed = parseATHENAResponse(cached.text);
+        const botMessage: Message = {
+          role: 'model',
+          content: parsed.content,
+          challenge: parsed.challenge,
+          blocks: parsed.blocks,
+          currentBlockIndex: 0,
+          subject: guidedSubjectName,
+          article: 1,
+          sourceType: 'gemini',
+          modelName: `${cached.model} (Cache Instantâneo)`
+        };
+
+        const cachedSession: ChatSession = {
+          ...newSession,
+          messages: [{ role: 'user', content: initialMsg }, botMessage]
+        };
+
+        LocalPersistence.saveSession(activeUserId, cachedSession);
+        setSessions(prev => [cachedSession, ...prev]);
+        setCurrentSessionId(id);
+        setGuidedSubject(guidedSubjectName);
+        setCurrentArticle(1);
+        setMessages([{ role: 'user', content: initialMsg }, botMessage]);
+        setIsLoading(false);
+
+        if (auth.currentUser && !isQuotaExhausted()) {
+          try {
+            const cleaned = cleanData(cachedSession);
+            await setDoc(doc(db, `users/${user.uid}/sessions`, id), cleaned);
+          } catch (error) {
+            handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/sessions/${id}`);
+          }
+        }
+
+        // Pré-carregamento em background da Parte 2
+        prefetchNextTrilhaPart(dayNum, 1, resolvedPhase, mentorshipStyle);
+        return;
+      }
+    }
+
     LocalPersistence.saveSession(activeUserId, newSession);
     setSessions(prev => [newSession, ...prev]);
     setCurrentSessionId(id);
     setGuidedSubject(guidedSubjectName);
     setCurrentArticle(1);
     setMessages([{ role: 'user', content: initialMsg }]);
-
-    if (sessionType === 'discursivo') {
-      setMentorshipPhase('subjetiva');
-    } else if (sessionType === 'oral') {
-      setMentorshipPhase('oral');
-    }
 
     if (auth.currentUser && !isQuotaExhausted()) {
       try {
@@ -3270,12 +3352,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               messages: updatedMessages
             }, currentSessionId);
 
-            try {
-              const history = updatedMessages.slice(0, -1).map(m => ({
-                role: m.role,
-                parts: [{ text: m.content }]
-              }));
-              let resolvedPhase = mentorshipPhase;
+            let resolvedPhase: 'objetiva' | 'subjetiva' | 'oral' = mentorshipPhase;
               if (session?.trilhaSessionType === 'discursivo') {
                 resolvedPhase = 'subjetiva';
               } else if (session?.trilhaSessionType === 'oral') {
@@ -3290,106 +3367,199 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   resolvedPhase = 'objetiva';
                 }
               }
-              const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
-              const parsed = parseATHENAResponse(responseText);
-              const botMessage: Message = {
-                role: 'model',
-                content: parsed.content,
-                challenge: parsed.challenge,
-                blocks: parsed.blocks,
-                currentBlockIndex: 0,
-                subject: nextMat.nome,
-                article: 1,
-                sourceType: 'gemini',
-                modelName: usedModel
-              };
-              
-              const finalMessages = [...updatedMessages, botMessage];
-              setMessages(finalMessages);
 
-              // Automatically sync trilha content to IndexedDB for offline viewing
-              cacheArticle(nextMat.nome, 1, parsed.content);
-              if (parsed.challenge?.questions) {
-                parsed.challenge.questions.forEach(q => {
-                  cacheQuestion({
-                    ...q,
-                    subject: nextMat.nome
-                  });
+              // 1. Verificação Instantânea de Cache (0s)
+              const cached = getCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase);
+              if (cached) {
+                console.log(`[ATHENA Cache] Hit para Dia ${dayNum} Parte ${nextMatIdx + 1}! Carregamento instantâneo (0s).`);
+                const parsed = parseATHENAResponse(cached.text);
+                const botMessage: Message = {
+                  role: 'model',
+                  content: parsed.content,
+                  challenge: parsed.challenge,
+                  blocks: parsed.blocks,
+                  currentBlockIndex: 0,
+                  subject: nextMat.nome,
+                  article: 1,
+                  sourceType: 'gemini',
+                  modelName: `${cached.model} (Cache Instantâneo)`
+                };
+                const finalMessages = [...updatedMessages, botMessage];
+                setMessages(finalMessages);
+                setIsLoading(false);
+
+                const updatedSessions = sessions.map(s => {
+                  if (s.id === currentSessionId) {
+                    return {
+                      ...s,
+                      title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                      guidedSubject: nextMat.nome,
+                      trilhaMaterialIndex: nextMatIdx,
+                      messages: finalMessages
+                    };
+                  }
+                  return s;
                 });
+                setSessions(updatedSessions);
+                await saveSession({
+                  title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                  guidedSubject: nextMat.nome,
+                  trilhaMaterialIndex: nextMatIdx,
+                  messages: finalMessages
+                }, currentSessionId);
+
+                setTimeout(() => {
+                  const firstBlock = document.getElementById(`block-${finalMessages.length - 1}-0`);
+                  if (firstBlock) {
+                    firstBlock.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  } else {
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }, 120);
+
+                // Dispara pre-fetch da próxima parte em background
+                prefetchNextTrilhaPart(dayNum, nextMatIdx + 1, resolvedPhase, mentorshipStyle);
+                return;
+              }
+
+              try {
+                const history = updatedMessages.slice(0, -1).map(m => ({
+                  role: m.role,
+                  parts: [{ text: m.content }]
+                }));
+                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
+                const parsed = parseATHENAResponse(responseText);
+                const botMessage: Message = {
+                  role: 'model',
+                  content: parsed.content,
+                  challenge: parsed.challenge,
+                  blocks: parsed.blocks,
+                  currentBlockIndex: 0,
+                  subject: nextMat.nome,
+                  article: 1,
+                  sourceType: 'gemini',
+                  modelName: usedModel
+                };
+                
+                const finalMessages = [...updatedMessages, botMessage];
+                setMessages(finalMessages);
+
+                // Armazena no cache local persistente
+                setCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase, {
+                  text: responseText,
+                  model: usedModel,
+                  timestamp: Date.now()
+                });
+
+                // Automatically sync trilha content to IndexedDB for offline viewing
+                cacheArticle(nextMat.nome, 1, parsed.content);
+                if (parsed.challenge?.questions) {
+                  parsed.challenge.questions.forEach(q => {
+                    cacheQuestion({
+                      ...q,
+                      subject: nextMat.nome
+                    });
+                  });
+                }
+                
+                await saveSession({
+                  messages: finalMessages
+                }, currentSessionId);
+
+                setTimeout(() => {
+                  const firstBlock = document.getElementById(`block-${finalMessages.length - 1}-0`);
+                  if (firstBlock) {
+                    firstBlock.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  } else {
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }, 120);
+
+                // Pré-carrega a parte subsequente em background
+                prefetchNextTrilhaPart(dayNum, nextMatIdx + 1, resolvedPhase, mentorshipStyle);
+              } catch (err: any) {
+                console.error("Error generating next trilha part:", err);
+                const errorMessage = err?.message || err?.toString() || "Erro na conexão com ATHENA";
+                if (errorMessage.includes('[API_TOKEN_EXHAUSTED]') || isQuotaExhausted()) {
+                  setTokenExhaustedBanner(true);
+                }
+                const botErrorMessage: Message = {
+                  role: 'model',
+                  content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
+                  blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
+                  currentBlockIndex: 0,
+                  subject: nextMat.nome,
+                  article: 1
+                };
+                const finalMessages = [...updatedMessages, botErrorMessage];
+                setMessages(finalMessages);
+                await saveSession({
+                  messages: finalMessages
+                }, currentSessionId);
+              } finally {
+                setIsLoading(false);
+              }
+            } else {
+              // No more parts remaining! Congratulate and complete the Trilha day.
+              if (!trilhaCompletedDays.includes(dayNum)) {
+                await toggleTrilhaDayComplete(dayNum);
               }
               
-              await saveSession({
-                messages: finalMessages
-              }, currentSessionId);
-            } catch (err: any) {
-              console.error("Error generating next trilha part:", err);
-              const errorMessage = err?.message || err?.toString() || "Erro na conexão com ATHENA";
-              const botErrorMessage: Message = {
-                role: 'model',
-                content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
-                blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
-                currentBlockIndex: 0,
-                subject: nextMat.nome,
-                article: 1
-              };
-              const finalMessages = [...updatedMessages, botErrorMessage];
+              const congratMsg = `🎉 **Parabéns de Elite!** Você completou todos os blocos de estudo do **Dia ${dayNum} da Trilha Jurídica de 100 Dias!**\n\nTodos os temas programados foram vencidos de forma fracionada e aprofundada. Você faturou **+150 XP**!\n\nContinue obstinado rumo à posse! Deseja programar os estudos de amanhã ou revisar o conteúdo de hoje?`;
+              
+              const finalMessages: Message[] = [
+                ...messages,
+                {
+                  role: 'model',
+                  content: congratMsg,
+                  blocks: [congratMsg],
+                  currentBlockIndex: 0
+                }
+              ];
+              
               setMessages(finalMessages);
               await saveSession({
                 messages: finalMessages
               }, currentSessionId);
-            } finally {
-              setIsLoading(false);
             }
-          } else {
-            // No more parts remaining! Congratulate and complete the Trilha day.
-            if (!trilhaCompletedDays.includes(dayNum)) {
-              await toggleTrilhaDayComplete(dayNum);
-            }
-            
-            const congratMsg = `🎉 **Parabéns de Elite!** Você completou todos os blocos de estudo do **Dia ${dayNum} da Trilha Jurídica de 100 Dias!**\n\nTodos os temas programados foram vencidos de forma fracionada e aprofundada. Você faturou **+150 XP**!\n\nContinue obstinado rumo à posse! Deseja programar os estudos de amanhã ou revisar o conteúdo de hoje?`;
-            
-            const finalMessages: Message[] = [
-              ...messages,
-              {
-                role: 'model',
-                content: congratMsg,
-                blocks: [congratMsg],
-                currentBlockIndex: 0
-              }
-            ];
-            
-            setMessages(finalMessages);
-            await saveSession({
-              messages: finalMessages
-            }, currentSessionId);
           }
+          return;
         }
+
+        // Default (non-trilha) flow
+        const nextArt = (msg.article || currentArticle) + 1;
+        setCurrentArticle(nextArt);
+        handleSendMessage(`Excelente. Vamos avançar para o Artigo ${nextArt} da ${guidedSubject}?`, true, nextArt);
         return;
       }
 
-      // Default (non-trilha) flow
-      const nextArt = (msg.article || currentArticle) + 1;
-      setCurrentArticle(nextArt);
-      handleSendMessage(`Excelente. Vamos avançar para o Artigo ${nextArt} da ${guidedSubject}?`, true, nextArt);
-      return;
-    }
+      const updatedMessages = (messages || []).map((m, i) => {
+        if (i === msgIdx) {
+          const nextIndex = (m.currentBlockIndex ?? 0) + 1;
+          
+          // If it's the last block, and we have an active study item, mark it complete
+          if (nextIndex === (m.blocks?.length ?? 0) - 1 && activeStudyItem) {
+            markScheduleItemComplete(activeStudyItem.scheduleId, activeStudyItem.itemIndex);
+          }
 
-    const updatedMessages = (messages || []).map((m, i) => {
-      if (i === msgIdx) {
-        const nextIndex = (m.currentBlockIndex ?? 0) + 1;
-        
-        // If it's the last block, and we have an active study item, mark it complete
-        if (nextIndex === (m.blocks?.length ?? 0) - 1 && activeStudyItem) {
-          markScheduleItemComplete(activeStudyItem.scheduleId, activeStudyItem.itemIndex);
+          return { ...m, currentBlockIndex: nextIndex };
         }
+        return m;
+      });
+      setMessages(updatedMessages);
+      saveSession({ messages: updatedMessages });
 
-        return { ...m, currentBlockIndex: nextIndex };
-      }
-      return m;
-    });
-    setMessages(updatedMessages);
-    saveSession({ messages: updatedMessages });
-  };
+      // Transição suave com scroll automático para o novo bloco revelado
+      const targetBlockIndex = (messages[msgIdx]?.currentBlockIndex ?? 0) + 1;
+      setTimeout(() => {
+        const nextBlockEl = document.getElementById(`block-${msgIdx}-${targetBlockIndex}`);
+        if (nextBlockEl) {
+          nextBlockEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 120);
+    };
 
   const skipTrilhaLesson = async (msgIdx: number) => {
     const session = sessions.find(s => s.id === currentSessionId);
@@ -3912,16 +4082,16 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                     {
                       id: 'subjetiva',
                       label: 'Provas Subjetivas (2ª Fase)',
-                      desc: (isCEO || hasCompletedDay50) ? 'Casos discursivos, dissertações e peças' : 'Disponível após concluir o Dia 50',
+                      desc: isCEO ? 'Casos discursivos, dissertações e peças (Acesso CEO Ilimitado)' : 'Exclusivo Perfil Mestre / Assinatura Premium',
                       icon: FileText,
-                      unlocked: isCEO || hasCompletedDay50,
+                      unlocked: isCEO,
                     },
                     {
                       id: 'oral',
                       label: 'Provas Orais (3ª Fase)',
-                      desc: (isCEO || hasCompletedDay75) ? 'Simulações de arguições sob pressão' : 'Disponível após concluir o Dia 75',
+                      desc: isCEO ? 'Simulações de arguições sob pressão (Acesso CEO Ilimitado)' : 'Exclusivo Perfil Mestre / Assinatura Premium',
                       icon: MessageSquare,
-                      unlocked: isCEO || hasCompletedDay75,
+                      unlocked: isCEO,
                     }
                   ].map((phase) => {
                     const isSelected = mentorshipPhase === phase.id;
@@ -3931,9 +4101,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                       <button
                         key={phase.id}
                         type="button"
-                        disabled={isPlLocked}
                         onClick={() => {
-                          if (!isPlLocked) setMentorshipPhase(phase.id as any);
+                          if (!isPlLocked) {
+                            setMentorshipPhase(phase.id as any);
+                          } else {
+                            setShowPaywallModal(true);
+                          }
                         }}
                         className={cn(
                           "w-full text-left p-2 rounded-xl border flex items-start gap-2 transition-all outline-none",
@@ -4239,32 +4412,28 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 )}
 
                 <div className="w-full space-y-3">
-                  {/* Botão de Acesso Direto CEO / Mestre */}
-                  <button 
-                    onClick={handleLoginAsCEO}
-                    className="w-full flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl hover:brightness-110 transition-all shadow-[0_10px_30px_rgba(212,175,55,0.25)] active:scale-95 cursor-pointer"
-                  >
-                    <Sparkles size={16} />
-                    <span>Acessar como Mestre / CEO (Jhonny)</span>
-                  </button>
-
-                  {/* Botão de Convidado / Aluno */}
-                  <button 
-                    onClick={handleLoginAsGuest}
-                    className="w-full flex items-center justify-center gap-3 px-8 py-3.5 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold uppercase tracking-wider text-xs rounded-2xl border border-white/10 hover:border-brand-gold/30 transition-all active:scale-95 cursor-pointer"
-                  >
-                    <BookOpen size={16} className="text-brand-gold" />
-                    <span>Acessar como Aluno Visitante</span>
-                  </button>
-
-                  {/* Botão Google Oficial */}
+                  {/* Botão Oficial Google Sign-In em Destaque */}
                   <button 
                     onClick={handleGoogleLogin}
-                    className="w-full flex items-center justify-center gap-3 px-8 py-3 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white font-medium text-xs rounded-2xl border border-white/5 transition-all cursor-pointer"
+                    className="w-full flex items-center justify-center gap-3 px-8 py-4 bg-white hover:bg-slate-100 text-slate-900 font-black uppercase tracking-wider text-xs rounded-2xl shadow-[0_10px_30px_rgba(255,255,255,0.15)] hover:shadow-[0_15px_35px_rgba(255,255,255,0.25)] transition-all active:scale-95 cursor-pointer"
                   >
-                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-4 h-4 opacity-75" />
-                    <span>Entrar com Conta Google (Online)</span>
+                    <svg className="w-5 h-5" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                    <span>Entrar com Conta Google</span>
                   </button>
+
+                  <div className="pt-2 text-center">
+                    <button 
+                      onClick={handleLoginAsCEO}
+                      className="text-[10px] text-slate-500 hover:text-brand-gold underline uppercase tracking-widest transition-colors cursor-pointer"
+                    >
+                      Acesso Homologação CEO (jhonny.spider@gmail.com)
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             ) : activeTab === 'stats' ? (
@@ -4784,6 +4953,11 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 {isCompleted && (
                                   <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-1 font-mono">
                                     <Zap size={10} /> Concluído (+150 XP)
+                                  </span>
+                                )}
+                                {dayItem.dia > 7 && !isCEO && (
+                                  <span className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1 font-mono">
+                                    <Sparkles size={10} /> Trial (Homologação)
                                   </span>
                                 )}
                               </div>
@@ -5309,6 +5483,38 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
               </motion.div>
             )}
 
+            {tokenExhaustedBanner && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mx-auto max-w-3xl w-full mb-6 p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-rose-300 shadow-xl"
+              >
+                <div className="flex items-start sm:items-center gap-3">
+                  <AlertTriangle className="text-rose-400 shrink-0 mt-0.5 sm:mt-0" size={18} />
+                  <div>
+                    <p className="font-bold text-rose-200">Limite de Requisições / Tokens da API Atingido</p>
+                    <p className="text-[11px] text-rose-300/80 leading-relaxed mt-0.5">
+                      A cota do Google AI Studio foi temporariamente esgotada. Aguarde um instante para renovação ou insira sua chave pessoal do Gemini em Configurações para continuar sem limites.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                  <button
+                    onClick={() => setIsAiSettingsOpen(true)}
+                    className="px-4 py-2 bg-gradient-to-r from-rose-500 to-amber-500 hover:brightness-110 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all shadow-md cursor-pointer"
+                  >
+                    Inserir Minha Chave
+                  </button>
+                  <button
+                    onClick={() => setTokenExhaustedBanner(false)}
+                    className="text-rose-400 hover:text-white text-xs p-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
                     <AnimatePresence mode="popLayout">
                       {(() => {
                         const activeSess = sessions.find(s => s.id === currentSessionId);
@@ -5423,15 +5629,6 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                         />
                                       </div>
                                     </div>
-                                  </div>
-
-                                  <div className="pt-2 text-center">
-                                    <button
-                                      onClick={() => setIsLoading(false)}
-                                      className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-300 underline cursor-pointer"
-                                    >
-                                      Cancelar ou tentar manualmente
-                                    </button>
                                   </div>
                                 </div>
                               </div>
@@ -5882,6 +6079,82 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   className="w-full py-2 bg-slate-950 text-slate-400 hover:text-slate-200 rounded-xl text-[11px] font-bold border border-white/5 transition-colors cursor-pointer"
                 >
                   Restaurar Chave Padrão
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Modal de Assinatura / Paywall (Trial Mode) */}
+    <AnimatePresence>
+      {showPaywallModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md"
+        >
+          <motion.div
+            initial={{ scale: 0.95, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 20 }}
+            className="bg-slate-900 border border-brand-gold/30 p-6 md:p-8 rounded-[2.5rem] max-w-md w-full relative shadow-[0_20px_60px_rgba(0,0,0,0.8)] text-left"
+          >
+            <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-brand-gold/10 rounded-2xl border border-brand-gold/20 text-brand-gold">
+                  <Trophy size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-serif font-bold text-slate-100">ATHENA Premium</h3>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">Plano Completo de Carreira</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPaywallModal(false)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-950/60 rounded-2xl border border-white/5 space-y-2">
+                <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider block">
+                  Período de Demonstração (Trial)
+                </span>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Os primeiros <strong>7 dias</strong> da Trilha de 100 Dias e o módulo de <strong>Provas Objetivas (1ª Fase)</strong> são gratuitos para degustação.
+                </p>
+                <div className="pt-2 border-t border-white/5 text-[11px] text-emerald-400 font-mono">
+                  ✓ Durante esta fase de homologação geral, o acesso irrestrito aos dias seguintes está liberado para testes.
+                </div>
+              </div>
+
+              <div className="space-y-2 text-xs text-slate-400">
+                <p className="flex items-center gap-2 text-slate-300">
+                  <Check size={14} className="text-brand-gold shrink-0" />
+                  100 Dias de Cronograma Estruturado Completo
+                </p>
+                <p className="flex items-center gap-2 text-slate-300">
+                  <Check size={14} className="text-brand-gold shrink-0" />
+                  Simulador de Peças e Discursivas (2ª Fase)
+                </p>
+                <p className="flex items-center gap-2 text-slate-300">
+                  <Check size={14} className="text-brand-gold shrink-0" />
+                  Banca Examinadora em Prova Oral com IA (3ª Fase)
+                </p>
+              </div>
+
+              <div className="pt-2 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPaywallModal(false)}
+                  className="w-full py-3.5 bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold text-slate-950 rounded-xl font-black uppercase text-xs tracking-wider flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-lg active:scale-95 cursor-pointer"
+                >
+                  <span>Continuar Estudando (Trial)</span>
                 </button>
               </div>
             </div>

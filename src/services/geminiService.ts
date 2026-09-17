@@ -141,8 +141,12 @@ async function callGeminiREST(
 
     if (!response.ok) {
       const errJson = await response.json().catch(() => ({}));
-      const msg = errJson?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
-      throw new Error(msg);
+      const rawMsg = errJson?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+      const isQuotaOrTokens = response.status === 429 || rawMsg.includes('RESOURCE_EXHAUSTED') || rawMsg.includes('Quota exceeded') || rawMsg.includes('rate limit');
+      if (isQuotaOrTokens) {
+        throw new Error(`[API_TOKEN_EXHAUSTED] Limite de tokens ou cota da API Gemini atingido. Aguarde alguns instantes ou verifique sua chave de API nas configurações.`);
+      }
+      throw new Error(rawMsg);
     }
 
     const data = await response.json();
@@ -172,7 +176,7 @@ async function askATHENADirectClient(
   file?: { mimeType: string, data: string },
   mentorshipStyle: 'teorico' | 'jurisprudente' | 'pratico' | 'automatico' = 'teorico',
   mentorshipPhase: 'objetiva' | 'subjetiva' | 'oral' = 'objetiva'
-): Promise<string> {
+): Promise<{ text: string; model: string }> {
   const parts: any[] = [{ text: message }];
   if (file) {
     parts.push({
@@ -183,11 +187,10 @@ async function askATHENADirectClient(
     });
   }
 
-  // Model tiering com modelos de 2026 ativos e timeouts adequados (priorizando o veloz gemini-flash-latest)
+  // Força explicitamente a chamada para o modelo Flash oficial estável
   const modelAttempts = [
-    { model: "gemini-flash-latest", timeout: 35000 },
-    { model: "gemini-3.1-flash-lite", timeout: 25000 },
-    { model: "gemini-3.6-flash", timeout: 40000 }
+    { model: "gemini-flash-latest", timeout: 45000 },
+    { model: "gemini-3.8-flash", timeout: 45000 }
   ];
 
   const systemInstruction = ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase);
@@ -265,8 +268,7 @@ Forneça sua correção detalhada em formato markdown elegante contendo sugestõ
 
   const modelAttempts = [
     { model: "gemini-flash-latest", timeout: 45000 },
-    { model: "gemini-3.6-flash", timeout: 50000 },
-    { model: "gemini-3.1-flash-lite", timeout: 35000 }
+    { model: "gemini-3.8-flash", timeout: 45000 }
   ];
 
   let text = '';
@@ -347,7 +349,7 @@ export async function testGeminiConnection(): Promise<GeminiConnectionTestResult
     };
   }
 
-  const modelAttempts = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
+  const modelAttempts = ["gemini-flash-latest", "gemini-3.8-flash"];
   let lastErr: any = null;
 
   for (const model of modelAttempts) {

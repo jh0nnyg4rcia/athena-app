@@ -119,3 +119,20 @@ export interface ChatSession {
   trilhaMaterialIndex?: number;
   trilhaSessionType?: 'estudo' | 'discursivo' | 'oral';
 }
+
+export interface UserProfile {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  role: 'ceo' | 'default';
+  profile: 'automatic' | 'custom';
+  allowedPhases: ('objetiva' | 'subjetiva' | 'oral')[];
+  isTrialMode: boolean;
+}
+
+export interface TrilhaPartCache {
+  text: string;
+  model: string;
+  timestamp: number;
+}
