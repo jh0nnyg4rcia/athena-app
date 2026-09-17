@@ -184,11 +184,11 @@ async function askATHENADirectClient(
     });
   }
 
-  // Model tiering com modelos de 2026 ativos e timeouts adequados
+  // Model tiering com modelos de 2026 ativos e timeouts adequados (priorizando o veloz gemini-flash-latest)
   const modelAttempts = [
-    { model: "gemini-3.6-flash", timeout: 20000 },
-    { model: "gemini-flash-latest", timeout: 18000 },
-    { model: "gemini-3.1-flash-lite", timeout: 15000 }
+    { model: "gemini-flash-latest", timeout: 45000 },
+    { model: "gemini-3.6-flash", timeout: 50000 },
+    { model: "gemini-3.1-flash-lite", timeout: 35000 }
   ];
 
   const systemInstruction = `${ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase)}\n\n${ATHENA_LEGAL_CORPUS}`;
@@ -265,9 +265,9 @@ Se for Prova Oral:
 Forneça sua correção detalhada em formato markdown elegante contendo sugestões de melhoria exaustivas para que ele possa gabaritar.`;
 
   const modelAttempts = [
-    { model: "gemini-3.6-flash", timeout: 20000 },
-    { model: "gemini-flash-latest", timeout: 18000 },
-    { model: "gemini-3.1-flash-lite", timeout: 15000 }
+    { model: "gemini-flash-latest", timeout: 45000 },
+    { model: "gemini-3.6-flash", timeout: 50000 },
+    { model: "gemini-3.1-flash-lite", timeout: 35000 }
   ];
 
   let text = '';

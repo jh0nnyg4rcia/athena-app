@@ -1098,11 +1098,17 @@ const ChatMessage = memo(({
   retryMessage?: (idx: number) => Promise<void>
 }) => {
   const isUser = msg.role === 'user';
-  const isMeditating = !isUser && msg.content && (
-    msg.content.toLowerCase().includes("meditando") || 
-    msg.content.toLowerCase().includes("meditar") || 
-    msg.content.toLowerCase().includes("tente novamente") || 
-    msg.content.toLowerCase().includes("não carrega")
+  const isError = !isUser && Boolean(
+    msg.content && (
+      msg.content.includes("problema na conexão") ||
+      msg.content.includes("Detalhes do Erro") ||
+      msg.content.includes("Tempo limite excedido") ||
+      msg.content.includes("Não foi possível obter uma resposta") ||
+      msg.content.toLowerCase().includes("meditando") ||
+      msg.content.toLowerCase().includes("meditar") ||
+      msg.content.toLowerCase().includes("tente novamente") ||
+      msg.content.toLowerCase().includes("não carrega")
+    )
   );
   
   const isInstruction = getIsInstructionMessage(msg);
@@ -1385,24 +1391,26 @@ const ChatMessage = memo(({
             >
               {(msg.currentBlockIndex ?? 0) < msg.blocks.length - 1 ? (
                 <div className="flex flex-wrap gap-3 items-center w-full">
-                  {isMeditating && retryMessage && (
+                  {isError && retryMessage && (
                     <button
                       type="button"
                       onClick={() => retryMessage(msgIdx)}
-                      className="bg-blue-600/25 hover:bg-blue-600/40 text-blue-400 hover:text-white border border-blue-500/30 px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer"
+                      className="bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 hover:text-white border border-blue-500/40 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer animate-pulse"
                     >
                       <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
                       <span>Recarregar Lição</span>
                     </button>
                   )}
 
-                  <button
-                    onClick={() => advanceStage(msgIdx)}
-                    className="bg-brand-gold/10 hover:bg-brand-gold text-brand-gold hover:text-slate-950 border border-brand-gold/20 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 group shadow-xl active:scale-95 cursor-pointer"
-                  >
-                    <span>AVANÇAR</span>
-                    <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                  </button>
+                  {!isError && (
+                    <button
+                      onClick={() => advanceStage(msgIdx)}
+                      className="bg-brand-gold/10 hover:bg-brand-gold text-brand-gold hover:text-slate-950 border border-brand-gold/20 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 group shadow-xl active:scale-95 cursor-pointer"
+                    >
+                      <span>AVANÇAR</span>
+                      <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                    </button>
+                  )}
 
                   {trilhaDay !== undefined && skipTrilhaLesson && (
                     <button
@@ -1418,18 +1426,18 @@ const ChatMessage = memo(({
               ) : (
                 <div className="flex flex-col gap-4 w-full">
                   <div className="flex flex-wrap gap-3">
-                    {isMeditating && retryMessage && (
+                    {isError && retryMessage && (
                       <button
                         type="button"
                         onClick={() => retryMessage(msgIdx)}
-                        className="bg-blue-600/25 hover:bg-blue-600/40 text-blue-400 hover:text-white border border-blue-500/30 px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer"
+                        className="bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 hover:text-white border border-blue-500/40 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-xl active:scale-95 cursor-pointer animate-pulse"
                       >
                         <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
                         <span>Recarregar Lição</span>
                       </button>
                     )}
 
-                    {trilhaDay !== undefined && trilhaMaterialIndex !== undefined && trilhaTotalMaterials !== undefined ? (
+                    {!isError && trilhaDay !== undefined && trilhaMaterialIndex !== undefined && trilhaTotalMaterials !== undefined ? (
                       trilhaMaterialIndex < trilhaTotalMaterials - 1 ? (
                         <>
                           <button
@@ -1460,7 +1468,7 @@ const ChatMessage = memo(({
                           <Trophy size={14} className="group-hover:scale-110 transition-transform" />
                         </button>
                       )
-                    ) : (
+                    ) : !isError ? (
                       <>
                         {msg.subject ? (
                           <button
@@ -1483,9 +1491,9 @@ const ChatMessage = memo(({
                           </button>
                         )}
                       </>
-                    )}
+                    ) : null}
                     
-                    {msg.blocks.length >= 5 && (
+                    {!isError && msg.blocks.length >= 5 && (
                       <button
                         onClick={() => saveReview(msgIdx)}
                         className={cn(
@@ -2556,7 +2564,14 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-    const handleSendMessageRequest = async (customMessage?: string, isAuto?: boolean, sessionId?: string | null, forcedArticle?: number, forcedSubject?: string | null) => {
+    const handleSendMessageRequest = async (
+      customMessage?: string, 
+      isAuto?: boolean, 
+      sessionId?: string | null, 
+      forcedArticle?: number, 
+      forcedSubject?: string | null,
+      forcedTrilhaDay?: number
+    ) => {
     const userMessage = customMessage || input;
     if (!userMessage.trim() && !attachedFile && !isLoading) return;
     if (isLoading) return;
@@ -2598,14 +2613,16 @@ export default function App() {
     setIsLoading(true);
 
     try {
-      const activeSession = sessions.find(s => s.id === (targetSessionId || currentSessionId));
+      const activeUserId = user?.uid || 'jhonny-spider-ceo';
+      const activeSession = sessions.find(s => s.id === (targetSessionId || currentSessionId))
+        || LocalPersistence.getSessions(activeUserId).find(s => s.id === (targetSessionId || currentSessionId));
+      const dayNum = forcedTrilhaDay ?? activeSession?.trilhaDay;
       let resolvedPhase = mentorshipPhase;
       if (activeSession?.trilhaSessionType === 'discursivo') {
         resolvedPhase = 'subjetiva';
       } else if (activeSession?.trilhaSessionType === 'oral') {
         resolvedPhase = 'oral';
-      } else if (activeSession?.trilhaDay !== undefined) {
-        const dayNum = activeSession.trilhaDay;
+      } else if (dayNum !== undefined) {
         if (dayNum % 5 === 0) {
           resolvedPhase = 'subjetiva';
         } else if (dayNum % 7 === 0 || dayNum % 10 === 3) {
@@ -2651,7 +2668,9 @@ export default function App() {
       }
 
       if (targetSessionId) {
-        const session = sessions.find(s => s.id === targetSessionId);
+        const activeUserId = user?.uid || 'jhonny-spider-ceo';
+        const session = sessions.find(s => s.id === targetSessionId)
+          || LocalPersistence.getSessions(activeUserId).find(s => s.id === targetSessionId);
         let currentMessages = session?.messages || [];
         if (currentMessages.length === 0) {
           currentMessages = [{ role: 'user' as const, content: userMessage }];
@@ -2674,14 +2693,18 @@ export default function App() {
       console.error("[ATHENA Error]", error);
       const errorMessage = error?.message || error?.toString() || "Erro inesperado";
       
-      const activeSession = sessions.find(s => s.id === (targetSessionId || currentSessionId));
-      const dayNum = activeSession?.trilhaDay;
+      const activeUserId = user?.uid || 'jhonny-spider-ceo';
+      const activeSession = sessions.find(s => s.id === (targetSessionId || currentSessionId))
+        || LocalPersistence.getSessions(activeUserId).find(s => s.id === (targetSessionId || currentSessionId));
+      const dayNum = forcedTrilhaDay ?? activeSession?.trilhaDay;
       const dayItem = dayNum ? TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum) : undefined;
 
       // Resiliência de Elite: se a API Gemini falhar ou demorar, sintetiza o material compilado Pareto do Dia
-      if (dayItem && dayItem.fonteCompleta) {
+      if (dayItem) {
         console.warn(`[ATHENA Trilha] Conexão Gemini indisponível. Ativando síntese local Pareto 80/20 do Dia ${dayNum}...`);
-        const fallbackText = `[BLOCK_1]
+        let fallbackText = '';
+        if (dayItem.fonteCompleta && dayNum === 1) {
+          fallbackText = `[BLOCK_1]
 # ⚖️ Trilha Jurídica • Dia ${dayNum} | ${activeSubject || 'Direito Constitucional'}
 *Modo de Alta Disponibilidade Local Ativado (Pareto 80/20)*
 
@@ -2772,35 +2795,81 @@ Teste agora a fixação deste tema com questões de alto nível:
     }
   ]
 }`;
+        } else if (dayItem.materias && dayItem.materias.length > 0) {
+          const matList = dayItem.materias.map((m, i) => `**${i + 1}. ${m.nome}**: ${m.conteudo}`).join('\n');
+          fallbackText = `[BLOCK_1]
+# ⚖️ Trilha Jurídica • Dia ${dayNum} | ${activeSubject || dayItem.materias[0].nome}
+*Plano de Estudos Pareto 80/20 (Alta Disponibilidade)*
 
-        const parsed = parseATHENAResponse(fallbackText);
-        const botMessage: Message = {
-          role: 'model',
-          content: parsed.content,
-          challenge: parsed.challenge,
-          blocks: parsed.blocks,
-          currentBlockIndex: 0,
-          subject: activeSubject,
-          article: activeArticle
-        };
-        setMessages(prev => [...prev, botMessage]);
+Bem-vindo(a) à sua sessão de estudos do **Dia ${dayNum}** da Trilha Jurídica!
 
-        const activeId = (targetSessionId || currentSessionId);
-        if (activeId) {
-          const session = sessions.find(s => s.id === activeId);
-          let currentMessages = session?.messages || [];
-          if (currentMessages.length === 0) {
-            currentMessages = [{ role: 'user' as const, content: userMessage }];
-          }
-          const newUserMsg = isAuto ? [] : [{ role: 'user' as const, content: userMessage }];
-          const updatedMessages = [...currentMessages, ...newUserMsg, botMessage];
-          saveSession({
-            messages: updatedMessages,
-            guidedSubject: activeSubject,
-            currentArticle: activeArticle
-          }, activeId, true);
+As disciplinas e matérias programadas para hoje são:
+${matList}
+
+[BLOCK_2]
+### **Foco Estratégico do Dia ${dayNum}**
+- **Meta**: Leitura atenta dos dispositivos de lei seca indicados e consolidação dos pontos mais cobrados pelas bancas.
+- **Técnica 80/20**: Dedique 80% do seu tempo de estudo aos artigos centrais e súmulas correlatas.
+
+[BLOCK_3]
+### **Recomendações Práticas de Estudo**
+1. **Leitura Ativa**: Grife os verbos nucleares e prazos de cada artigo indicado.
+2. **Mapeamento de Pegadinhas**: Fique atento a exceções e remissões normativas.
+3. **Fixação Contínua**: Resolva questões comentadas ao final de cada bloco de leitura.
+
+[BLOCK_4]
+### **Simulado Rápido de Fixação**
+[ATHENA_CHALLENGE]
+{
+  "questions": [
+    {
+      "id": 1,
+      "text": "Ao estudar a lei seca pelo método Pareto 80/20, qual deve ser a postura do candidato em relação às exceções e prazos legais?",
+      "options": [
+        "A) Ignorar exceções e focar exclusivamente nas regras gerais.",
+        "B) Mapear e memorizar ativamente as exceções e prazos, pois representam o maior índice de pegadinhas das bancas.",
+        "C) Memorizar apenas o número dos artigos sem ler o texto da norma.",
+        "D) Deixar o estudo da lei seca apenas para a véspera da prova."
+      ],
+      "correctAnswer": 1,
+      "explanation": "Correto item B. As bancas examinadoras de concursos de alto nível cobram intensamente exceções e prazos legais literais."
+    }
+  ]
+}`;
         }
-        return;
+
+        if (fallbackText) {
+          const parsed = parseATHENAResponse(fallbackText);
+          const botMessage: Message = {
+            role: 'model',
+            content: parsed.content,
+            challenge: parsed.challenge,
+            blocks: parsed.blocks,
+            currentBlockIndex: 0,
+            subject: activeSubject,
+            article: activeArticle
+          };
+          setMessages(prev => [...prev, botMessage]);
+
+          const activeId = (targetSessionId || currentSessionId);
+          if (activeId) {
+            const activeUserId = user?.uid || 'jhonny-spider-ceo';
+            const session = sessions.find(s => s.id === activeId)
+              || LocalPersistence.getSessions(activeUserId).find(s => s.id === activeId);
+            let currentMessages = session?.messages || [];
+            if (currentMessages.length === 0) {
+              currentMessages = [{ role: 'user' as const, content: userMessage }];
+            }
+            const newUserMsg = isAuto ? [] : [{ role: 'user' as const, content: userMessage }];
+            const updatedMessages = [...currentMessages, ...newUserMsg, botMessage];
+            saveSession({
+              messages: updatedMessages,
+              guidedSubject: activeSubject,
+              currentArticle: activeArticle
+            }, activeId, true);
+          }
+          return;
+        }
       }
 
       const botErrorMessage: Message = {
@@ -2815,7 +2884,9 @@ Teste agora a fixação deste tema com questões de alto nível:
 
       if (targetSessionId || currentSessionId) {
         const activeId = (targetSessionId || currentSessionId)!;
-        const session = sessions.find(s => s.id === activeId);
+        const activeUserId = user?.uid || 'jhonny-spider-ceo';
+        const session = sessions.find(s => s.id === activeId)
+          || LocalPersistence.getSessions(activeUserId).find(s => s.id === activeId);
         const currentMsgs = session?.messages || [];
         const updatedMessages = [...currentMsgs, botErrorMessage];
         saveSession({
@@ -3103,7 +3174,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
 
     try {
-      await handleSendMessageRequest(initialMsg, true, id, 1, guidedSubjectName);
+      await handleSendMessageRequest(initialMsg, true, id, 1, guidedSubjectName, dayNum);
     } catch (sendErr) {
       console.error("[handleStartTrilhaStudy] Error sending initial trilha message:", sendErr);
     }
@@ -3213,8 +3284,22 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               await saveSession({
                 messages: finalMessages
               }, currentSessionId);
-            } catch (err) {
+            } catch (err: any) {
               console.error("Error generating next trilha part:", err);
+              const errorMessage = err?.message || err?.toString() || "Erro na conexão com ATHENA";
+              const botErrorMessage: Message = {
+                role: 'model',
+                content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
+                blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
+                currentBlockIndex: 0,
+                subject: nextMat.nome,
+                article: 1
+              };
+              const finalMessages = [...updatedMessages, botErrorMessage];
+              setMessages(finalMessages);
+              await saveSession({
+                messages: finalMessages
+              }, currentSessionId);
             } finally {
               setIsLoading(false);
             }
@@ -3356,8 +3441,22 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             await saveSession({
               messages: finalMessages
             }, currentSessionId);
-          } catch (err) {
+          } catch (err: any) {
             console.error("Error skipping lesson and generating next part:", err);
+            const errorMessage = err?.message || err?.toString() || "Erro na conexão com ATHENA";
+            const botErrorMessage: Message = {
+              role: 'model',
+              content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
+              blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
+              currentBlockIndex: 0,
+              subject: nextMat.nome,
+              article: 1
+            };
+            const finalMessages = [...updatedMessages, botErrorMessage];
+            setMessages(finalMessages);
+            await saveSession({
+              messages: finalMessages
+            }, currentSessionId);
           } finally {
             setIsLoading(false);
           }
@@ -3408,65 +3507,26 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const prevMsg = messages[prevMsgIdx];
     if (!prevMsg) return;
 
-    setIsLoading(true);
-    
+    const activeUserId = user?.uid || 'jhonny-spider-ceo';
+    const activeSession = sessions.find(s => s.id === currentSessionId)
+      || LocalPersistence.getSessions(activeUserId).find(s => s.id === currentSessionId);
+    const dayNum = activeSession?.trilhaDay;
+
     // Remove the failed bot message from state
     const truncatedMessages = messages.slice(0, msgIdx);
     setMessages(truncatedMessages);
 
     try {
-      const history = truncatedMessages.slice(0, -1).map(m => ({
-        role: m.role,
-        parts: [{ text: m.content }]
-      }));
-
-      const activeSession = sessions.find(s => s.id === currentSessionId);
-      let resolvedPhase = mentorshipPhase;
-      if (activeSession?.trilhaSessionType === 'discursivo') {
-        resolvedPhase = 'subjetiva';
-      } else if (activeSession?.trilhaSessionType === 'oral') {
-        resolvedPhase = 'oral';
-      } else if (activeSession?.trilhaDay !== undefined) {
-        const dayNum = activeSession.trilhaDay;
-        if (dayNum % 5 === 0) {
-          resolvedPhase = 'subjetiva';
-        } else if (dayNum % 7 === 0 || dayNum % 10 === 3) {
-          resolvedPhase = 'oral';
-        } else {
-          resolvedPhase = 'objetiva';
-        }
-      }
-
-      const responseText = await askATHENA(
+      await handleSendMessageRequest(
         prevMsg.content,
-        history,
-        user?.displayName || "Mestre",
-        null,
-        mentorshipStyle,
-        resolvedPhase
+        true,
+        currentSessionId,
+        msg.article || currentArticle,
+        msg.subject || guidedSubject,
+        dayNum
       );
-
-      const parsed = parseATHENAResponse(responseText);
-      const botMessage: Message = {
-        role: 'model',
-        content: parsed.content,
-        challenge: parsed.challenge,
-        editalData: parsed.editalData,
-        blocks: parsed.blocks,
-        currentBlockIndex: 0,
-        subject: msg.subject || guidedSubject,
-        article: msg.article || currentArticle
-      };
-
-      const finalMessages = [...truncatedMessages, botMessage];
-      setMessages(finalMessages);
-      await saveSession({
-        messages: finalMessages
-      }, currentSessionId);
     } catch (err) {
       console.error("Error retrying lesson:", err);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -5255,7 +5315,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                   onClick={() => {
                                     const sess = sessions.find(s => s.id === currentSessionId);
                                     const firstMsg = sess?.messages?.[0]?.content || `ATHENA, inicie o estudo de ${guidedSubject}`;
-                                    handleSendMessageRequest(firstMsg, true, currentSessionId);
+                                    handleSendMessageRequest(firstMsg, true, currentSessionId, undefined, undefined, sess?.trilhaDay);
                                   }}
                                   className="w-full py-4 bg-brand-gold hover:bg-white text-slate-950 font-black text-xs uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-brand-gold/20 active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
                                 >
