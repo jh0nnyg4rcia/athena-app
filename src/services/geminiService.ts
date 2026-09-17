@@ -1,4 +1,3 @@
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold, ThinkingLevel } from "@google/genai";
 import { ATHENA_SYSTEM_INSTRUCTION } from "./geminiServerService";
 import { ATHENA_LEGAL_CORPUS } from "./legalCorpusSource";
 
@@ -68,8 +67,104 @@ const getApiUrl = (endpoint: string): string => {
 };
 
 /**
+ * Extrai o texto limpo retornado pela API REST do Gemini,
+ * inspecionando candidates[0].content.parts e garantindo suporte
+ * mesmo quando houver metadados de pensamento (thoughtSignature).
+ */
+function extractTextFromGeminiResponse(data: any): string {
+  if (!data) return '';
+  if (typeof data.text === 'string' && data.text.trim()) {
+    return data.text.trim();
+  }
+  const candidate = data.candidates?.[0];
+  if (candidate?.content?.parts && Array.isArray(candidate.content.parts)) {
+    const combined = candidate.content.parts
+      .map((part: any) => part.text || '')
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    if (combined) return combined;
+  }
+  return '';
+}
+
+/**
+ * Chamada REST pura e direta para a API Gemini (v1beta), compatível
+ * com qualquer ambiente (Browser, WebView Android via Capacitor, etc.).
+ * Elimina completamente gargalos de SDK, retries infinitos e overhead.
+ */
+async function callGeminiREST(
+  model: string,
+  contents: any[],
+  systemInstructionText?: string,
+  timeoutMs: number = 20000
+): Promise<string> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error("Chave da API Gemini não configurada.");
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const bodyPayload: any = {
+    contents,
+    generationConfig: {
+      temperature: 0.25
+    },
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+    ]
+  };
+
+  if (systemInstructionText && systemInstructionText.trim()) {
+    bodyPayload.systemInstruction = {
+      parts: [{ text: systemInstructionText }]
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(bodyPayload),
+      signal: controller.signal
+    });
+
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => ({}));
+      const msg = errJson?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(msg);
+    }
+
+    const data = await response.json();
+    const extracted = extractTextFromGeminiResponse(data);
+    if (!extracted) {
+      throw new Error("A API Gemini retornou uma resposta sem conteúdo textual legível.");
+    }
+
+    return extracted;
+  } catch (err: any) {
+    clearTimeout(timer);
+    if (err?.name === 'AbortError') {
+      throw new Error(`Tempo limite excedido (${timeoutMs / 1000}s) no modelo ${model}.`);
+    }
+    throw err;
+  }
+}
+
+/**
  * Executa geração de conteúdo diretamente no cliente (Browser ou WebView nativo do Android)
- * utilizando o SDK oficial @google/genai.
+ * utilizando chamada REST de altíssima performance.
  */
 async function askATHENADirectClient(
   message: string, 
@@ -79,13 +174,6 @@ async function askATHENADirectClient(
   mentorshipStyle: 'teorico' | 'jurisprudente' | 'pratico' | 'automatico' = 'teorico',
   mentorshipPhase: 'objetiva' | 'subjetiva' | 'oral' = 'objetiva'
 ): Promise<string> {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) {
-    throw new Error("Chave da API Gemini não encontrada. Por favor, configure sua chave no menu.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-
   const parts: any[] = [{ text: message }];
   if (file) {
     parts.push({
@@ -96,49 +184,29 @@ async function askATHENADirectClient(
     });
   }
 
-  // Model tiering com modelos de 2026 ativos
+  // Model tiering com modelos de 2026 ativos e timeouts adequados
   const modelAttempts = [
-    { model: "gemini-3.6-flash", useThinking: false },
-    { model: "gemini-flash-latest", useThinking: false },
-    { model: "gemini-3.5-flash", useThinking: true },
-    { model: "gemini-3.1-pro-preview", useThinking: true }
+    { model: "gemini-3.6-flash", timeout: 20000 },
+    { model: "gemini-flash-latest", timeout: 18000 },
+    { model: "gemini-3.1-flash-lite", timeout: 15000 }
+  ];
+
+  const systemInstruction = `${ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase)}\n\n${ATHENA_LEGAL_CORPUS}`;
+  const contents = [
+    ...history,
+    { role: 'user', parts }
   ];
 
   let lastError: any = null;
 
   for (const attempt of modelAttempts) {
     try {
-      console.log(`[ATHENA Mobile] Solicitando modelo: ${attempt.model}...`);
-      const config: any = {
-        temperature: 0.25,
-        safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-        ],
-        systemInstruction: `${ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase)}\n\n${ATHENA_LEGAL_CORPUS}`
-      };
-
-      if (attempt.useThinking) {
-        config.thinkingConfig = { thinkingLevel: ThinkingLevel.HIGH };
-      }
-
-      const response = await ai.models.generateContent({
-        model: attempt.model,
-        contents: [
-          ...history,
-          { role: 'user', parts }
-        ],
-        config
-      });
-
-      if (response && response.text) {
-        console.log(`[ATHENA Mobile] Resposta gerada com sucesso via ${attempt.model}`);
-        return response.text;
-      }
+      console.log(`[ATHENA Mobile REST] Solicitando modelo: ${attempt.model}...`);
+      const text = await callGeminiREST(attempt.model, contents, systemInstruction, attempt.timeout);
+      console.log(`[ATHENA Mobile REST] Resposta gerada com sucesso via ${attempt.model} (${text.length} chars)`);
+      return text;
     } catch (err: any) {
-      console.warn(`[ATHENA Mobile] Falha no modelo ${attempt.model}:`, err?.message || err);
+      console.warn(`[ATHENA Mobile REST] Falha no modelo ${attempt.model}:`, err?.message || err);
       lastError = err;
     }
   }
@@ -147,7 +215,7 @@ async function askATHENADirectClient(
 }
 
 /**
- * Executa avaliação discursiva ou oral diretamente no cliente
+ * Executa avaliação discursiva ou oral diretamente no cliente via REST
  */
 async function evaluateAnswerDirectClient(
   questionText: string,
@@ -156,13 +224,6 @@ async function evaluateAnswerDirectClient(
   phase: 'subjetiva' | 'oral',
   userName: string = "Mestre"
 ): Promise<{ text: string; evaluation: any }> {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) {
-    throw new Error("Chave da API Gemini não encontrada para avaliação.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-
   const prompt = `Você é o Presidente da Banca Examinadora de Concursos de Elite de Magistratura e Ministério Público.
 Você deve avaliar a resposta do candidato de forma extremamente rigorosa, realista e profissional jurídica.
 
@@ -204,52 +265,29 @@ Se for Prova Oral:
 Forneça sua correção detalhada em formato markdown elegante contendo sugestões de melhoria exaustivas para que ele possa gabaritar.`;
 
   const modelAttempts = [
-    { model: "gemini-3.6-flash", useThinking: false },
-    { model: "gemini-3.1-pro-preview", useThinking: true },
-    { model: "gemini-flash-latest", useThinking: false },
-    { model: "gemini-3.5-flash", useThinking: true }
+    { model: "gemini-3.6-flash", timeout: 20000 },
+    { model: "gemini-flash-latest", timeout: 18000 },
+    { model: "gemini-3.1-flash-lite", timeout: 15000 }
   ];
 
-  let response: any = null;
+  let text = '';
   let lastError: any = null;
 
   for (const attempt of modelAttempts) {
     try {
-      const config: any = {
-        temperature: 0.25,
-        safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-        ]
-      };
-
-      if (attempt.useThinking) {
-        config.thinkingConfig = { thinkingLevel: ThinkingLevel.HIGH };
-      }
-
-      console.log(`[ATHENA Mobile Eval] Tentando modelo: ${attempt.model}`);
-      response = await ai.models.generateContent({
-        model: attempt.model,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config
-      });
-
-      if (response && response.text) {
-        break;
-      }
+      console.log(`[ATHENA Mobile Eval REST] Solicitando ${attempt.model}...`);
+      text = await callGeminiREST(attempt.model, [{ role: 'user', parts: [{ text: prompt }] }], undefined, attempt.timeout);
+      if (text) break;
     } catch (err: any) {
-      console.warn(`[ATHENA Mobile Eval] Erro com ${attempt.model}:`, err?.message || err);
+      console.warn(`[ATHENA Mobile Eval REST] Erro com ${attempt.model}:`, err?.message || err);
       lastError = err;
     }
   }
 
-  if (!response || !response.text) {
+  if (!text) {
     throw lastError || new Error("ATHENA não conseguiu avaliar a resposta.");
   }
 
-  const text = response.text;
   let evaluationData: any = null;
   const tag = "[ATHENA_EVALUATION]";
   if (text.includes(tag)) {
