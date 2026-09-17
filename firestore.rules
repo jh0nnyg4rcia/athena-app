@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /test/connection {
+      allow get: if true;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.get('email', '').lower() == 'jhonny.spider@gmail.com';
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches("^[a-zA-Z0-9_-]+$");
+    }
+
+    function isValidUser(data) {
+      return data.get('displayName', '') is string && data.get('displayName', '').size() <= 200
+        && data.get('email', '') is string && data.get('email', '').size() <= 200;
+    }
+
+    function isValidSession(data) {
+      return data.get('id', '') is string
+        && data.get('title', '') is string && data.get('title', '').size() <= 500
+        && data.get('userId', request.auth.uid) == request.auth.uid
+        && (data.get('guidedSubject', null) == null || data.get('guidedSubject', '') is string)
+        && (data.get('messages', []) is list)
+        && (data.get('lastUpdatedAt', 0) is number)
+        && (data.get('reviews', []) is list)
+        && (data.get('currentArticle', 1) is number)
+        && (data.get('trilhaDay', null) == null || data.get('trilhaDay', 0) is number)
+        && (data.get('trilhaMaterialIndex', null) == null || data.get('trilhaMaterialIndex', 0) is number)
+        && (data.get('trilhaSessionType', null) == null || data.get('trilhaSessionType', '') is string);
+    }
+    
+    function isValidStat(data) {
+      return data.get('userId', '') == request.auth.uid
+        && data.get('subjectName', '') is string;
+    }
+
+    function isValidFailedQuestion(data) {
+      return data.get('userId', '') == request.auth.uid
+        && data.get('text', '') is string;
+    }
+
+    function isValidSchedule(data) {
+      return data.get('userId', '') == request.auth.uid
+        && data.get('title', '') is string && data.get('title', '').size() <= 500
+        && data.get('raioX', []) is list && data.get('cronograma', []) is list;
+    }
+
+    function isValidGamification(data) {
+      return data.get('totalXP', 0) is number
+        && data.get('level', 1) is number
+        && data.get('streak', 0) is number;
+    }
+
+    function isValidTrilhaProgress(data) {
+      return data.get('completedDays', []) is list
+        && data.get('completedDays', []).size() <= 200;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && incoming().email == existing().email;
+      
+      match /gamification/{statusId} {
+        allow get, list: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId) && isValidId(statusId) && isValidGamification(incoming());
+      }
+      
+      match /sessions/{sessionId} {
+        allow list, get: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId) && isValidId(sessionId) && isValidSession(incoming());
+        allow delete: if isOwner(userId);
+      }
+
+      match /stats/{subjectId} {
+        allow list, get: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId) && isValidId(subjectId) && isValidStat(incoming());
+      }
+
+      match /failed_questions/{questionId} {
+        allow list, get: if isOwner(userId) || isAdmin();
+        allow create, delete: if isOwner(userId) && isValidId(questionId) && isValidFailedQuestion(incoming());
+      }
+
+      match /schedules/{scheduleId} {
+        allow list, get: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId) && isValidId(scheduleId) && isValidSchedule(incoming());
+        allow delete: if isOwner(userId);
+      }
+
+      match /trilha/{trilhaId} {
+        allow list, get: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId) && isValidId(trilhaId) && isValidTrilhaProgress(incoming());
+      }
+    }
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["displayName", "email"]
+    },
+    "Session": {
+      "title": "Study Session",
+      "description": "A guided study session for a specific subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "userId": { "type": "string" },
+        "guidedSubject": { "type": "string" },
+        "currentArticle": { "type": "number" },
+        "messages": { "type": "array" },
+        "reviews": { "type": "array" },
+        "lastUpdatedAt": { "type": "number" },
+        "trilhaDay": { "type": "number" },
+        "trilhaMaterialIndex": { "type": "number" },
+        "trilhaSessionType": { "type": "string" }
+      },
+      "required": ["id", "title", "userId"]
+    },
+    "Statistic": {
+      "title": "Subject Statistic",
+      "description": "Accuracy and progress statistics per subject",
+      "type": "object",
+      "properties": {
+        "subjectName": { "type": "string" },
+        "correctAnswers": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "progress": { "type": "number" },
+        "xp": { "type": "number" }
+      }
+    },
+    "Question": {
+      "title": "Question",
+      "description": "A quiz question and its state",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "options": { "type": "array" },
+        "correctIndex": { "type": "number" },
+        "explanation": { "type": "string" },
+        "subject": { "type": "string" },
+        "originalArticle": { "type": "number" },
+        "timestamp": { "type": "number" }
+      }
+    },
+    "Schedule": {
+      "title": "Study Schedule",
+      "description": "A generated study schedule from an edital analysis",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "raioX": { "type": "array" },
+        "cronograma": { "type": "array" },
+        "createdAt": { "type": "number" }
+      }
+    },
+    "Gamification": {
+      "title": "Gamification Status",
+      "description": "User XP, level, and streak",
+      "type": "object",
+      "properties": {
+        "totalXP": { "type": "number" },
+        "level": { "type": "number" },
+        "streak": { "type": "number" },
+        "lastActive": { "type": "number" }
+      }
+    },
+    "TrilhaProgress": {
+      "title": "Trilha 98 Dias Progress",
+      "description": "Completed days list in Trilha Jurídica",
+      "type": "object",
+      "properties": {
+        "completedDays": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User metadata"
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Chat sessions and progress history"
+    },
+    "/users/{userId}/stats/{subjectId}": {
+      "schema": "Statistic",
+      "description": "User performance stats"
+    },
+    "/users/{userId}/failed_questions/{questionId}": {
+      "schema": "Question",
+      "description": "Questions the user answered incorrectly"
+    },
+    "/users/{userId}/schedules/{scheduleId}": {
+      "schema": "Schedule",
+      "description": "Saved study schedules"
+    },
+    "/users/{userId}/gamification/{statusId}": {
+      "schema": "Gamification",
+      "description": "User gamification data"
+    },
+    "/users/{userId}/trilha/{trilhaId}": {
+      "schema": "TrilhaProgress",
+      "description": "Trilha Jurídica completed days list"
+    }
+  }
+}

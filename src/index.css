@@ -1,0 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", serif;
+  
+  --color-brand-gold: #d4af37;
+  --color-brand-emerald: #064e3b;
+  --color-brand-paper: #f8f5f2;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-50 font-sans antialiased;
+  }
+}
+
+.athena-gradient {
+  background: radial-gradient(circle at top right, rgba(212, 175, 55, 0.1), transparent),
+              radial-gradient(circle at bottom left, rgba(6, 78, 59, 0.15), transparent);
+}
+
+.markdown-body {
+  @apply space-y-4 text-slate-300;
+}
+
+.markdown-body h1 { @apply text-2xl font-serif font-bold text-brand-gold border-b border-brand-gold/20 pb-2 mb-4; }
+.markdown-body h2 { @apply text-xl font-serif font-semibold text-brand-gold mt-8 mb-2 flex items-center gap-2; }
+.markdown-body h2::before { content: ""; @apply w-1 h-6 bg-brand-gold rounded-full inline-block; }
+.markdown-body p { @apply leading-relaxed; }
+.markdown-body ul { @apply list-disc list-outside ml-5 space-y-2; }
+.markdown-body strong { @apply text-slate-100 font-semibold; }
+.markdown-body blockquote { 
+  @apply bg-brand-gold/5 border-l-4 border-brand-gold p-4 rounded-r-xl italic font-serif text-slate-200 my-6;
+}
+
+/* Specific styling for the 'Desafio' section */
+.markdown-body h2:has(+ p:contains('Desafio')), 
+.markdown-body h2:contains('Desafio') {
+  @apply text-emerald-400;
+}
+.markdown-body h2:contains('Desafio')::before {
+  @apply bg-emerald-400;
+}
+
+/* Gabarito hidden style using details */
+.markdown-body details {
+  @apply mt-4 p-4 bg-slate-800/50 rounded-xl border border-white/5 cursor-pointer hover:bg-slate-800 transition-all;
+}
+.markdown-body summary {
+  @apply font-bold text-xs uppercase tracking-widest text-slate-500 outline-none;
+}
+
+.markdown-body code {
+  @apply bg-slate-800 text-brand-gold px-1.5 py-0.5 rounded font-mono text-sm border border-white/10;
+}
+
+/* Custom Scrollbar for the Sidebar Article Grid and general lists */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.25);
+  border-radius: 10px;
+  border: 1.5px solid rgba(15, 23, 42, 0.6);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.5);
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.3);
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.8);
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.55);
+}
+
+/* Hide horizontal scrollbars for carousels while keeping scrolling active */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}

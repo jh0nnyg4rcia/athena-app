@@ -1,0 +1,64 @@
+name: Build ATHENA Android (APK e AAB)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Instalar Dependências Web
+        run: npm ci
+
+      - name: Compilar Aplicação Web (Vite)
+        run: npm run build
+
+      - name: Sincronizar com Capacitor Android
+        run: npx cap sync android
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configurar Permissão de Execução para o Gradle Wrapper
+        run: chmod +x android/gradlew
+
+      - name: Compilar APK de Teste (Debug)
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Compilar AAB para Google Play (Release Bundle)
+        run: |
+          cd android
+          ./gradlew bundleRelease
+
+      - name: Disponibilizar APK de Teste para Download
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATHENA-app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      - name: Disponibilizar AAB (Google Play) para Download
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATHENA-app-release-bundle
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 14
