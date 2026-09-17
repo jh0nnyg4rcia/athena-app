@@ -1503,11 +1503,14 @@ export default function App() {
   const [user, setUser] = useState<User | any | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [showCeoModal, setShowCeoModal] = useState(false);
+  const [ceoPinInput, setCeoPinInput] = useState('');
+  const [ceoPinError, setCeoPinError] = useState<string | null>(null);
 
   const handleLoginAsCEO = () => {
     const ceoUser = {
       uid: 'jhonny-spider-ceo',
-      displayName: 'Jhonny',
+      displayName: 'Jhonny (CEO)',
       email: 'jhonny.spider@gmail.com',
       photoURL: '',
       emailVerified: true
@@ -1517,11 +1520,23 @@ export default function App() {
     setAuthError(null);
   };
 
+  const handleVerifyCeoPin = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (ceoPinInput.trim() === '7777') {
+      handleLoginAsCEO();
+      setShowCeoModal(false);
+      setCeoPinInput('');
+      setCeoPinError(null);
+    } else {
+      setCeoPinError('PIN de segurança incorreto. Acesso exclusivo ao Administrador.');
+    }
+  };
+
   const handleLoginAsGuest = () => {
     const guestUser = {
-      uid: 'aluno-visitante',
-      displayName: 'Aluno Visitante',
-      email: 'aluno@athena.local',
+      uid: `aluno-${Date.now()}`,
+      displayName: 'Aluno(a) ATHENA',
+      email: 'aluno@athena.app',
       photoURL: '',
       emailVerified: false
     };
@@ -1537,11 +1552,13 @@ export default function App() {
     } catch (err: any) {
       console.warn("Erro ao fazer login com Google:", err);
       if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
-        setAuthError("O domínio localhost:3000 não está autorizado no Firebase do Google AI Studio. Utilize o botão 'Acessar como Mestre / CEO' para navegar normalmente com acesso total.");
+        setAuthError("Domínio não autorizado no Firebase. Para testar imediatamente no celular ou navegador, clique em 'Entrar como Aluno'.");
       } else if (err?.code === 'auth/popup-closed-by-user') {
-        setAuthError("A janela do Google foi fechada antes de concluir o login. Se estiver no localhost, utilize o botão 'Acessar como Mestre / CEO'.");
+        setAuthError("A janela do Google foi fechada antes de concluir o login.");
+      } else if (isNativeMobile() || err?.code === 'auth/operation-not-supported-in-this-environment') {
+        setAuthError("O Google Sign-In no Android exige certificado SHA-1 no Firebase Console. Para testar o app agora mesmo com 7 dias de acesso grátis, clique em 'Entrar como Aluno' abaixo.");
       } else {
-        setAuthError(err?.message || "Não foi possível conectar com o Google. Use o acesso local abaixo.");
+        setAuthError(err?.message || "Não foi possível conectar com o Google no momento. Utilize o acesso de Aluno abaixo.");
       }
     }
   };
@@ -3423,11 +3440,9 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               }
 
               try {
-                const history = updatedMessages.slice(0, -1).map(m => ({
-                  role: m.role,
-                  parts: [{ text: m.content }]
-                }));
-                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
+                // Cada parte da trilha possui comando autocontido com escopo exato.
+                // Usamos histórico limpo ([]), idêntico ao prefetch, para máxima agilidade e sem poluição de contexto.
+                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
                 const parsed = parseATHENAResponse(responseText);
                 const botMessage: Message = {
                   role: 'model',
@@ -4426,15 +4441,86 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                     <span>Entrar com Conta Google</span>
                   </button>
 
+                  {/* Acesso para Estudantes e Testadores (Trial 7 Dias) */}
+                  <button 
+                    onClick={handleLoginAsGuest}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-brand-gold/30 hover:border-brand-gold/60 font-bold uppercase tracking-wider text-[11px] rounded-2xl shadow-lg transition-all active:scale-95 cursor-pointer"
+                  >
+                    <Sparkles size={15} className="text-brand-gold" />
+                    <span>Entrar como Aluno (7 Dias Grátis)</span>
+                  </button>
+
                   <div className="pt-2 text-center">
                     <button 
-                      onClick={handleLoginAsCEO}
-                      className="text-[10px] text-slate-500 hover:text-brand-gold underline uppercase tracking-widest transition-colors cursor-pointer"
+                      onClick={() => {
+                        setShowCeoModal(true);
+                        setCeoPinError(null);
+                        setCeoPinInput('');
+                      }}
+                      className="text-[10px] text-slate-600 hover:text-brand-gold uppercase tracking-widest transition-colors cursor-pointer inline-flex items-center gap-1.5"
                     >
-                      Acesso Homologação CEO (jhonny.spider@gmail.com)
+                      <Lock size={11} />
+                      <span>Acesso Mestre (Restrito ao Administrador)</span>
                     </button>
                   </div>
                 </div>
+
+                {/* Modal Seguro de Validação do PIN Mestre para CEO */}
+                {showCeoModal && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                    <div className="w-full max-w-sm bg-slate-900 border border-brand-gold/40 rounded-3xl p-6 shadow-2xl space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-brand-gold">
+                          <Lock size={18} />
+                          <h3 className="font-serif font-bold text-sm text-slate-100">Acesso Restrito CEO</h3>
+                        </div>
+                        <button 
+                          onClick={() => setShowCeoModal(false)}
+                          className="text-slate-400 hover:text-white p-1 rounded-lg"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Insira o PIN Mestre de Segurança para autenticar como <span className="text-brand-gold font-mono font-bold">jhonny.spider@gmail.com</span>:
+                      </p>
+
+                      <form onSubmit={handleVerifyCeoPin} className="space-y-4">
+                        <div>
+                          <input
+                            type="password"
+                            maxLength={6}
+                            value={ceoPinInput}
+                            onChange={(e) => setCeoPinInput(e.target.value)}
+                            placeholder="Digite o PIN Mestre (ex: 7777)"
+                            autoFocus
+                            className="w-full px-4 py-3 bg-slate-950 border border-slate-700 focus:border-brand-gold rounded-xl text-center text-lg tracking-widest text-slate-100 outline-none transition-colors"
+                          />
+                          {ceoPinError && (
+                            <p className="text-[11px] text-rose-400 mt-2 text-center font-medium">{ceoPinError}</p>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowCeoModal(false)}
+                            className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="submit"
+                            className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
+                          >
+                            Validar PIN
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             ) : activeTab === 'stats' ? (
               <motion.div

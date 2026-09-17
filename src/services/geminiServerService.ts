@@ -196,7 +196,7 @@ DIRETRIZES DE RESPOSTA (FLUXO OBRIGATÓRIO DE 6 BLOCOS):
 Você DEVE estruturar sua resposta exatamente em 6 blocos, utilizando os marcadores [BLOCK_1] a [BLOCK_6] para permitir a entrega faseada no app.
 
 [BLOCK_1] (👋 Saudação e Introdução): Saudação cordial e breve contextualização da importância deste artigo/tema para o concurso almejado.
-[BLOCK_2] (⚖️ Letra da Lei e Análise Normativa Exaustiva): Transcrição e análise normativa da Legislação Pertinente (Lei Seca). REGRA ESTRITA DE ESCOPO: Se o comando/tema delimita um intervalo de artigos (ex: "art. 1º ao 12", "art. 1º ao 4º"), você DEVE obrigatoriamente apresentar a íntegra de TODOS os artigos do intervalo, sem qualquer exceção, seleção parcial ou corte sintético. É TERMINANTEMENTE PROIBIDO omitir ou resumir artigos (ex: jamais utilize notas como "[...artigos omitidos...]"). Cada um dos artigos delimitados deve ser apresentado com seu caput, parágrafos e incisos pertinentes, acompanhado da decodificação de seus núcleos normativos, requisitos legais, prazos, competências e pegadinhas clássicas de banca examinadora.
+[BLOCK_2] (⚖️ Letra da Lei e Análise Normativa Exaustiva): Decodificação e análise normativa da Legislação Pertinente (Lei Seca). Se o comando delimitar um intervalo de artigos (ex: "art. 1º ao 12", "art. 1º ao 4º"), você DEVE obrigatoriamente examinar e explicar TODOS os artigos do intervalo delimitado, sem omitir nenhum dispositivo. Para cada um dos artigos delimitados, apresente uma análise pedagógica autoral profunda (caput, parágrafos e incisos pertinentes), dissecando seus núcleos normativos, requisitos legais, prazos, sanções, competências, exceções e pegadinhas clássicas de banca examinadora.
 [BLOCK_3] (🏛️ Jurisprudência e Súmulas): Explicação monumental e absolutamente exaustiva de súmulas e entendimentos do STF/STJ. É expressamente proibido fazer citações superficiais ou apenas listar números de súmulas. Você DEVE detalhar a **ratio decidendi** (fundamento determinante), os argumentos jurídicos vencedores e vencidos de cada julgado importante, e a contextualização fática do conflito originário. Explore teses de Repercussão Geral, Recursos Repetitivos e Informativos com a **máxima densidade possível para estudos de 2ª fase** (provas discursivas), de modo que o candidato domine a evolução histórica, o "porquê" da tomada de decisão e consiga discorrer tecnicamente fundamentando peças processuais e sentenças complexas com rigor acadêmico máximo.
 [BLOCK_4] (📖 Doutrina de Alto Nível): Explicação doutrinária EXAUSTIVA, VERTICALIZADA e PASSO A PASSO até esgotar o tema. Este bloco deve ser o "Curso Completo" do aluno, gerado com a **máxima densidade e profundidade possíveis para estudos de 2ª fase (subjetivos/escritos)**. Aborde detalhadamente:
    - Natureza jurídica, conceitos fundamentais e classificações jurídicas detalhadas.
@@ -277,13 +277,11 @@ export async function askATHENA(
   const targetTemp = 0.25;
 
   // Model Tiering:
-  // Para geração dos 6 blocos, quizzes objetivos e navegação diária, priorizamos gemini-2.5-flash:
-  // - Latência de resposta ultra-baixa (3 a 5 segundos)
-  // - Custo operacional ~90% mais baixo
-  // - Elevadíssima precisão na transcrição e formulação de perguntas
+  // Priorizamos gemini-flash-latest e gemini-2.5-flash com fallback de alta velocidade para flash-lite
   const modelAttempts = [
     { model: "gemini-flash-latest", useThinking: false },
-    { model: "gemini-3.8-flash", useThinking: false }
+    { model: "gemini-2.5-flash", useThinking: false },
+    { model: "gemini-flash-lite-latest", useThinking: false }
   ];
 
   let lastError: any = null;
