@@ -204,7 +204,7 @@ async function askATHENADirectClient(
       console.log(`[ATHENA Mobile REST] Solicitando modelo: ${attempt.model}...`);
       const text = await callGeminiREST(attempt.model, contents, systemInstruction, attempt.timeout);
       console.log(`[ATHENA Mobile REST] Resposta gerada com sucesso via ${attempt.model} (${text.length} chars)`);
-      return text;
+      return { text, model: attempt.model };
     } catch (err: any) {
       console.warn(`[ATHENA Mobile REST] Falha no modelo ${attempt.model}:`, err?.message || err);
       lastError = err;
@@ -316,6 +316,72 @@ Forneça sua correção detalhada em formato markdown elegante contendo sugestõ
  * (se estiver rodando em desenvolvimento no PC) e a execução direta do cliente
  * (essencial no smartphone Android com o APK instalado).
  */
+export interface AthenaResult {
+  text: string;
+  model: string;
+}
+
+export interface GeminiConnectionTestResult {
+  success: boolean;
+  model: string;
+  latencyMs: number;
+  message: string;
+  apiKeyPreview: string;
+}
+
+/**
+ * Executa um ping de diagnóstico rápido para testar a comunicação direta
+ * com a API do Google Gemini a partir do dispositivo móvel ou browser.
+ */
+export async function testGeminiConnection(): Promise<GeminiConnectionTestResult> {
+  const start = Date.now();
+  const apiKey = getGeminiApiKey();
+  const apiKeyPreview = apiKey ? `${apiKey.substring(0, 8)}...${apiKey.substring(apiKey.length - 4)}` : "Não encontrada";
+  
+  if (!apiKey) {
+    return {
+      success: false,
+      model: "Nenhum",
+      latencyMs: 0,
+      message: "Chave da API Gemini não configurada no aplicativo.",
+      apiKeyPreview
+    };
+  }
+
+  const modelAttempts = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
+  let lastErr: any = null;
+
+  for (const model of modelAttempts) {
+    try {
+      const text = await callGeminiREST(
+        model,
+        [{ role: 'user', parts: [{ text: 'Responda estritamente: ATHENA IA CONECTADA.' }] }],
+        undefined,
+        15000
+      );
+      const latencyMs = Date.now() - start;
+      return {
+        success: true,
+        model,
+        latencyMs,
+        message: text.trim(),
+        apiKeyPreview
+      };
+    } catch (err: any) {
+      lastErr = err;
+    }
+  }
+
+  const latencyMs = Date.now() - start;
+  return {
+    success: false,
+    model: modelAttempts[0],
+    latencyMs,
+    message: lastErr?.message || lastErr?.toString() || "Falha ao conectar com os servidores Gemini.",
+    apiKeyPreview
+  };
+}
+
 export async function askATHENA(
   message: string, 
   history: any[] = [], 
@@ -323,9 +389,9 @@ export async function askATHENA(
   file?: { mimeType: string, data: string },
   mentorshipStyle: 'teorico' | 'jurisprudente' | 'pratico' | 'automatico' = 'teorico',
   mentorshipPhase: 'objetiva' | 'subjetiva' | 'oral' = 'objetiva'
-): Promise<string> {
+): Promise<AthenaResult> {
   // Se estiver em dispositivo móvel (Capacitor) ou se não houver backend remoto configurado,
-  // chama diretamente o Gemini SDK no cliente para resposta imediata sem depender de servidor Node.
+  // chama diretamente a API REST no cliente para resposta imediata sem depender de servidor Node.
   const remoteUrl = import.meta.env.VITE_API_URL;
   if (isNativeMobile() || !remoteUrl) {
     console.log("[ATHENA] Executando Gemini diretamente no dispositivo móvel...");
@@ -350,7 +416,7 @@ export async function askATHENA(
       throw new Error(errData.error || `Erro de conexão HTTP: ${response.status}`);
     }
     const data = await response.json();
-    return data.responseText;
+    return { text: data.responseText, model: data.model || 'gemini-flash-latest' };
   } catch (error: any) {
     console.warn("[ATHENA] Backend indisponível, acionando execução cliente direta do Gemini:", error?.message);
     return askATHENADirectClient(message, history, userName, file, mentorshipStyle, mentorshipPhase);

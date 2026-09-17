@@ -49,11 +49,12 @@ import {
   AlertTriangle,
   Cpu,
   Key,
-  Check
+  Check,
+  Activity
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile } from './services/geminiService';
+import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile, testGeminiConnection, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
 import { clsx, type ClassValue } from 'clsx';
@@ -111,6 +112,8 @@ interface Message {
     finalScore?: number;
     feedback?: string;
   }>;
+  sourceType?: 'gemini' | 'offline_pareto';
+  modelName?: string;
 }
 
 const getIsInstructionMessage = (msg: Message): boolean => {
@@ -1153,6 +1156,22 @@ const ChatMessage = memo(({
         )}
         
         <div className="space-y-8">
+          {!isUser && !isError && (
+            <div className="flex items-center gap-2 -mt-1 -mb-3">
+              {(msg.sourceType === 'offline_pareto' || msg.content?.includes("Modo de Alta Disponibilidade Local Ativado (Pareto 80/20)")) ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[10px] font-mono text-amber-300 shadow-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  <span>Modo Offline • Material Compilado (Pareto 80/20)</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-mono text-emerald-400 shadow-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Gerado via IA Gemini ({msg.modelName || 'gemini-flash-latest'})</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {!isUser && msg.blocks ? (
             <>
               {msg.blocks.slice(0, (msg.currentBlockIndex ?? 0) + 1).map((block, blockIdx) => (
@@ -1653,6 +1672,27 @@ export default function App() {
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
   const [customApiKeyInput, setCustomApiKeyInput] = useState(() => getGeminiApiKey());
   const [keySaveSuccess, setKeySaveSuccess] = useState(false);
+  const [testAiLoading, setTestAiLoading] = useState(false);
+  const [testAiResult, setTestAiResult] = useState<GeminiConnectionTestResult | null>(null);
+
+  const handleTestGeminiConnection = async () => {
+    setTestAiLoading(true);
+    setTestAiResult(null);
+    try {
+      const res = await testGeminiConnection();
+      setTestAiResult(res);
+    } catch (err: any) {
+      setTestAiResult({
+        success: false,
+        model: "Falha Geral",
+        latencyMs: 0,
+        message: err?.message || err?.toString() || "Erro desconhecido ao testar conexão.",
+        apiKeyPreview: ""
+      });
+    } finally {
+      setTestAiLoading(false);
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('athena_mentorship_style', mentorshipStyle);
@@ -2638,7 +2678,7 @@ export default function App() {
         parts: [{ text: m.content || "" }]
       }));
 
-      const responseText = await askATHENA(userMessage, history, user?.displayName || "Mestre", currentAttachedFile, mentorshipStyle, resolvedPhase);
+      const { text: responseText, model: usedModel } = await askATHENA(userMessage, history, user?.displayName || "Mestre", currentAttachedFile, mentorshipStyle, resolvedPhase);
       const parsed = parseATHENAResponse(responseText);
 
       const botMessage: Message = {
@@ -2649,7 +2689,9 @@ export default function App() {
         blocks: parsed.blocks,
         currentBlockIndex: 0,
         subject: activeSubject,
-        article: activeArticle
+        article: activeArticle,
+        sourceType: 'gemini',
+        modelName: usedModel
       };
 
       setMessages(prev => [...prev, botMessage]);
@@ -2847,7 +2889,9 @@ ${matList}
             blocks: parsed.blocks,
             currentBlockIndex: 0,
             subject: activeSubject,
-            article: activeArticle
+            article: activeArticle,
+            sourceType: 'offline_pareto',
+            modelName: 'Material Local Pareto 80/20'
           };
           setMessages(prev => [...prev, botMessage]);
 
@@ -3255,7 +3299,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   resolvedPhase = 'objetiva';
                 }
               }
-              const responseText = await askATHENA(nextMsg, history, user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
+              const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
               const parsed = parseATHENAResponse(responseText);
               const botMessage: Message = {
                 role: 'model',
@@ -3264,7 +3308,9 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 blocks: parsed.blocks,
                 currentBlockIndex: 0,
                 subject: nextMat.nome,
-                article: 1
+                article: 1,
+                sourceType: 'gemini',
+                modelName: usedModel
               };
               
               const finalMessages = [...updatedMessages, botMessage];
@@ -3424,7 +3470,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 resolvedPhase = 'objetiva';
               }
             }
-            const responseText = await askATHENA(nextMsg, history, user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
+            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
             const parsed = parseATHENAResponse(responseText);
             const botMessage: Message = {
               role: 'model',
@@ -3433,7 +3479,9 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               blocks: parsed.blocks,
               currentBlockIndex: 0,
               subject: nextMat.nome,
-              article: 1
+              article: 1,
+              sourceType: 'gemini',
+              modelName: usedModel
             };
             
             const finalMessages = [...updatedMessages, botMessage];
@@ -3646,11 +3694,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             {/* Botão de Configurações de IA */}
             <button
               onClick={() => setIsAiSettingsOpen(true)}
-              className="px-2.5 py-1.5 text-brand-gold hover:text-white transition-all rounded-xl bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/25 flex items-center gap-1.5 active:scale-95 text-[11px] font-bold cursor-pointer"
-              title="Configurações do Cérebro Gemini AI"
+              className="px-2.5 py-1.5 text-brand-gold hover:text-white transition-all rounded-xl bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/25 flex items-center gap-1.5 active:scale-95 text-[10px] font-bold cursor-pointer shadow-sm"
+              title="Status e Diagnóstico da IA Gemini"
             >
               <Cpu size={14} className="animate-pulse text-brand-gold shrink-0" />
-              <span className="hidden sm:inline font-mono text-[10px] tracking-wider uppercase">Cérebro IA</span>
+              <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">IA Status</span>
             </button>
 
            {user && (
@@ -5759,8 +5807,47 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                 </div>
                 <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  gemini-3.6-flash (Latência Ultrabaixa)
+                  gemini-flash-latest (Alta Velocidade)
                 </span>
+              </div>
+
+              {/* Diagnóstico de Conexão ao Vivo */}
+              <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-white/10 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-slate-200">
+                    <Activity size={14} className="text-brand-gold" />
+                    <span className="text-xs font-bold">Diagnóstico de Conexão IA</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTestGeminiConnection}
+                    disabled={testAiLoading}
+                    className="px-2.5 py-1 bg-brand-gold/15 hover:bg-brand-gold/30 text-brand-gold border border-brand-gold/30 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <RotateCw size={11} className={testAiLoading ? "animate-spin" : ""} />
+                    <span>{testAiLoading ? "Testando..." : "Testar Conexão"}</span>
+                  </button>
+                </div>
+
+                {testAiResult && (
+                  <div className={`p-2.5 rounded-xl border text-xs font-mono ${
+                    testAiResult.success 
+                      ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' 
+                      : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
+                  }`}>
+                    <div className="flex items-center justify-between font-bold text-[11px] mb-1">
+                      <span>{testAiResult.success ? "✓ Conectado ao Google Gemini" : "✕ Falha na Comunicação"}</span>
+                      {testAiResult.latencyMs > 0 && (
+                        <span className="text-[10px] text-slate-400 font-normal">{testAiResult.latencyMs}ms</span>
+                      )}
+                    </div>
+                    <div className="text-[10px] space-y-0.5 text-slate-300">
+                      <p><span className="text-slate-400">Modelo:</span> {testAiResult.model}</p>
+                      <p><span className="text-slate-400">Chave:</span> {testAiResult.apiKeyPreview}</p>
+                      <p><span className="text-slate-400">Retorno:</span> {testAiResult.message}</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

@@ -102,6 +102,8 @@ export interface Message {
     finalScore?: number;
     feedback?: string;
   }>;
+  sourceType?: 'gemini' | 'offline_pareto';
+  modelName?: string;
 }
 
 export interface ChatSession {
