@@ -58,7 +58,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile, testGeminiConnection, type GeminiConnectionTestResult } from './services/geminiService';
+import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
@@ -1853,6 +1853,7 @@ export default function App() {
   const [keySaveSuccess, setKeySaveSuccess] = useState(false);
   const [testAiLoading, setTestAiLoading] = useState(false);
   const [testAiResult, setTestAiResult] = useState<GeminiConnectionTestResult | null>(null);
+  const [selectedAiModel, setSelectedAiModel] = useState<string>(() => getSelectedModel());
 
   const handleTestGeminiConnection = async () => {
     setTestAiLoading(true);
@@ -3332,9 +3333,8 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
          • Tribunal e Colegiado: (ex: "Superior Tribunal de Justiça — STJ, Corte Especial / 3ª Turma", "Supremo Tribunal Federal — STF, Plenário")
          • Tese Fixada / Ratio Decidendi: A tese jurídica exata e seus fundamentos determinantes.
          • Fundamento Legal: O artigo deste recorte (${currentMat.conteudo}) com o qual se relaciona.
-         • Identificação: Se o número exato do acórdão/tema NÃO constar na base minerada fornecida abaixo, NUNCA invente números! Identifique como "Precedente consolidado do STJ/STF".
-       - REGRA DE OURO PARA SÚMULAS: Jamais arrisque ou troque números de súmulas. Só cite o NÚMERO se constar da base minerada fornecida ou se for súmula notória e incontroversa (ex: Súmula Vinculante 13 do STF, Súmula 375 do STJ). Em qualquer dúvida, enuncie o conteúdo sem número: "Em enunciado sumular consolidado do STJ/STF, pacificou-se a orientação de que...".
-     * Cada precedente citado deve indicar explicitamente o artigo deste recorte (${currentMat.conteudo}) com o qual se relaciona e sua ratio decidendi.
+        - PROIBIÇÃO CATEGÓRICA DE NÚMEROS DE SÚMULAS NÃO FORNECIDOS NO MATERIAL MINERADO: É terminantemente proibido citar o numeral ordinal de qualquer súmula do STF ou STJ (ex: "Súmula nº 123"), A MENOS QUE o número conste de forma expressa e literal na base de grounding/material minerado fornecido abaixo nesta mensagem. Se o número não constar expressamente no texto minerado abaixo, você DEVE OBRIGATORIAMENTE apresentar o entendimento como tese jurídica sem número, enunciando exclusivamente: "Em tese sumular consolidada do Superior Tribunal de Justiça (STJ), firmou-se a orientação de que..." ou "Consoante enunciado sumular do Supremo Tribunal Federal (STF)...". Jamais invente ou troque números de súmulas!
+      * Cada precedente citado deve indicar explicitamente o artigo deste recorte (${currentMat.conteudo}) com o qual se relaciona e sua ratio decidendi.
    
    - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase) estritamente circunscrita aos institutos disciplinados em ${currentMat.conteudo}. Traga divergências doutrinárias reais e exemplos práticos da atividade forense que ilustrem exatamente os artigos estudados hoje.
    
@@ -6784,17 +6784,61 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
             </div>
 
             <div className="space-y-4">
-              <div className="p-3 bg-slate-950/60 rounded-2xl border border-white/5 space-y-1.5">
+              <div className="p-3.5 bg-slate-950/60 rounded-2xl border border-white/5 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Modelo Ativo</span>
-                  <span className="text-[9px] font-mono uppercase bg-brand-gold/10 text-brand-gold px-2 py-0.5 rounded border border-brand-gold/20">
-                    {isNativeMobile() ? 'Nativo Móvel' : 'Web Resiliente'}
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cérebro IA Oficial</span>
+                  <span className="text-[9px] font-mono uppercase bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-bold">
+                    Temp: 0.10 (Anti-Alucinação)
                   </span>
                 </div>
-                <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  gemini-3.5-flash-lite (Alta Velocidade)
-                </span>
+                
+                {/* Seletor Visual de Modelo Oficial 2026 */}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedModel('gemini-3.8-flash');
+                      setSelectedAiModel('gemini-3.8-flash');
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      selectedAiModel === 'gemini-3.8-flash'
+                        ? 'bg-brand-gold/15 border-brand-gold/60 text-white shadow-lg'
+                        : 'bg-slate-900/60 border-white/10 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold font-mono">Gemini 3.8 Flash</span>
+                      {selectedAiModel === 'gemini-3.8-flash' && <Check size={12} className="text-brand-gold" />}
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-tight">Padrão Oficial (2.7s) • Alta Precisão & Velocidade</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedModel('gemini-3.1-pro-preview');
+                      setSelectedAiModel('gemini-3.1-pro-preview');
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      selectedAiModel === 'gemini-3.1-pro-preview'
+                        ? 'bg-brand-gold/15 border-brand-gold/60 text-white shadow-lg'
+                        : 'bg-slate-900/60 border-white/10 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold font-mono">Gemini 3.1 Pro</span>
+                      {selectedAiModel === 'gemini-3.1-pro-preview' && <Check size={12} className="text-brand-gold" />}
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-tight">Raciocínio Profundo • Nível Banca / 2ª Fase</p>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                  <span className="text-[9px] text-slate-500">Modo de Execução:</span>
+                  <span className="text-[9px] font-mono text-brand-gold">
+                    {isNativeMobile() ? 'Nativo Android (REST)' : 'Web Resiliente'}
+                  </span>
+                </div>
               </div>
 
               {/* Diagnóstico de Conexão ao Vivo */}

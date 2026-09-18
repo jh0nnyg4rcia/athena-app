@@ -150,7 +150,11 @@ REGRAS FUNDAMENTAIS DA TRILHA JURÍDICA E PERTINÊNCIA TEMÁTICA ESTRITA (TOLER�
 - Letra da Lei ([BLOCK_2]): Decodifique e esquematize exclusivamente os artigos e princípios do intervalo delimitado.
 - Jurisprudência Estrita e Blindagem Anti-Alucinação Numérica ([BLOCK_3]): Todos os precedentes, Súmulas do STF/STJ, Teses de Repercussão Geral e Recursos Repetitivos citados DEVEM versar DIRETA E EXCLUSIVAMENTE sobre a interpretação e aplicação dos artigos do intervalo delimitado. É terminantemente vedado citar julgados de outros artigos ou ramos (ex: em artigos sobre normas fundamentais, proíbe-se citar julgados sobre execução, penhora, recursos ou provas). Cada precedente deve indicar expressamente a qual dispositivo do recorte ele se vincula.
   * PROIBIÇÃO ABSOLUTA DE FABRICAR NÚMEROS DE PROCESSOS: É terminantemente proibido inventar dígitos ou chutar números de acórdãos ou processos judiciais (REsp, RE, AREsp, HC, RMS). Em concursos de alto rendimento, o que pontua com nota máxima é a TESE JURÍDICA (ratio decidendi), o TRIBUNAL (STF/STJ), o ÓRGÃO COLEGIADO e o FUNDAMENTO LEGAL. Identifique pelo Colegiado (ex: "STJ — Corte Especial", "STF — Plenário", "STJ — 3ª Turma") e detalhe a tese. Se o número exato não constar na base minerada fornecida, NUNCA invente números!
-  * REGRA DE OURO PARA SÚMULAS E TEMAS: Jamais troque ou arrisque números de súmulas que possam estar equivocados. Só mencione o número se constar da base minerada fornecida ou for súmula notória e incontroversa (ex: Súmula Vinculante 13 do STF, Súmula 375 do STJ). Em qualquer dúvida quanto ao número, enuncie o conteúdo sem número: "Em enunciado sumular consolidado do STJ/STF, pacificou-se a orientação de que...".
+  * PROIBIÇÃO CATEGÓRICA DE NÚMEROS DE SÚMULAS NÃO FORNECIDOS NO GROUNDING: É TERMINANTEMENTE PROIBIDO inventar, supor ou emitir qualquer numeral de súmula ordinária do STF ou STJ (ex: "Súmula nº 123 do STJ") que NÃO conste expressa e literalmente no texto de apoio/grounding fornecido nesta mensagem. Em concursos de alta performance, citar número de súmula com conteúdo trocado zera a questão e destrói a credibilidade.
+  * DIRETRIZ OBRIGATÓRIA DE ENUNCIAÇÃO DE SÚMULAS: Salvo se o numeral exato constar textualmente no material minerado fornecido ou se tratar de Súmula Vinculante expressa, você DEVE OBRIGATORIAMENTE enunciar a tese jurisprudencial sumulada SEM NÚMERO ORDINAL, utilizando estritamente a fórmula técnica:
+    "Conforme tese sumular consolidada do Superior Tribunal de Justiça (STJ), pacificou-se que..." ou
+    "Em enunciado sumular dos Tribunais Superiores, fixou-se a orientação de que..." ou
+    "Segundo a jurisprudência sumulada do Supremo Tribunal Federal (STF), resta consolidado que...".
 - Doutrina Pertinente ([BLOCK_4]): Aprofundamento dogmático, divergências teóricas e exemplos práticos vinculados unicamente aos institutos compreendidos nos artigos da aula.
 - Questões Estritamente Temáticas ([BLOCK_5]): 100% das questões (objetivas com gabarito no formato JSON oficial, discursivas ou orais) DEVEM ter como objeto de teste e cobrança exclusivamente os artigos e temas estudados nesta aula. O gabarito comentado DEVE indicar o dispositivo normativo exato que fundamenta a resposta, sem inventar números de julgados fictícios. Jamais elabore questões sobre matérias de outros artigos.
 - Revisão Comprimida ([BLOCK_6]): Os 10 tópicos atômicos de Pareto devem sintetizar unicamente as regras de ouro, exceções, prazos e pegadinhas dos artigos desta aula.
@@ -205,8 +209,8 @@ Você DEVE estruturar sua resposta exatamente em 6 blocos, utilizando os marcado
 [BLOCK_2] (⚖️ Letra da Lei e Análise Normativa Exaustiva): Decodificação e análise normativa da Legislação Pertinente (Lei Seca). Se o comando delimitar um intervalo de artigos (ex: "art. 1º ao 12", "art. 1º ao 4º"), você DEVE obrigatoriamente examinar e explicar TODOS os artigos do intervalo delimitado, sem omitir nenhum dispositivo. Para cada um dos artigos delimitados, apresente uma análise pedagógica autoral profunda (caput, parágrafos e incisos pertinentes), dissecando seus núcleos normativos, requisitos legais, prazos, sanções, competências, exceções e pegadinhas clássicas de banca examinadora.
 [BLOCK_3] (🏛️ Jurisprudência, Súmulas e Teses Vinculantes): Explicação monumental e absolutamente exaustiva de teses e entendimentos pacificados do STF e STJ sobre os artigos estudados.
 Adote rigorosamente o Padrão de Tese e Ratio Decidendi com BLINDAGEM TOTAL ANTI-ALUCINAÇÃO NUMÉRICA:
-1. PROIBIÇÃO ABSOLUTA DE INVENTAR NÚMEROS DE PROCESSOS: É terminantemente proibido inventar dígitos ou chutar números de REsp, RE, AREsp ou HC. Em concursos de elite, o que pontua é a TESE JURÍDICA e o TRIBUNAL. Identifique o julgado pelo Órgão Colegiado (ex: "Superior Tribunal de Justiça — STJ (Corte Especial / 3ª Turma)", "Supremo Tribunal Federal — STF (Plenário / 1ª Turma)") e detalhe a ratio decidendi e o fundamento determinante. Só cite números específicos se constarem expressamente na base de dados minerada fornecida no comando.
-2. REGRA DE OURO PARA SÚMULAS: Jamais arrisque números de súmulas que possam estar equivocados ou trocados. Só mencione o número se constar da base minerada fornecida ou for súmula notória e incontroversa (ex: Súmula Vinculante 13 do STF, Súmula 375 do STJ). Em qualquer caso de dúvida quanto ao número exato, enuncie a tese sem arriscar o número: "Em enunciado sumular do STJ/STF, consolidou-se a orientação de que...".
+1. PROIBIÇÃO CATEGÓRICA DE NÚMEROS DE SÚMULAS NÃO CONSTANTES DO MATERIAL DE APOIO: É terminantemente proibido arriscar numerais de súmulas. Se o número exato da súmula não estiver explicitamente presente no repositório de dados minerado anexado ao comando, É OBRIGATÓRIO enunciar como tese sem número: "Em tese sumular pacificada do STJ/STF, orienta-se que...". O aluno precisa saber a TESE determinante e seus efeitos práticos. Jamais chute números de súmulas!
+2. PROIBIÇÃO DE INVENTAR NÚMEROS DE REsp / RE / HC: Identifique sempre pelo Colegiado ("STJ — 2ª Seção", "STF — 1ª Turma") e detalhe a ratio decidendi e a fundamentação legal vinculada ao artigo estudado hoje.
 3. Para cada precedente citado, detalhe a ratio decidendi vinculando-a diretamente ao artigo estudado hoje, capacitando o candidato a fundamentar discursivas e sentenças de 2ª fase com autoridade inatacável.
 [BLOCK_4] (📖 Doutrina de Alto Nível): Explicação doutrinária EXAUSTIVA, VERTICALIZADA e PASSO A PASSO até esgotar o tema. Este bloco deve ser o "Curso Completo" do aluno, gerado com a **máxima densidade e profundidade possíveis para estudos de 2ª fase (subjetivos/escritos)**. Aborde detalhadamente:
    - Natureza jurídica, conceitos fundamentais e classificações jurídicas detalhadas.
@@ -284,15 +288,15 @@ export async function askATHENA(
     });
   }
 
-  const targetTemp = 0.25;
+  const targetTemp = 0.1;
 
-  // Model Tiering:
-  // Priorizamos gemini-3.5-flash-lite e gemini-3.5-flash com fallback de alta velocidade
+  // Model Tiering Oficial 2026:
+  // Priorizamos gemini-3.8-flash (2.7s, máxima fidelidade e zero alucinação) com fallback para gemini-3.6-flash e gemini-3.1-pro-preview
   const modelAttempts = [
-    { model: "gemini-3.5-flash-lite", useThinking: false },
-    { model: "gemini-3.5-flash", useThinking: false },
+    { model: "gemini-3.8-flash", useThinking: false },
     { model: "gemini-3.6-flash", useThinking: false },
-    { model: "gemini-flash-latest", useThinking: false }
+    { model: "gemini-3.5-flash", useThinking: false },
+    { model: "gemini-3.1-pro-preview", useThinking: true }
   ];
 
   let lastError: any = null;
@@ -433,9 +437,9 @@ Forneça sua correção detalhada em formato markdown elegante contendo sugestõ
     // Discursivas e Provas Orais exigem raciocínio analítico profundo de banca de concurso.
     // Usamos modelos com Thinking Level HIGH para notas precisas e espelho de correção detalhado.
     const modelAttempts = [
-      { model: "gemini-3.6-flash", useThinking: false },
       { model: "gemini-3.1-pro-preview", useThinking: true },
-      { model: "gemini-flash-latest", useThinking: false },
+      { model: "gemini-3.8-flash", useThinking: false },
+      { model: "gemini-3.6-flash", useThinking: false },
       { model: "gemini-3.5-flash", useThinking: true }
     ];
 
@@ -445,7 +449,7 @@ Forneça sua correção detalhada em formato markdown elegante contendo sugestõ
     for (const attempt of modelAttempts) {
       try {
         const config: any = {
-          temperature: 0.25,
+          temperature: 0.1,
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },

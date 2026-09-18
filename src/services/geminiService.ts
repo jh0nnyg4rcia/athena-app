@@ -61,6 +61,28 @@ export const setCustomApiKey = (key: string) => {
 };
 
 /**
+ * Gerenciamento do Modelo de IA Ativo:
+ * Permite ao usuário/CEO alternar entre Gemini 3.8 Flash (Padrão 2.7s) e Gemini 3.1 Pro (Deep Thinking)
+ */
+export const getSelectedModel = (): string => {
+  try {
+    const saved = localStorage.getItem('athena_selected_model');
+    if (saved && (saved === 'gemini-3.8-flash' || saved === 'gemini-3.1-pro-preview' || saved === 'gemini-3.6-flash')) {
+      return saved;
+    }
+  } catch {}
+  return 'gemini-3.8-flash';
+};
+
+export const setSelectedModel = (model: string) => {
+  try {
+    localStorage.setItem('athena_selected_model', model);
+  } catch (e) {
+    console.warn("Não foi possível salvar o modelo no armazenamento local:", e);
+  }
+};
+
+/**
  * Detecta se a aplicação está rodando nativamente dentro do Capacitor (Android / iOS)
  */
 export const isNativeMobile = (): boolean => {
@@ -129,7 +151,8 @@ async function callGeminiREST(
   const bodyPayload: any = {
     contents,
     generationConfig: {
-      temperature: 0.25
+      temperature: 0.1,
+      topP: 0.8
     },
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
@@ -208,13 +231,19 @@ async function askATHENADirectClient(
     });
   }
 
-  // Hierarquia resiliente com os modelos oficiais do Google Gemini
-  const modelAttempts = [
-    { model: "gemini-3.5-flash-lite", timeout: 45000 },
-    { model: "gemini-3.5-flash", timeout: 50000 },
+  // Hierarquia resiliente com os modelos oficiais do Google Gemini 2026
+  const activeModel = getSelectedModel();
+  const rawList = [
+    { model: activeModel, timeout: activeModel.includes('pro') ? 65000 : 45000 },
+    { model: "gemini-3.8-flash", timeout: 45000 },
     { model: "gemini-3.6-flash", timeout: 50000 },
-    { model: "gemini-flash-latest", timeout: 45000 }
+    { model: "gemini-3.5-flash", timeout: 50000 },
+    { model: "gemini-3.1-pro-preview", timeout: 65000 }
   ];
+  // Elimina duplicidades preservando a prioridade do modelo ativo escolhido
+  const modelAttempts = rawList.filter((item, index, self) => 
+    index === self.findIndex(m => m.model === item.model)
+  );
 
   const systemInstruction = ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase);
   const contents = [
@@ -290,8 +319,8 @@ Se for Prova Oral:
 Forneça sua correção detalhada em formato markdown elegante contendo sugestões de melhoria exaustivas para que ele possa gabaritar.`;
 
   const modelAttempts = [
-    { model: "gemini-3.5-flash-lite", timeout: 45000 },
-    { model: "gemini-3.5-flash", timeout: 50000 },
+    { model: "gemini-3.1-pro-preview", timeout: 65000 },
+    { model: "gemini-3.8-flash", timeout: 45000 },
     { model: "gemini-3.6-flash", timeout: 50000 }
   ];
 
@@ -373,7 +402,9 @@ export async function testGeminiConnection(): Promise<GeminiConnectionTestResult
     };
   }
 
-  const modelAttempts = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.6-flash"];
+  const active = getSelectedModel();
+  const rawModels = [active, "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.1-pro-preview"];
+  const modelAttempts = rawModels.filter((item, index, self) => index === self.indexOf(item));
   let lastErr: any = null;
 
   for (const model of modelAttempts) {
