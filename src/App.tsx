@@ -1089,7 +1089,13 @@ const ChatMessage = memo(({
   trilhaMaterialIndex,
   trilhaTotalMaterials,
   skipTrilhaLesson,
-  retryMessage
+  retryMessage,
+  isCEO,
+  onApproveLesson,
+  onApproveAndAdvance,
+  onEditLesson,
+  isSavingHomologation,
+  homologatedLessonState
 }: { 
   msg: Message,
   msgIdx: number,
@@ -1112,7 +1118,13 @@ const ChatMessage = memo(({
   trilhaMaterialIndex?: number,
   trilhaTotalMaterials?: number,
   skipTrilhaLesson?: (idx: number) => Promise<void>,
-  retryMessage?: (idx: number) => Promise<void>
+  retryMessage?: (idx: number) => Promise<void>,
+  isCEO?: boolean,
+  onApproveLesson?: (idx: number) => Promise<any>,
+  onApproveAndAdvance?: (idx: number) => Promise<void>,
+  onEditLesson?: (idx: number) => void,
+  isSavingHomologation?: boolean,
+  homologatedLessonState?: HomologatedLesson | null
 }) => {
   const isUser = msg.role === 'user';
   const isError = !isUser && Boolean(
@@ -1449,29 +1461,144 @@ const ChatMessage = memo(({
                     {!isError && trilhaDay !== undefined && trilhaTotalMaterials !== undefined ? (
                       (() => {
                         const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? 0);
-                        return msgPartIdx < trilhaTotalMaterials - 1 ? (
-                          <button
-                            onClick={(e) => {
-                              advanceStage(msgIdx);
-                              setTimeout(() => {
-                                e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                              }, 120);
-                            }}
-                            className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
-                          >
-                            <span className="font-extrabold tracking-wider">
-                              IR PARA PARTE {msgPartIdx + 2} DE {trilhaTotalMaterials}
-                            </span>
-                            <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => advanceStage(msgIdx)}
-                            className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
-                          >
-                            <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
-                            <Trophy size={18} className="group-hover:scale-110 transition-transform" />
-                          </button>
+                        const localApproved = getLocalHomologatedLesson(trilhaDay, msgPartIdx);
+                        const isThisPartApproved = Boolean(
+                          (localApproved && localApproved.status === 'approved') ||
+                          (homologatedLessonState && homologatedLessonState.day === trilhaDay && homologatedLessonState.part === msgPartIdx && homologatedLessonState.status === 'approved')
+                        );
+
+                        return (
+                          <div className="w-full flex flex-col items-center gap-3.5">
+                            {/* Card de Curadoria Exclusivo do CEO por Parte */}
+                            {isCEO && (
+                              <div className="w-full max-w-xl p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-brand-gold/10 to-transparent border border-brand-gold/35 backdrop-blur-md text-left flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-8 h-8 rounded-xl bg-brand-gold/20 border border-brand-gold/30 flex items-center justify-center text-brand-gold shrink-0">
+                                    <Trophy size={16} />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-brand-gold">
+                                        Curadoria • Parte {msgPartIdx + 1} de {trilhaTotalMaterials}
+                                      </span>
+                                      {isThisPartApproved ? (
+                                        <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                          <CheckCircle size={10} /> Salvo no Cache Central
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                          🟡 Aguardando Aprovação
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-slate-300 font-medium mt-0.5">
+                                      {isThisPartApproved 
+                                        ? `Esta parte já foi homologada e está garantida no cache compartilhado.`
+                                        : `Salve esta parte no cache central para garantir seu acesso caso ocorra instabilidade.`}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => onEditLesson?.(msgIdx)}
+                                    className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                    title="Editar ou refinar o texto desta parte antes de homologar"
+                                  >
+                                    <Edit3 size={13} />
+                                    <span>Editar</span>
+                                  </button>
+
+                                  {!isThisPartApproved && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onApproveLesson?.(msgIdx)}
+                                      disabled={isSavingHomologation}
+                                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-brand-gold via-amber-400 to-yellow-500 hover:brightness-110 text-slate-950 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-[0_4px_15px_rgba(212,175,55,0.3)] active:scale-95 cursor-pointer"
+                                      title="Salvar esta parte imediatamente no cache oficial e Firestore"
+                                    >
+                                      <Trophy size={14} />
+                                      <span>{isSavingHomologation ? 'Salvando...' : 'Aprovar e Salvar'}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Botões de Avanço / Conclusão */}
+                            {msgPartIdx < trilhaTotalMaterials - 1 ? (
+                              isCEO && !isThisPartApproved ? (
+                                <div className="flex flex-col items-center gap-2 w-full sm:w-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => onApproveAndAdvance?.(msgIdx)}
+                                    disabled={isSavingHomologation}
+                                    className="w-full sm:w-auto min-w-[300px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-brand-gold via-amber-400 to-emerald-400 hover:from-yellow-400 hover:to-emerald-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.4)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.55)] border border-amber-300/80 active:scale-98 transition-all cursor-pointer group"
+                                  >
+                                    <Trophy size={18} className="group-hover:scale-110 transition-transform text-slate-950" />
+                                    <span className="font-extrabold tracking-wider">
+                                      {isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & IR PARA PARTE ${msgPartIdx + 2} DE ${trilhaTotalMaterials}`}
+                                    </span>
+                                    <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      advanceStage(msgIdx);
+                                      setTimeout(() => {
+                                        e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                                      }, 120);
+                                    }}
+                                    className="text-[11px] font-bold text-slate-400 hover:text-slate-200 underline underline-offset-4 transition-colors py-1 cursor-pointer"
+                                  >
+                                    Avançar para Parte {msgPartIdx + 2} sem salvar no cache
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    advanceStage(msgIdx);
+                                    setTimeout(() => {
+                                      e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                                    }, 120);
+                                  }}
+                                  className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
+                                >
+                                  <span className="font-extrabold tracking-wider">
+                                    IR PARA PARTE {msgPartIdx + 2} DE {trilhaTotalMaterials}
+                                  </span>
+                                  <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
+                                </button>
+                              )
+                            ) : (
+                              isCEO && !isThisPartApproved ? (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await onApproveLesson?.(msgIdx);
+                                    await advanceStage(msgIdx);
+                                  }}
+                                  disabled={isSavingHomologation}
+                                  className="w-full sm:w-auto min-w-[280px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-brand-gold via-amber-400 to-emerald-400 hover:from-yellow-400 hover:to-emerald-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.4)] active:scale-98 transition-all cursor-pointer group"
+                                >
+                                  <Trophy size={18} className="group-hover:scale-110 transition-transform" />
+                                  <span>{isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & CONCLUIR DIA ${trilhaDay}`}</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => advanceStage(msgIdx)}
+                                  className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
+                                >
+                                  <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
+                                  <Trophy size={18} className="group-hover:scale-110 transition-transform" />
+                                </button>
+                              )
+                            )}
+                          </div>
                         );
                       })()
                     ) : !isError && msg.subject ? (
@@ -1658,6 +1785,7 @@ export default function App() {
   const [isSavingHomologation, setIsSavingHomologation] = useState(false);
   const [isEditingLesson, setIsEditingLesson] = useState(false);
   const [editingLessonContent, setEditingLessonContent] = useState('');
+  const [editingLessonIndex, setEditingLessonIndex] = useState<number | undefined>(undefined);
   const [homologationSuccessBanner, setHomologationSuccessBanner] = useState<string | null>(null);
 
   useEffect(() => {
@@ -3770,42 +3898,54 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     return sanitized;
   };
 
-  const handleCeoApproveLesson = async () => {
+  const handleCeoApproveLesson = async (targetMsgIdx?: number) => {
     const activeSess = sessions.find(s => s.id === currentSessionId);
-    if (!activeSess || activeSess.trilhaDay === undefined) return;
+    if (!activeSess || activeSess.trilhaDay === undefined) return null;
     const day = activeSess.trilhaDay;
-    const part = activeSess.trilhaMaterialIndex ?? 0;
-    const lastBotMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
-    if (!lastBotMsg) {
-      alert("Aguarde o conteúdo da lição ser gerado antes de aprovar.");
-      return;
+
+    let targetMsg: Message | undefined;
+    if (targetMsgIdx !== undefined && messages[targetMsgIdx]) {
+      targetMsg = messages[targetMsgIdx];
+    } else {
+      targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
     }
+
+    if (!targetMsg || !targetMsg.content) {
+      alert("Aguarde o conteúdo da lição ser gerado antes de aprovar.");
+      return null;
+    }
+
+    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (activeSess.trilhaMaterialIndex ?? 0);
+    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
+    const partSubject = (dayItem && dayItem.materias && dayItem.materias[part]) 
+      ? dayItem.materias[part].nome 
+      : (targetMsg.subject || activeSess.guidedSubject || 'Direito');
 
     setIsSavingHomologation(true);
     try {
-      const sanitizedContent = sanitizeHomologatedContent(lastBotMsg.content, user?.displayName);
-      const sanitizedBlocks = lastBotMsg.blocks?.map(b => sanitizeHomologatedContent(b, user?.displayName));
+      const sanitizedContent = sanitizeHomologatedContent(targetMsg.content, user?.displayName);
+      const sanitizedBlocks = targetMsg.blocks?.map(b => sanitizeHomologatedContent(b, user?.displayName));
 
       const lesson: HomologatedLesson = {
         id: getLessonDocId(day, part),
         day,
         part,
-        subject: activeSess.guidedSubject || 'Direito',
-        topic: lastBotMsg.subject || '',
+        subject: partSubject,
+        topic: targetMsg.subject || partSubject,
         content: sanitizedContent,
         blocks: sanitizedBlocks,
         status: 'approved',
         approvedBy: user?.email || 'jhonny.spider@gmail.com',
         approvedAt: Date.now(),
-        modelUsed: lastBotMsg.modelName || 'gemini-3.5-flash-lite',
+        modelUsed: targetMsg.modelName || 'gemini-3.5-flash-lite',
         version: 1
       };
       await saveHomologatedLesson(lesson);
       setHomologatedLessonState(lesson);
 
       // Também sincroniza a mensagem da sessão com a versão limpa e universal
-      const updatedMessages = (messages || []).map(m => {
-        if (m === lastBotMsg) {
+      const updatedMessages = (messages || []).map((m, i) => {
+        if ((targetMsgIdx !== undefined && i === targetMsgIdx) || (targetMsgIdx === undefined && m === targetMsg)) {
           return {
             ...m,
             content: sanitizedContent,
@@ -3817,14 +3957,21 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       setMessages(updatedMessages);
       saveSession({ messages: updatedMessages }, currentSessionId);
 
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1}) homologado com sucesso! O material foi higienizado de nomes individuais e agora está disponível para todos os alunos.`);
+      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) homologado com sucesso! Salvo no cache central para todos os alunos.`);
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
+      return lesson;
     } catch (err: any) {
       console.error("Erro ao homologar lição:", err);
       alert("Não foi possível salvar no Firestore. A lição foi preservada no cache local.");
+      return null;
     } finally {
       setIsSavingHomologation(false);
     }
+  };
+
+  const handleCeoApproveAndAdvance = async (msgIdx: number) => {
+    await handleCeoApproveLesson(msgIdx);
+    await advanceStage(msgIdx);
   };
 
   const handleCeoRegenerateLesson = async () => {
@@ -3869,21 +4016,27 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
   };
 
-  const handleCeoEditOpen = () => {
-    const lastBotMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
-    if (!lastBotMsg) {
+  const handleCeoEditOpen = (msgIdx?: number) => {
+    let targetMsg: Message | undefined;
+    if (msgIdx !== undefined && messages[msgIdx]) {
+      targetMsg = messages[msgIdx];
+    } else {
+      targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
+    }
+    if (!targetMsg) {
       alert("Nenhum conteúdo disponível para edição.");
       return;
     }
-    setEditingLessonContent(lastBotMsg.content);
+    setEditingLessonIndex(msgIdx);
+    setEditingLessonContent(targetMsg.content);
     setIsEditingLesson(true);
   };
 
   const handleCeoSaveEdit = () => {
     if (!editingLessonContent.trim()) return;
     const parsed = parseATHENAResponse(editingLessonContent);
-    const updatedMessages = (messages || []).map((m) => {
-      if (m.role === 'model' && m.blocks && m.blocks.length > 0) {
+    const updatedMessages = (messages || []).map((m, idx) => {
+      if (idx === editingLessonIndex || (editingLessonIndex === undefined && m.role === 'model' && m.blocks && m.blocks.length > 0)) {
         return {
           ...m,
           content: parsed.content,
@@ -6223,6 +6376,12 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 trilhaTotalMaterials={tTotal}
                                 skipTrilhaLesson={skipTrilhaLesson}
                                 retryMessage={retryMessage}
+                                isCEO={isCEO}
+                                onApproveLesson={handleCeoApproveLesson}
+                                onApproveAndAdvance={handleCeoApproveAndAdvance}
+                                onEditLesson={handleCeoEditOpen}
+                                isSavingHomologation={isSavingHomologation}
+                                homologatedLessonState={homologatedLessonState}
                               />
                             ))}
                           </>
@@ -6749,7 +6908,11 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                 </div>
                 <div>
                   <h3 className="text-base font-serif font-bold text-slate-100">Editor de Curadoria do CEO</h3>
-                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold font-mono">Ajustar Texto da Lição Antes de Homologar</p>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold font-mono">
+                    {editingLessonIndex !== undefined && messages[editingLessonIndex]
+                      ? `Ajustar Parte ${(messages[editingLessonIndex].trilhaMaterialIndex !== undefined ? messages[editingLessonIndex].trilhaMaterialIndex + 1 : 1)} (${messages[editingLessonIndex].subject || 'Direito'}) Antes de Homologar`
+                      : 'Ajustar Texto da Lição Antes de Homologar'}
+                  </p>
                 </div>
               </div>
               <button
