@@ -127,6 +127,7 @@ interface Message {
   }>;
   sourceType?: 'gemini' | 'offline_pareto';
   modelName?: string;
+  trilhaMaterialIndex?: number;
 }
 
 const getIsInstructionMessage = (msg: Message): boolean => {
@@ -1445,31 +1446,34 @@ const ChatMessage = memo(({
                       </button>
                     )}
 
-                    {!isError && trilhaDay !== undefined && trilhaMaterialIndex !== undefined && trilhaTotalMaterials !== undefined ? (
-                      trilhaMaterialIndex < trilhaTotalMaterials - 1 ? (
-                        <button
-                          onClick={(e) => {
-                            advanceStage(msgIdx);
-                            setTimeout(() => {
-                              e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                            }, 120);
-                          }}
-                          className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
-                        >
-                          <span className="font-extrabold tracking-wider">
-                            IR PARA PARTE {trilhaMaterialIndex + 2} DE {trilhaTotalMaterials}
-                          </span>
-                          <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => advanceStage(msgIdx)}
-                          className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
-                        >
-                          <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
-                          <Trophy size={18} className="group-hover:scale-110 transition-transform" />
-                        </button>
-                      )
+                    {!isError && trilhaDay !== undefined && trilhaTotalMaterials !== undefined ? (
+                      (() => {
+                        const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? 0);
+                        return msgPartIdx < trilhaTotalMaterials - 1 ? (
+                          <button
+                            onClick={(e) => {
+                              advanceStage(msgIdx);
+                              setTimeout(() => {
+                                e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                              }, 120);
+                            }}
+                            className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
+                          >
+                            <span className="font-extrabold tracking-wider">
+                              IR PARA PARTE {msgPartIdx + 2} DE {trilhaTotalMaterials}
+                            </span>
+                            <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => advanceStage(msgIdx)}
+                            className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
+                          >
+                            <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
+                            <Trophy size={18} className="group-hover:scale-110 transition-transform" />
+                          </button>
+                        );
+                      })()
                     ) : !isError && msg.subject ? (
                       <button
                         onClick={() => advanceStage(msgIdx)}
@@ -2015,7 +2019,8 @@ export default function App() {
     const activeUserId = user?.uid || 'jhonny-spider-ceo';
 
     // 1. Immediately persist locally (instant UI response, zero data loss)
-    const existingSession = sessions.find(s => s.id === targetId);
+    const localSessions = LocalPersistence.getSessions(activeUserId);
+    const existingSession = localSessions.find(s => s.id === targetId) || sessions.find(s => s.id === targetId);
     const mergedData = {
       id: targetId,
       userId: activeUserId,
@@ -2715,7 +2720,8 @@ export default function App() {
         parts: [{ text: m.content || "" }]
       }));
 
-      const { text: responseText, model: usedModel } = await askATHENA(userMessage, history, user?.displayName || "Mestre", currentAttachedFile, mentorshipStyle, resolvedPhase);
+      const audienceName = dayNum !== undefined ? "Futuro(a) Magistrado(a)" : (user?.displayName || "Mestre");
+      const { text: responseText, model: usedModel } = await askATHENA(userMessage, history, audienceName, currentAttachedFile, mentorshipStyle, resolvedPhase);
       const parsed = parseATHENAResponse(responseText);
 
       const botMessage: Message = {
@@ -2728,7 +2734,8 @@ export default function App() {
         subject: activeSubject,
         article: activeArticle,
         sourceType: 'gemini',
-        modelName: usedModel
+        modelName: usedModel,
+        trilhaMaterialIndex: dayNum !== undefined ? (activeSession?.trilhaMaterialIndex ?? 0) : undefined
       };
 
       setMessages(prev => [...prev, botMessage]);
@@ -3180,7 +3187,7 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
     let extraSource = `\n\n[DIRETRIZ DA BASE DE CONHECIMENTO E MENTORIA ATHENA]:
 1. A BASE SOBERANA DE VERDADE são as fontes normativas e doutrinárias programadas para ${currentMat.nome} (${currentMat.conteudo}).
 2. Como mentora pedagógica de apoio a este material, sua missão é estruturar a aula estritamente nos 6 BLOCOS PEDAGÓGICOS OFICIAIS:
-   - [BLOCK_1] (👋 Saudação e Raio-X): Contextualize a importância deste recorte para os concursos de elite (Magistratura, MP, Defensoria e Delegado).
+   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE uma saudação institucional e universal de mentoria de alto rendimento (ex: "Olá, Futuro(a) Magistrado(a)!", "Seja bem-vindo(a), Candidato(a) de Elite!"). NUNCA use nomes individuais ou apelidos pessoais nesta saudação, pois este conteúdo será homologado e compartilhado com todos os alunos da mentoria. Contextualize a importância deste recorte para os concursos de elite (Magistratura, MP, Defensoria e Delegado).
    - [BLOCK_2] (⚖️ Letra da Lei): Decodifique com rigor pedagógico os artigos do intervalo delimitado (${currentMat.conteudo}), detalhando núcleos do tipo, requisitos, penas, exceções e pegadinhas clássicas de banca examinadora.
    - [BLOCK_3] (🏛️ Jurisprudência e Súmulas): Aprofunde precedentes vinculantes, Súmulas do STF/STJ e teses de Repercussão Geral com a ratio decidendi e contexto fático.
    - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase), enriquecida com exemplos práticos do cotidiano forense brasileiro, casuística real e divergências teóricas.
@@ -3214,7 +3221,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     try {
       console.log(`[ATHENA Pre-fetch] Disparando em background geração da Parte ${nextMatIdx + 1} de ${dayItem.materias.length} (Dia ${dayNum} - ${nextMat.nome})...`);
-      const { text, model } = await askATHENA(nextMsg, [], user?.displayName || "Mestre", undefined, mStyle, resolvedPhase as any);
+      const { text, model } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mStyle, resolvedPhase as any);
       setCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase, {
         text,
         model,
@@ -3306,7 +3313,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           subject: guidedSubjectName,
           article: 1,
           sourceType: 'gemini',
-          modelName: 'Oficial Homologado pelo CEO'
+          modelName: 'Oficial Homologado pelo CEO',
+          trilhaMaterialIndex: 0
         };
 
         const cachedSession: ChatSession = {
@@ -3349,7 +3357,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           subject: guidedSubjectName,
           article: 1,
           sourceType: 'gemini',
-          modelName: `${cached.model} (Cache Instantâneo)`
+          modelName: `${cached.model} (Cache Instantâneo)`,
+          trilhaMaterialIndex: 0
         };
 
         const cachedSession: ChatSession = {
@@ -3413,7 +3422,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       const session = sessions.find(s => s.id === currentSessionId);
       if (session && session.trilhaDay) {
         const dayNum = session.trilhaDay;
-        const currentMatIdx = session.trilhaMaterialIndex ?? 0;
+        const currentMatIdx = (msg?.trilhaMaterialIndex !== undefined) ? msg.trilhaMaterialIndex : (session.trilhaMaterialIndex ?? 0);
         const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
         
         if (dayItem && dayItem.materias) {
@@ -3488,7 +3497,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   subject: nextMat.nome,
                   article: 1,
                   sourceType: 'gemini',
-                  modelName: 'Oficial Homologado pelo CEO'
+                  modelName: 'Oficial Homologado pelo CEO',
+                  trilhaMaterialIndex: nextMatIdx
                 };
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
@@ -3541,7 +3551,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   subject: nextMat.nome,
                   article: 1,
                   sourceType: 'gemini',
-                  modelName: `${cached.model} (Cache Instantâneo)`
+                  modelName: `${cached.model} (Cache Instantâneo)`,
+                  trilhaMaterialIndex: nextMatIdx
                 };
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
@@ -3584,7 +3595,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               try {
                 // Cada parte da trilha possui comando autocontido com escopo exato.
                 // Usamos histórico limpo ([]), idêntico ao prefetch, para máxima agilidade e sem poluição de contexto.
-                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
+                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
                 const parsed = parseATHENAResponse(responseText);
                 const botMessage: Message = {
                   role: 'model',
@@ -3595,11 +3606,26 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   subject: nextMat.nome,
                   article: 1,
                   sourceType: 'gemini',
-                  modelName: usedModel
+                  modelName: usedModel,
+                  trilhaMaterialIndex: nextMatIdx
                 };
                 
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
+
+                const updatedSessionsGemini = sessions.map(s => {
+                  if (s.id === currentSessionId) {
+                    return {
+                      ...s,
+                      title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                      guidedSubject: nextMat.nome,
+                      trilhaMaterialIndex: nextMatIdx,
+                      messages: finalMessages
+                    };
+                  }
+                  return s;
+                });
+                setSessions(updatedSessionsGemini);
 
                 // Armazena no cache local persistente
                 setCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase, {
@@ -3620,6 +3646,9 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 }
                 
                 await saveSession({
+                  title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                  guidedSubject: nextMat.nome,
+                  trilhaMaterialIndex: nextMatIdx,
                   messages: finalMessages
                 }, currentSessionId);
 
@@ -3646,11 +3675,15 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1
+                  article: 1,
+                  trilhaMaterialIndex: nextMatIdx
                 };
                 const finalMessages = [...updatedMessages, botErrorMessage];
                 setMessages(finalMessages);
                 await saveSession({
+                  title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                  guidedSubject: nextMat.nome,
+                  trilhaMaterialIndex: nextMatIdx,
                   messages: finalMessages
                 }, currentSessionId);
               } finally {
@@ -3718,6 +3751,25 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       }, 120);
     };
 
+  const sanitizeHomologatedContent = (text: string, userDisplayName?: string): string => {
+    if (!text) return text;
+    let sanitized = text;
+    const namesToSanitize = [
+      userDisplayName,
+      'Jhonny',
+      'Jhony',
+      'Jhonny Spider',
+      'Mestre CEO'
+    ].filter((n): n is string => Boolean(n && n.trim().length > 1));
+
+    for (const name of namesToSanitize) {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), '$1, Futuro(a) Magistrado(a)');
+      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), 'Futuro(a) Magistrado(a)');
+    }
+    return sanitized;
+  };
+
   const handleCeoApproveLesson = async () => {
     const activeSess = sessions.find(s => s.id === currentSessionId);
     if (!activeSess || activeSess.trilhaDay === undefined) return;
@@ -3731,23 +3783,41 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     setIsSavingHomologation(true);
     try {
+      const sanitizedContent = sanitizeHomologatedContent(lastBotMsg.content, user?.displayName);
+      const sanitizedBlocks = lastBotMsg.blocks?.map(b => sanitizeHomologatedContent(b, user?.displayName));
+
       const lesson: HomologatedLesson = {
         id: getLessonDocId(day, part),
         day,
         part,
         subject: activeSess.guidedSubject || 'Direito',
         topic: lastBotMsg.subject || '',
-        content: lastBotMsg.content,
-        blocks: lastBotMsg.blocks,
+        content: sanitizedContent,
+        blocks: sanitizedBlocks,
         status: 'approved',
-        approvedBy: 'jhonny.spider@gmail.com',
+        approvedBy: user?.email || 'jhonny.spider@gmail.com',
         approvedAt: Date.now(),
         modelUsed: lastBotMsg.modelName || 'gemini-flash-latest',
         version: 1
       };
       await saveHomologatedLesson(lesson);
       setHomologatedLessonState(lesson);
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1}) homologado com sucesso! O material agora está disponível instantaneamente para todos os alunos.`);
+
+      // Também sincroniza a mensagem da sessão com a versão limpa e universal
+      const updatedMessages = (messages || []).map(m => {
+        if (m === lastBotMsg) {
+          return {
+            ...m,
+            content: sanitizedContent,
+            blocks: sanitizedBlocks
+          };
+        }
+        return m;
+      });
+      setMessages(updatedMessages);
+      saveSession({ messages: updatedMessages }, currentSessionId);
+
+      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1}) homologado com sucesso! O material foi higienizado de nomes individuais e agora está disponível para todos os alunos.`);
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
     } catch (err: any) {
       console.error("Erro ao homologar lição:", err);
@@ -3770,7 +3840,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setIsLoading(true);
     const msg = getTrilhaDayPartitionMessage(day, dayItem.materias, part, dayItem.semana, mentorshipStyle);
     try {
-      const { text, model } = await askATHENA(msg, [], user?.displayName || "Mestre CEO", undefined, mentorshipStyle, mentorshipPhase);
+      const { text, model } = await askATHENA(msg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, mentorshipPhase);
       const parsed = parseATHENAResponse(text);
       const botMessage: Message = {
         role: 'model',
@@ -3781,12 +3851,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         subject: dayItem.materias[part].nome,
         article: 1,
         sourceType: 'gemini',
-        modelName: `${model} (Regerado pelo CEO)`
+        modelName: `${model} (Regerado pelo CEO)`,
+        trilhaMaterialIndex: part
       };
       const userMsg: Message = { role: 'user', content: msg };
       setMessages([userMsg, botMessage]);
       await saveSession({
-        messages: [userMsg, botMessage]
+        messages: [userMsg, botMessage],
+        trilhaMaterialIndex: part
       }, currentSessionId);
       setHomologatedLessonState(prev => prev ? { ...prev, status: 'draft' } : null);
     } catch (err: any) {
@@ -3841,7 +3913,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const session = sessions.find(s => s.id === currentSessionId);
     if (session && session.trilhaDay !== undefined) {
       const dayNum = session.trilhaDay;
-      const currentMatIdx = session.trilhaMaterialIndex ?? 0;
+      const currentMatIdx = (messages[msgIdx]?.trilhaMaterialIndex !== undefined) ? messages[msgIdx].trilhaMaterialIndex : (session.trilhaMaterialIndex ?? 0);
       const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
       const isEstudo = session.trilhaSessionType === 'estudo' || !session.trilhaSessionType;
       
@@ -3907,7 +3979,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 resolvedPhase = 'objetiva';
               }
             }
-            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, user?.displayName || "Mestre", undefined, mentorshipStyle, resolvedPhase);
+            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
             const parsed = parseATHENAResponse(responseText);
             const botMessage: Message = {
               role: 'model',
@@ -3918,12 +3990,31 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               subject: nextMat.nome,
               article: 1,
               sourceType: 'gemini',
-              modelName: usedModel
+              modelName: usedModel,
+              trilhaMaterialIndex: nextMatIdx
             };
             
             const finalMessages = [...updatedMessages, botMessage];
             setMessages(finalMessages);
+
+            const updatedSessionsSkip = sessions.map(s => {
+              if (s.id === currentSessionId) {
+                return {
+                  ...s,
+                  title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                  guidedSubject: nextMat.nome,
+                  trilhaMaterialIndex: nextMatIdx,
+                  messages: finalMessages
+                };
+              }
+              return s;
+            });
+            setSessions(updatedSessionsSkip);
+
             await saveSession({
+              title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+              guidedSubject: nextMat.nome,
+              trilhaMaterialIndex: nextMatIdx,
               messages: finalMessages
             }, currentSessionId);
           } catch (err: any) {
@@ -3935,11 +4026,15 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
               currentBlockIndex: 0,
               subject: nextMat.nome,
-              article: 1
+              article: 1,
+              trilhaMaterialIndex: nextMatIdx
             };
             const finalMessages = [...updatedMessages, botErrorMessage];
             setMessages(finalMessages);
             await saveSession({
+              title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+              guidedSubject: nextMat.nome,
+              trilhaMaterialIndex: nextMatIdx,
               messages: finalMessages
             }, currentSessionId);
           } finally {

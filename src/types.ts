@@ -104,6 +104,7 @@ export interface Message {
   }>;
   sourceType?: 'gemini' | 'offline_pareto';
   modelName?: string;
+  trilhaMaterialIndex?: number;
 }
 
 export interface ChatSession {
