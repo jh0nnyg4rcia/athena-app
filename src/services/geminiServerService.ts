@@ -277,11 +277,12 @@ export async function askATHENA(
   const targetTemp = 0.25;
 
   // Model Tiering:
-  // Priorizamos gemini-flash-latest e gemini-2.5-flash com fallback de alta velocidade para flash-lite
+  // Priorizamos gemini-3.5-flash-lite e gemini-3.5-flash com fallback de alta velocidade
   const modelAttempts = [
-    { model: "gemini-flash-latest", useThinking: false },
-    { model: "gemini-2.5-flash", useThinking: false },
-    { model: "gemini-flash-lite-latest", useThinking: false }
+    { model: "gemini-3.5-flash-lite", useThinking: false },
+    { model: "gemini-3.5-flash", useThinking: false },
+    { model: "gemini-3.6-flash", useThinking: false },
+    { model: "gemini-flash-latest", useThinking: false }
   ];
 
   let lastError: any = null;

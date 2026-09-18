@@ -1185,7 +1185,7 @@ const ChatMessage = memo(({
               ) : (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-mono text-emerald-400 shadow-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Gerado via IA Gemini ({msg.modelName || 'gemini-flash-latest'})</span>
+                  <span>Gerado via IA Gemini ({msg.modelName || 'gemini-3.5-flash-lite'})</span>
                 </div>
               )}
             </div>
@@ -3188,7 +3188,7 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
 1. A BASE SOBERANA DE VERDADE são as fontes normativas e doutrinárias programadas para ${currentMat.nome} (${currentMat.conteudo}).
 2. Como mentora pedagógica de apoio a este material, sua missão é estruturar a aula estritamente nos 6 BLOCOS PEDAGÓGICOS OFICIAIS:
    - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE uma saudação institucional e universal de mentoria de alto rendimento (ex: "Olá, Futuro(a) Magistrado(a)!", "Seja bem-vindo(a), Candidato(a) de Elite!"). NUNCA use nomes individuais ou apelidos pessoais nesta saudação, pois este conteúdo será homologado e compartilhado com todos os alunos da mentoria. Contextualize a importância deste recorte para os concursos de elite (Magistratura, MP, Defensoria e Delegado).
-   - [BLOCK_2] (⚖️ Letra da Lei): Decodifique com rigor pedagógico os artigos do intervalo delimitado (${currentMat.conteudo}), detalhando núcleos do tipo, requisitos, penas, exceções e pegadinhas clássicas de banca examinadora.
+   - [BLOCK_2] (⚖️ Letra da Lei): Decodifique e esquematize com suas próprias palavras e rigor analítico os artigos e princípios do intervalo delimitado (${currentMat.conteudo}), evitando transcrição mecânica literal de manuais e apostilas comerciais, dissecando núcleos dogmáticos, postulados, exceções e pegadinhas clássicas de banca examinadora.
    - [BLOCK_3] (🏛️ Jurisprudência e Súmulas): Aprofunde precedentes vinculantes, Súmulas do STF/STJ e teses de Repercussão Geral com a ratio decidendi e contexto fático.
    - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase), enriquecida com exemplos práticos do cotidiano forense brasileiro, casuística real e divergências teóricas.
    - [BLOCK_5] (🎯 Desafio ATHENA): Simulado com questões inéditas de fixação baseadas diretamente nas fontes estudadas hoje.
@@ -3797,7 +3797,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         status: 'approved',
         approvedBy: user?.email || 'jhonny.spider@gmail.com',
         approvedAt: Date.now(),
-        modelUsed: lastBotMsg.modelName || 'gemini-flash-latest',
+        modelUsed: lastBotMsg.modelName || 'gemini-3.5-flash-lite',
         version: 1
       };
       await saveHomologatedLesson(lesson);
@@ -3889,7 +3889,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           content: parsed.content,
           challenge: parsed.challenge || m.challenge,
           blocks: parsed.blocks,
-          modelName: (m.modelName || 'gemini-flash-latest') + ' (Ajustado pelo CEO)'
+          modelName: (m.modelName || 'gemini-3.5-flash-lite') + ' (Ajustado pelo CEO)'
         };
       }
       return m;
@@ -6559,7 +6559,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                 </div>
                 <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  gemini-flash-latest (Alta Velocidade)
+                  gemini-3.5-flash-lite (Alta Velocidade)
                 </span>
               </div>
 

@@ -210,10 +210,10 @@ async function askATHENADirectClient(
 
   // Hierarquia resiliente com os modelos oficiais do Google Gemini
   const modelAttempts = [
-    { model: "gemini-flash-latest", timeout: 45000 },
-    { model: "gemini-2.5-flash", timeout: 45000 },
-    { model: "gemini-flash-lite-latest", timeout: 40000 },
-    { model: "gemini-2.5-flash-lite", timeout: 40000 }
+    { model: "gemini-3.5-flash-lite", timeout: 45000 },
+    { model: "gemini-3.5-flash", timeout: 50000 },
+    { model: "gemini-3.6-flash", timeout: 50000 },
+    { model: "gemini-flash-latest", timeout: 45000 }
   ];
 
   const systemInstruction = ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase);
@@ -290,9 +290,9 @@ Se for Prova Oral:
 Forneça sua correção detalhada em formato markdown elegante contendo sugestões de melhoria exaustivas para que ele possa gabaritar.`;
 
   const modelAttempts = [
-    { model: "gemini-flash-latest", timeout: 45000 },
-    { model: "gemini-2.5-flash", timeout: 45000 },
-    { model: "gemini-flash-lite-latest", timeout: 40000 }
+    { model: "gemini-3.5-flash-lite", timeout: 45000 },
+    { model: "gemini-3.5-flash", timeout: 50000 },
+    { model: "gemini-3.6-flash", timeout: 50000 }
   ];
 
   let text = '';
@@ -373,7 +373,7 @@ export async function testGeminiConnection(): Promise<GeminiConnectionTestResult
     };
   }
 
-  const modelAttempts = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest"];
+  const modelAttempts = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.6-flash"];
   let lastErr: any = null;
 
   for (const model of modelAttempts) {
@@ -441,7 +441,7 @@ export async function askATHENA(
       throw new Error(errData.error || `Erro de conexão HTTP: ${response.status}`);
     }
     const data = await response.json();
-    return { text: data.responseText, model: data.model || 'gemini-flash-latest' };
+    return { text: data.responseText, model: data.model || 'gemini-3.5-flash-lite' };
   } catch (error: any) {
     console.warn("[ATHENA] Backend indisponível, acionando execução cliente direta do Gemini:", error?.message);
     return askATHENADirectClient(message, history, userName, file, mentorshipStyle, mentorshipPhase);
