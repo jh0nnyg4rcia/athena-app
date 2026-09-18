@@ -161,7 +161,7 @@ export function getGroundingForTrilhaPart(
   // 1. Tentar fonte direta do dia se existir
   const directSource = extractFromDayFullSource(dayNum, subject);
   if (directSource && directSource.length > 100) {
-    const prompt = `\n[FONTES MINERADAS DE REFERÊNCIA OFICIAL - GROUNDING SOBERANO]:\n${directSource}\n\nDIRETRIZES DE USO DO GROUNDING:\n- Utilize a base de referência acima como guia doutrinário, legal e jurisprudencial soberano.\n- Decodifique e sintetize os artigos com suas próprias palavras analíticas para evitar recitação literal de manuais comerciais.\n- Toda a lição, questões e julgados devem estar estritamente vinculados aos artigos e temas desta base.`;
+    const prompt = `\n[FONTES MINERADAS DE REFERÊNCIA OFICIAL - GROUNDING SOBERANO]:\n${directSource}\n\nDIRETRIZES DE USO DO GROUNDING:\n- Utilize a base de referência acima como guia doutrinário, legal e jurisprudencial soberano.\n- Decodifique e sintetize os artigos com suas próprias palavras analíticas para evitar recitação literal de manuais comerciais.\n- Toda a lição, questões e julgados devem estar estritamente vinculados aos artigos e temas desta base.\n- BLINDAGEM ANTI-ALUCINAÇÃO NUMÉRICA: É expressamente proibido inventar números de processos (REsp, RE, HC). Apresente a jurisprudência pelo Tribunal, Colegiado e Tese (Ratio Decidendi). Só cite número de súmula se constar expressamente nesta base ou for notória inquestionável; caso contrário, enuncie o conteúdo sem arriscar números.`;
 
     return {
       hasGrounding: true,
@@ -203,7 +203,7 @@ export function getGroundingForTrilhaPart(
   }
 
   const fullText = sections.join("\n\n---\n\n");
-  const prompt = `\n[FONTES MINERADAS DE REFERÊNCIA OFICIAL - GROUNDING SOBERANO]:\n${fullText}\n\nDIRETRIZES DE USO DO GROUNDING:\n- Utilize os artigos de regência e a dogmática acima como fundamento soberano para os 6 blocos pedagógicos.\n- Decodifique e esquematize com suas próprias palavras analíticas para evitar qualquer filtro de recitação literal de apostilas comerciais.\n- As questões do [BLOCK_5] e os precedentes do [BLOCK_3] devem ser 100% ancorados neste recorte delimitado.`;
+  const prompt = `\n[FONTES MINERADAS DE REFERÊNCIA OFICIAL - GROUNDING SOBERANO]:\n${fullText}\n\nDIRETRIZES DE USO DO GROUNDING:\n- Utilize os artigos de regência e a dogmática acima como fundamento soberano para os 6 blocos pedagógicos.\n- Decodifique e esquematize com suas próprias palavras analíticas para evitar qualquer filtro de recitação literal de apostilas comerciais.\n- As questões do [BLOCK_5] e os precedentes do [BLOCK_3] devem ser 100% ancorados neste recorte delimitado.\n- BLINDAGEM ANTI-ALUCINAÇÃO NUMÉRICA: É expressamente proibido inventar números de processos judiciais (REsp, RE, HC). Apresente cada precedente pelo Tribunal, Colegiado e Ratio Decidendi vinculada ao artigo estudado. Só mencione o número de súmula se for notória e incontroversa ou constar nesta base minerada; caso contrário, enuncie o conteúdo sem arriscar números.`;
 
   return {
     hasGrounding: true,

@@ -3326,6 +3326,14 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
    - [BLOCK_3] (🏛️ Jurisprudência, Súmulas e Teses Vinculantes):
      * REGRA DE PERTINÊNCIA TEMÁTICA ESTREITA: Todos os julgados, Súmulas do STF/STJ, Teses de Repercussão Geral e Recursos Repetitivos citados DEVEM versar DIRETA E EXCLUSIVAMENTE sobre a interpretação e aplicação dos artigos delimitados (${currentMat.conteudo} de ${currentMat.nome}).
      * É EXPRESSAMENTE PROIBIDO citar julgados de outros artigos ou temas desvinculados deste recorte (por exemplo: se o tema for arts. 1º ao 15 do CPC, cite exclusivamente julgados sobre decisão surpresa, cooperação processual, boa-fé e nulidade de algibeira, contraditório dinâmico ou aplicação supletiva/subsidiária; NUNCA cite julgados de execução, recursos, cumprimento de sentença ou provas).
+     * BLINDAGEM TOTAL ANTI-ALUCINAÇÃO NUMÉRICA (TOLERÂNCIA ZERO A NÚMEROS FALSOS):
+       - É TERMINANTEMENTE PROIBIDO inventar, chutar ou deduzir números de processos judiciais (REsp, RE, AREsp, HC, RMS). Em concursos de alto rendimento, o que pontua com nota máxima é a TESE JURÍDICA (ratio decidendi), o TRIBUNAL (STF/STJ), o ÓRGÃO COLEGIADO e o DISPOSITIVO LEGAL.
+       - Apresente cada precedente no formato:
+         • Tribunal e Colegiado: (ex: "Superior Tribunal de Justiça — STJ, Corte Especial / 3ª Turma", "Supremo Tribunal Federal — STF, Plenário")
+         • Tese Fixada / Ratio Decidendi: A tese jurídica exata e seus fundamentos determinantes.
+         • Fundamento Legal: O artigo deste recorte (${currentMat.conteudo}) com o qual se relaciona.
+         • Identificação: Se o número exato do acórdão/tema NÃO constar na base minerada fornecida abaixo, NUNCA invente números! Identifique como "Precedente consolidado do STJ/STF".
+       - REGRA DE OURO PARA SÚMULAS: Jamais arrisque ou troque números de súmulas. Só cite o NÚMERO se constar da base minerada fornecida ou se for súmula notória e incontroversa (ex: Súmula Vinculante 13 do STF, Súmula 375 do STJ). Em qualquer dúvida, enuncie o conteúdo sem número: "Em enunciado sumular consolidado do STJ/STF, pacificou-se a orientação de que...".
      * Cada precedente citado deve indicar explicitamente o artigo deste recorte (${currentMat.conteudo}) com o qual se relaciona e sua ratio decidendi.
    
    - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase) estritamente circunscrita aos institutos disciplinados em ${currentMat.conteudo}. Traga divergências doutrinárias reais e exemplos práticos da atividade forense que ilustrem exatamente os artigos estudados hoje.
@@ -3333,7 +3341,7 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
    - [BLOCK_5] (🎯 Desafio ATHENA - Questões Estritamente Temáticas):
      * REGRA DE PERTINÊNCIA DAS QUESTÕES: 100% das questões geradas (objetivas ou discursiva/oral) DEVEM ter como objeto de cobrança EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
      * É TERMINANTEMENTE PROIBIDO formular questões sobre artigos ou tópicos de fora deste recorte.
-     * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou súmula deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais.
+     * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou o entendimento consolidado deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais, sem inventar números de processos fictícios.
    
    - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).${hybridDirective}`;
 
