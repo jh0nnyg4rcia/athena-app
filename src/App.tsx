@@ -4077,6 +4077,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     });
     setMessages(updatedMessages);
     saveSession({ messages: updatedMessages }, currentSessionId);
+    setHomologatedLessonState(prev => prev ? { ...prev, status: 'draft' } : null);
     setIsEditingLesson(false);
   };
 
@@ -6366,7 +6367,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                         title="Aprovar e salvar como versão oficial definitiva para todos os alunos"
                                       >
                                         <Trophy size={15} />
-                                        {isSavingHomologation ? 'Publicando...' : 'Aprovar e Publicar'}
+                                        {isSavingHomologation ? 'Publicando...' : (homologatedLessonState ? 'Atualizar e Publicar' : 'Aprovar e Publicar')}
                                       </button>
                                     )}
                                   </div>
