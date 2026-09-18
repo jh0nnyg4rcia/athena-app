@@ -60,6 +60,7 @@ import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
 import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile, testGeminiConnection, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
+import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
 import { type UserProfile, type HomologatedLesson } from './types';
 import { getCachedTrilhaPart, setCachedTrilhaPart } from './services/trilhaCacheService';
@@ -3336,6 +3337,11 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
    
    - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).${hybridDirective}`;
 
+    const grounding = getGroundingForTrilhaPart(dayNum, currentMat.nome, currentMat.conteudo);
+    if (grounding.hasGrounding) {
+      extraSource += `\n\n${grounding.formattedGroundingPrompt}`;
+    }
+
     return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos estudar de forma PARTICIONADA o tema do DIA ${dayNum} (Semana ${semana}) para garantir profundidade monumental sem sobrecarga de processamento.
 
 Dentre os temas programados para hoje, este comando refere-se especificamente à seguinte parte:
@@ -6326,7 +6332,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                     </button>
 
                                     <button
-                                      onClick={handleCeoEditOpen}
+                                      onClick={() => handleCeoEditOpen()}
                                       disabled={isLoading}
                                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
                                       title="Editar ou refinar o texto antes de homologar"
@@ -6346,7 +6352,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                       </button>
                                     ) : (
                                       <button
-                                        onClick={handleCeoApproveLesson}
+                                        onClick={() => handleCeoApproveLesson()}
                                         disabled={isSavingHomologation || isLoading}
                                         className="px-4 py-2 rounded-xl bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold hover:brightness-110 text-slate-950 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-[0_4px_15px_rgba(212,175,55,0.3)] active:scale-95 cursor-pointer"
                                         title="Aprovar e salvar como versão oficial definitiva para todos os alunos"

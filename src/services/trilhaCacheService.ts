@@ -31,17 +31,26 @@ export function setCachedTrilhaPart(
   dayNum: number,
   partIndex: number,
   style: string = 'teorico',
-  text: string,
-  model: string = 'gemini-flash-latest'
+  textOrEntry: string | TrilhaPartCache,
+  model: string = 'gemini-3.5-flash-lite'
 ): void {
   try {
-    if (!text || !text.trim()) return;
     const key = `${CACHE_PREFIX}d${dayNum}_p${partIndex}_${style}`;
-    const entry: TrilhaPartCache = {
-      text: text.trim(),
-      model,
-      timestamp: Date.now()
-    };
+    let entry: TrilhaPartCache;
+    if (typeof textOrEntry === 'object' && textOrEntry !== null) {
+      entry = {
+        text: textOrEntry.text.trim(),
+        model: textOrEntry.model || model,
+        timestamp: textOrEntry.timestamp || Date.now()
+      };
+    } else {
+      if (!textOrEntry || !textOrEntry.trim()) return;
+      entry = {
+        text: textOrEntry.trim(),
+        model,
+        timestamp: Date.now()
+      };
+    }
     localStorage.setItem(key, JSON.stringify(entry));
     console.log(`[TrilhaCache] Parte ${partIndex + 1} do Dia ${dayNum} (${style}) armazenada em cache com sucesso.`);
   } catch (err) {
