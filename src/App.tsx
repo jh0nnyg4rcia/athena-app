@@ -3312,15 +3312,29 @@ Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de
 No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas normais, apresente uma única ARGUIÇÃO ORAL (Pergunta de Exame Oral) formal de banca examinadora, instruindo o aluno a utilizar gravação de áudio ou digitação por ditado de voz para responder verbalmente sob pressão à banca. Aguarde a sustentação para proferir nota oficial de oratória jurídica.`;
     }
 
-    let extraSource = `\n\n[DIRETRIZ DA BASE DE CONHECIMENTO E MENTORIA ATHENA]:
-1. A BASE SOBERANA DE VERDADE são as fontes normativas e doutrinárias programadas para ${currentMat.nome} (${currentMat.conteudo}).
-2. Como mentora pedagógica de apoio a este material, sua missão é estruturar a aula estritamente nos 6 BLOCOS PEDAGÓGICOS OFICIAIS:
-   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE uma saudação institucional e universal de mentoria de alto rendimento (ex: "Olá, Futuro(a) Magistrado(a)!", "Seja bem-vindo(a), Candidato(a) de Elite!"). NUNCA use nomes individuais ou apelidos pessoais nesta saudação, pois este conteúdo será homologado e compartilhado com todos os alunos da mentoria. Contextualize a importância deste recorte para os concursos de elite (Magistratura, MP, Defensoria e Delegado).
-   - [BLOCK_2] (⚖️ Letra da Lei): Decodifique e esquematize com suas próprias palavras e rigor analítico os artigos e princípios do intervalo delimitado (${currentMat.conteudo}), evitando transcrição mecânica literal de manuais e apostilas comerciais, dissecando núcleos dogmáticos, postulados, exceções e pegadinhas clássicas de banca examinadora.
-   - [BLOCK_3] (🏛️ Jurisprudência e Súmulas): Aprofunde precedentes vinculantes, Súmulas do STF/STJ e teses de Repercussão Geral com a ratio decidendi e contexto fático.
-   - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase), enriquecida com exemplos práticos do cotidiano forense brasileiro, casuística real e divergências teóricas.
-   - [BLOCK_5] (🎯 Desafio ATHENA): Simulado com questões inéditas de fixação baseadas diretamente nas fontes estudadas hoje.
-   - [BLOCK_6] (📝 Revisão Comprimida): Exatamente 10 tópicos atômicos (bullet points) para memorização rápida (Pareto 80/20).${hybridDirective}`;
+    let extraSource = `\n\n[DIRETRIZES DA BASE DE CONHECIMENTO E PERTINÊNCIA TEMÁTICA ABSOLUTA ATHENA]:
+1. BASE SOBERANA E CONFINAMENTO TEMÁTICO RESTRITO:
+   - A sua base soberana de verdade é EXCLUSIVAMENTE o seguinte recorte: ${currentMat.nome} (${currentMat.conteudo}).
+   - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo dos 6 blocos deve nascer e se esgotar no exame deste recorte!
+
+2. DIRETRIZES BLOCO A BLOCO (RIGOR ESTRITO):
+   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE uma saudação institucional e universal de mentoria de alto rendimento (ex: "Olá, Futuro(a) Magistrado(a)!", "Seja bem-vindo(a), Candidato(a) de Elite!"). NUNCA use nomes individuais ou apelidos pessoais nesta saudação, pois este conteúdo será homologado e compartilhado com todos os alunos da mentoria. Apresente o Raio-X e a relevância prática deste recorte exato (${currentMat.conteudo}) para concursos de ponta (Magistratura, MP, Defensoria e Delegado).
+   
+   - [BLOCK_2] (⚖️ Letra da Lei Decodificada): Decodifique, esquematize e disseque com suas próprias palavras e rigor analítico CADA UM dos artigos e princípios compreendidos no intervalo ${currentMat.conteudo}. Destaque núcleos dogmáticos, prazos, exceções legais, postulados normativos e pegadinhas clássicas de banca examinadora, evitando transcrição mecânica literal de apostilas comerciais.
+   
+   - [BLOCK_3] (🏛️ Jurisprudência, Súmulas e Teses Vinculantes):
+     * REGRA DE PERTINÊNCIA TEMÁTICA ESTREITA: Todos os julgados, Súmulas do STF/STJ, Teses de Repercussão Geral e Recursos Repetitivos citados DEVEM versar DIRETA E EXCLUSIVAMENTE sobre a interpretação e aplicação dos artigos delimitados (${currentMat.conteudo} de ${currentMat.nome}).
+     * É EXPRESSAMENTE PROIBIDO citar julgados de outros artigos ou temas desvinculados deste recorte (por exemplo: se o tema for arts. 1º ao 15 do CPC, cite exclusivamente julgados sobre decisão surpresa, cooperação processual, boa-fé e nulidade de algibeira, contraditório dinâmico ou aplicação supletiva/subsidiária; NUNCA cite julgados de execução, recursos, cumprimento de sentença ou provas).
+     * Cada precedente citado deve indicar explicitamente o artigo deste recorte (${currentMat.conteudo}) com o qual se relaciona e sua ratio decidendi.
+   
+   - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase) estritamente circunscrita aos institutos disciplinados em ${currentMat.conteudo}. Traga divergências doutrinárias reais e exemplos práticos da atividade forense que ilustrem exatamente os artigos estudados hoje.
+   
+   - [BLOCK_5] (🎯 Desafio ATHENA - Questões Estritamente Temáticas):
+     * REGRA DE PERTINÊNCIA DAS QUESTÕES: 100% das questões geradas (objetivas ou discursiva/oral) DEVEM ter como objeto de cobrança EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
+     * É TERMINANTEMENTE PROIBIDO formular questões sobre artigos ou tópicos de fora deste recorte.
+     * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou súmula deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais.
+   
+   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).${hybridDirective}`;
 
     return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos estudar de forma PARTICIONADA o tema do DIA ${dayNum} (Semana ${semana}) para garantir profundidade monumental sem sobrecarga de processamento.
 
@@ -4250,12 +4264,30 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setMessages(truncatedMessages);
 
     try {
+      let promptToSend = prevMsg.content;
+      let partIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (activeSession?.trilhaMaterialIndex ?? 0);
+      let subjectName = msg.subject || guidedSubject;
+
+      if (dayNum !== undefined) {
+        const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
+        if (dayItem && dayItem.materias && dayItem.materias[partIdx]) {
+          subjectName = dayItem.materias[partIdx].nome;
+          promptToSend = getTrilhaDayPartitionMessage(
+            dayNum,
+            dayItem.materias,
+            partIdx,
+            dayItem.semana,
+            mentorshipStyle
+          );
+        }
+      }
+
       await handleSendMessageRequest(
-        prevMsg.content,
+        promptToSend,
         true,
         currentSessionId,
         msg.article || currentArticle,
-        msg.subject || guidedSubject,
+        subjectName,
         dayNum
       );
     } catch (err) {
