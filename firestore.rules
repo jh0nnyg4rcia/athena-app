@@ -120,8 +120,9 @@ service cloud.firestore {
     }
 
     match /homologated_lessons/{lessonId} {
-      allow get, list: if true;
-      allow write: if isAdmin();
+      allow read: if true;
+      allow create, update: if isAdmin() || incoming().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
+      allow delete: if isAdmin() || existing().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
     }
   }
 }

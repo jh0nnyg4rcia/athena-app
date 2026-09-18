@@ -4142,6 +4142,34 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           }, currentSessionId);
 
           try {
+            // Prioridade Máxima: Conteúdo Oficial Homologado pelo CEO (0.05s)
+            const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
+            if (homologated && homologated.content) {
+              const parsed = parseATHENAResponse(homologated.content);
+              const botMessage: Message = {
+                role: 'model',
+                content: parsed.content,
+                challenge: parsed.challenge,
+                blocks: parsed.blocks,
+                currentBlockIndex: 0,
+                subject: nextMat.nome,
+                article: 1,
+                sourceType: 'gemini',
+                modelName: 'Oficial Homologado pelo CEO',
+                trilhaMaterialIndex: nextMatIdx
+              };
+              const finalMessages = [...updatedMessages, botMessage];
+              setMessages(finalMessages);
+              setIsLoading(false);
+              await saveSession({
+                title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
+                guidedSubject: nextMat.nome,
+                trilhaMaterialIndex: nextMatIdx,
+                messages: finalMessages
+              }, currentSessionId);
+              return;
+            }
+
             const history = updatedMessages.slice(0, -1).map(m => ({
               role: m.role,
               parts: [{ text: m.content }]

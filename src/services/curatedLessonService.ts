@@ -109,7 +109,9 @@ export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<
     await setDoc(docRef, cleaned, { merge: true });
     console.log(`[CuratedLessonService] Lição ${docId} homologada e gravada com sucesso no Firestore!`);
   } catch (error) {
+    console.error(`[CuratedLessonService] Falha ao persistir ${docId} no Firestore:`, error);
     handleFirestoreError(error, OperationType.WRITE, `homologated_lessons/${docId}`);
+    throw error;
   }
 }
 
