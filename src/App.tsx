@@ -97,6 +97,7 @@ import {
   auth, 
   signInWithGoogle, 
   logOut, 
+  checkAndSyncNativeAuth,
   handleFirestoreError, 
   OperationType, 
   cleanData,
@@ -1897,17 +1898,21 @@ export default function App() {
   const handleGoogleLogin = async () => {
     setAuthError(null);
     try {
-      await signInWithGoogle();
+      const cred = await signInWithGoogle();
+      if (cred && 'user' in cred && cred.user) {
+        setUser(cred.user);
+      }
     } catch (err: any) {
       console.warn("Erro ao fazer login com Google:", err);
-      if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
-        setAuthError("Domínio não autorizado no Firebase. Para testar imediatamente no celular ou navegador, clique em 'Entrar como Aluno'.");
-      } else if (err?.code === 'auth/popup-closed-by-user') {
-        setAuthError("A janela do Google foi fechada antes de concluir o login.");
-      } else if (isNativeMobile() || err?.code === 'auth/operation-not-supported-in-this-environment') {
-        setAuthError("O Google Sign-In no Android exige certificado SHA-1 no Firebase Console. Para testar o app agora mesmo com 7 dias de acesso grátis, clique em 'Entrar como Aluno' abaixo.");
+      const msg = err?.message || String(err);
+      if (err?.code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+        setAuthError("Domínio não autorizado no Firebase. Para testar imediatamente, clique em 'Entrar como Aluno'.");
+      } else if (err?.code === 'auth/popup-closed-by-user' || msg.includes('16') || msg.toLowerCase().includes('cancel')) {
+        setAuthError("A seleção da Conta Google foi cancelada.");
+      } else if (msg.includes('network') || msg.includes('NETWORK')) {
+        setAuthError("Falha de conexão com os servidores do Google. Verifique sua conexão com a internet.");
       } else {
-        setAuthError(err?.message || "Não foi possível conectar com o Google no momento. Utilize o acesso de Aluno abaixo.");
+        setAuthError(err?.message || "Não foi possível conectar com a Conta Google no momento. Utilize o acesso de Aluno abaixo.");
       }
     }
   };
@@ -2137,6 +2142,8 @@ export default function App() {
       // Nenhum usuário local persistido: aguarda autenticação oficial via Google Sign-In
       setLoadingAuth(false);
     }
+
+    checkAndSyncNativeAuth();
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
