@@ -5448,6 +5448,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                         <span>Acesso Rápido Visitante (Degustação)</span>
                       </button>
                     </div>
+
+                    {/* Link da Política de Privacidade e LGPD */}
+                    <div className="pt-2 text-center">
+                      <a 
+                        href="https://jh0nnyg4rcia.github.io/athena-app/privacidade.html"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-slate-500 hover:text-brand-gold transition-colors inline-flex items-center gap-1 underline underline-offset-2"
+                      >
+                        <ShieldCheck size={12} />
+                        <span>Política de Privacidade & LGPD</span>
+                      </a>
+                    </div>
                   </div>
                 </div>
 
