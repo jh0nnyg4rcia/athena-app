@@ -56,7 +56,8 @@ import {
   Edit3,
   RefreshCw,
   Mail,
-  User as UserIcon
+  User as UserIcon,
+  Copy
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
@@ -84,6 +85,7 @@ import {
   query, 
   onSnapshot, 
   doc, 
+  getDoc,
   setDoc, 
   deleteDoc, 
   updateDoc,
@@ -1713,6 +1715,8 @@ export default function App() {
     };
 
     saveRegisteredStudentLocally(newStudent);
+    setLoginIdentifier(email);
+    setLoginAccessCode(accessCode);
 
     // Tenta persistir de forma não-bloqueante no Firestore
     try {
@@ -5483,21 +5487,35 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                         <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">
                           Seu Código de Acesso (Senha):
                         </p>
-                        <div className="text-3xl font-mono font-black text-brand-gold tracking-widest py-1">
+                        <div className="text-3xl font-mono font-black text-brand-gold tracking-widest py-1 select-all">
                           {registeredSuccess.accessCode}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(registeredSuccess.accessCode);
-                            setCopiedCode(true);
-                            setTimeout(() => setCopiedCode(false), 3000);
-                          }}
-                          className="text-[11px] text-brand-gold hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <Copy size={13} />
-                          <span>{copiedCode ? 'Código Copiado!' : 'Copiar Código de Acesso'}</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-3 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              try {
+                                navigator.clipboard.writeText(registeredSuccess.accessCode);
+                                setCopiedCode(true);
+                                setTimeout(() => setCopiedCode(false), 3000);
+                              } catch {}
+                            }}
+                            className="text-[11px] text-brand-gold hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Copy size={13} />
+                            <span>{copiedCode ? 'Código Copiado!' : 'Copiar Código'}</span>
+                          </button>
+
+                          <span className="text-slate-600 text-xs">•</span>
+
+                          <a
+                            href={`mailto:${registeredSuccess.email}?subject=Meu%20C%C3%B3digo%20de%20Acesso%20ATHENA&body=Ol%C3%A1%20${encodeURIComponent(registeredSuccess.fullName)}!%0A%0ASeu%20C%C3%B3digo%20de%20Acesso%20exclusivo%20para%20o%20app%20ATHENA%20%C3%A9:%20${registeredSuccess.accessCode}%0A%0AEmail%20de%20Login:%20${registeredSuccess.email}%0A%0ABons%20estudos!`}
+                            className="text-[11px] text-slate-300 hover:text-white hover:underline font-medium inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Mail size={13} className="text-brand-gold" />
+                            <span>Salvar no E-mail</span>
+                          </a>
+                        </div>
                       </div>
 
                       <p className="text-[11px] text-slate-400 leading-relaxed">

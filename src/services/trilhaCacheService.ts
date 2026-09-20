@@ -37,19 +37,22 @@ export function setCachedTrilhaPart(
   try {
     const key = `${CACHE_PREFIX}d${dayNum}_p${partIndex}_${style}`;
     let entry: TrilhaPartCache;
-    if (typeof textOrEntry === 'object' && textOrEntry !== null) {
+    if (typeof textOrEntry === 'string') {
+      const trimmed = textOrEntry.trim();
+      if (!trimmed) return;
       entry = {
-        text: textOrEntry.text.trim(),
+        text: trimmed,
+        model,
+        timestamp: Date.now()
+      };
+    } else if (textOrEntry && typeof textOrEntry === 'object') {
+      entry = {
+        text: (textOrEntry.text || '').trim(),
         model: textOrEntry.model || model,
         timestamp: textOrEntry.timestamp || Date.now()
       };
     } else {
-      if (!textOrEntry || !textOrEntry.trim()) return;
-      entry = {
-        text: textOrEntry.trim(),
-        model,
-        timestamp: Date.now()
-      };
+      return;
     }
     localStorage.setItem(key, JSON.stringify(entry));
     console.log(`[TrilhaCache] Parte ${partIndex + 1} do Dia ${dayNum} (${style}) armazenada em cache com sucesso.`);
