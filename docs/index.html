@@ -1,39 +1,177 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="scroll-smooth">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ATHENA — Mentoria Jurídica com Inteligência Artificial</title>
+  <title>ATHENA — Mentoria Jurídica com Inteligência Artificial | Método 80/20 de Pareto</title>
+  
+  <!-- SEO & Metatags -->
+  <meta name="description" content="A mais avançada mentoria jurídica potencializada por Inteligência Artificial para carreiras jurídicas de elite. Domine a Magistratura, MP, Defensorias e OAB com a Trilha dos 100 Dias de Pareto.">
+  <meta name="keywords" content="Mentoria Jurídica, Concursos Públicos, Magistratura, Ministério Público, OAB, Inteligência Artificial, Método de Pareto, STF, STJ, Jurisprudência, Direito Constitucional">
+  <meta name="author" content="ATHENA Mentoria Jurídica">
+  <link rel="canonical" href="https://projetoathena.app.br">
+
+  <!-- Open Graph / WhatsApp / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://projetoathena.app.br/">
+  <meta property="og:title" content="ATHENA — Mentoria Jurídica com Inteligência Artificial">
+  <meta property="og:description" content="Preparação de alta performance para carreiras jurídicas com o Método 80/20 de Pareto, Jurisprudência STF/STJ e simulados comentados.">
+  <meta property="og:image" content="https://projetoathena.app.br/athena-banner.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ATHENA — Mentoria Jurídica com Inteligência Artificial">
+  <meta name="twitter:description" content="A mais avançada plataforma de mentoria jurídica adaptativa para aprovação em concursos de ponta.">
+  <meta name="twitter:image" content="https://projetoathena.app.br/athena-banner.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="athena-icon.png">
+  <link rel="apple-touch-icon" href="athena-icon.png">
+
+  <!-- Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
   <style>
     :root {
-      --bg-dark: #070a12;
-      --card-bg: #0f172a;
+      --bg-dark: #080c14;
+      --bg-card: #0f1626;
+      --bg-card-hover: #162035;
       --gold: #f59e0b;
       --gold-light: #fbbf24;
+      --gold-dark: #b45309;
       --emerald: #10b981;
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
+      --border-card: rgba(245, 158, 11, 0.2);
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, var(--bg-dark) 70%);
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(30, 27, 75, 0.4) 0%, transparent 60%),
+        radial-gradient(circle at 100% 40%, rgba(245, 158, 11, 0.05) 0%, transparent 40%);
       color: var(--text-main);
       font-family: 'Plus Jakarta Sans', sans-serif;
       line-height: 1.6;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
+      overflow-x: hidden;
     }
-    .hero {
-      max-width: 960px;
+
+    .font-serif { font-family: 'Cinzel', serif; }
+
+    /* Glassmorphism Navbar */
+    .glass-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 50;
+      background: rgba(8, 12, 20, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      transition: all 0.3s ease;
+    }
+
+    .nav-container {
+      max-width: 1200px;
       margin: 0 auto;
-      padding: 5rem 1.5rem 3rem;
-      text-align: center;
+      padding: 0.85rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
-    .badge {
+
+    .logo-box {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+    }
+
+    .logo-img {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);
+    }
+
+    .logo-text {
+      font-family: 'Cinzel', serif;
+      font-weight: 900;
+      font-size: 1.35rem;
+      letter-spacing: 0.05em;
+      background: linear-gradient(135deg, #ffffff 40%, var(--gold-light) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 1.75rem;
+      list-style: none;
+    }
+
+    .nav-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-link:hover { color: var(--gold-light); }
+
+    .nav-cta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.75rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-gold {
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      color: #080c14;
+      box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.4);
+    }
+
+    .btn-gold:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 15px 30px -5px rgba(245, 158, 11, 0.5);
+      filter: brightness(1.05);
+    }
+
+    .btn-outline {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+    }
+
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+    }
+
+    .badge-pill {
       display: inline-flex;
       align-items: center;
       gap: 0.5rem;
@@ -42,154 +180,881 @@
       color: var(--gold-light);
       padding: 0.4rem 1.25rem;
       border-radius: 9999px;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 700;
       letter-spacing: 0.06em;
       text-transform: uppercase;
-      margin-bottom: 2rem;
+      margin-bottom: 1.5rem;
     }
-    h1 {
-      font-family: 'Cinzel', serif;
-      font-size: 3.2rem;
+
+    /* Container */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Hero */
+    .hero-section {
+      padding: 8.5rem 1.5rem 5rem;
+      text-align: center;
+    }
+
+    .hero-title {
+      font-size: clamp(2.4rem, 5.5vw, 4rem);
       font-weight: 900;
-      color: #fff;
       line-height: 1.15;
       margin-bottom: 1.5rem;
-      background: linear-gradient(135deg, #ffffff 30%, var(--gold-light) 100%);
+      background: linear-gradient(135deg, #ffffff 40%, var(--gold-light) 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
+      max-width: 980px;
+      margin-left: auto;
+      margin-right: auto;
     }
-    .lead {
-      font-size: 1.25rem;
+
+    .hero-subtitle {
+      font-size: clamp(1.05rem, 2.2vw, 1.3rem);
       color: var(--text-muted);
-      max-width: 720px;
+      max-width: 820px;
       margin: 0 auto 2.5rem;
+      font-weight: 400;
     }
-    .cta-group {
+
+    .hero-ctas {
       display: flex;
-      gap: 1rem;
       justify-content: center;
+      gap: 1rem;
       flex-wrap: wrap;
       margin-bottom: 4rem;
     }
-    .btn-gold {
-      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-      color: #0b0f19;
-      font-weight: 700;
-      font-size: 1.05rem;
-      padding: 1rem 2rem;
-      border-radius: 0.75rem;
-      text-decoration: none;
-      box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.4);
-      transition: transform 0.2s, box-shadow 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.6rem;
-    }
-    .btn-gold:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 15px 30px -5px rgba(245, 158, 11, 0.5);
-    }
-    .btn-outline {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: #fff;
-      font-weight: 600;
-      font-size: 1.05rem;
-      padding: 1rem 2rem;
-      border-radius: 0.75rem;
-      text-decoration: none;
-      transition: background 0.2s;
-    }
-    .btn-outline:hover {
-      background: rgba(255, 255, 255, 0.1);
-    }
-    .features {
-      max-width: 1024px;
+
+    .hero-banner-wrap {
+      max-width: 900px;
       margin: 0 auto;
-      padding: 0 1.5rem 4rem;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 1.75rem;
+      border-radius: 1.25rem;
+      overflow: hidden;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(245, 158, 11, 0.15);
+      transition: transform 0.3s;
     }
-    .feature-card {
-      background: var(--card-bg);
+
+    .hero-banner-wrap:hover {
+      transform: scale(1.01);
+    }
+
+    .hero-banner-img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* Metrics Grid */
+    .metrics-section {
+      padding: 3rem 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(15, 22, 38, 0.5);
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 2rem;
+      text-align: center;
+    }
+
+    .metric-number {
+      font-family: 'Cinzel', serif;
+      font-size: 2.7rem;
+      font-weight: 800;
+      color: var(--gold-light);
+      margin-bottom: 0.3rem;
+    }
+
+    .metric-label {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 1.25rem;
       padding: 2.25rem;
+      transition: all 0.3s ease;
       box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
     }
-    .feature-card h3 {
-      font-family: 'Cinzel', serif;
-      font-size: 1.3rem;
-      color: var(--gold-light);
-      margin-bottom: 0.75rem;
+
+    .card:hover {
+      border-color: rgba(245, 158, 11, 0.3);
+      background: var(--bg-card-hover);
+      transform: translateY(-4px);
     }
-    .feature-card p {
+
+    /* Section Headers */
+    .section-head {
+      text-align: center;
+      max-width: 760px;
+      margin: 0 auto 3.5rem;
+    }
+
+    .section-tag {
+      color: var(--gold);
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+
+    .section-title {
+      font-size: clamp(1.8rem, 3.5vw, 2.5rem);
+      font-weight: 800;
+      margin-bottom: 1rem;
+    }
+
+    .section-desc {
       color: var(--text-muted);
+      font-size: 1.05rem;
+    }
+
+    /* 6 Blocks Grid */
+    .blocks-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.75rem;
+    }
+
+    .block-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--gold-light);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 0.9rem;
+      margin-bottom: 1.25rem;
+    }
+
+    /* Interactive Simulator */
+    .simulator-wrap {
+      background: #0b111e;
+      border: 2px solid rgba(245, 158, 11, 0.4);
+      border-radius: 1.5rem;
+      padding: 2.5rem;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(245, 158, 11, 0.15);
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .quiz-option {
+      background: #121927;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 0.85rem;
+      padding: 1.15rem 1.25rem;
+      margin-bottom: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      transition: all 0.2s ease;
       font-size: 0.98rem;
     }
+
+    .quiz-option:hover {
+      border-color: var(--gold);
+      background: #172134;
+      transform: translateX(4px);
+    }
+
+    .quiz-letter {
+      background: rgba(255, 255, 255, 0.1);
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      flex-shrink: 0;
+      font-size: 0.85rem;
+    }
+
+    .quiz-option.correct {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: #10b981;
+      color: #ecfdf5;
+    }
+    .quiz-option.correct .quiz-letter {
+      background: #10b981;
+      color: #064e3b;
+    }
+
+    .quiz-option.wrong {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: #ef4444;
+      color: #fef2f2;
+    }
+    .quiz-option.wrong .quiz-letter {
+      background: #ef4444;
+      color: #450a0a;
+    }
+
+    .explanation-box {
+      margin-top: 1.5rem;
+      padding: 1.5rem;
+      border-radius: 1rem;
+      background: rgba(16, 185, 129, 0.08);
+      border-left: 4px solid #10b981;
+      display: none;
+      animation: fadeIn 0.4s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Screenshots Gallery */
+    .screenshots-scroll {
+      display: flex;
+      gap: 1.5rem;
+      overflow-x: auto;
+      padding: 1rem 0.5rem 2rem;
+      scrollbar-width: thin;
+      scrollbar-color: var(--gold) #111827;
+    }
+
+    .mockup-item {
+      flex: 0 0 280px;
+      border-radius: 1.25rem;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.6);
+      transition: transform 0.3s;
+    }
+
+    .mockup-item:hover {
+      transform: translateY(-8px);
+      border-color: var(--gold);
+    }
+
+    .mockup-item img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* Pricing */
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 2rem;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .pricing-card.featured {
+      border: 2px solid var(--gold);
+      background: linear-gradient(180deg, #162035 0%, #0e1526 100%);
+      transform: scale(1.03);
+      position: relative;
+    }
+
+    .popular-tag {
+      position: absolute;
+      top: -14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #080c14;
+      font-size: 0.75rem;
+      font-weight: 800;
+      padding: 0.3rem 1.25rem;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* FAQ */
+    .faq-list {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .faq-item {
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 1rem;
+      margin-bottom: 1rem;
+      overflow: hidden;
+    }
+
+    .faq-question {
+      padding: 1.35rem 1.5rem;
+      font-weight: 700;
+      font-size: 1.05rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: color 0.2s;
+    }
+
+    .faq-question:hover { color: var(--gold-light); }
+
+    .faq-answer {
+      padding: 0 1.5rem 1.35rem;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      display: none;
+    }
+
+    .faq-item.active .faq-answer { display: block; }
+    .faq-item.active .faq-icon { transform: rotate(180deg); }
+
+    /* Footer */
     footer {
-      margin-top: auto;
       background: #050810;
       border-top: 1px solid rgba(255, 255, 255, 0.06);
-      padding: 2.5rem 1.5rem;
-      text-align: center;
+      padding: 4rem 1.5rem 2.5rem;
       color: var(--text-muted);
+    }
+
+    .footer-grid {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 3rem;
+      margin-bottom: 3rem;
+    }
+
+    .footer-col h4 {
+      font-family: 'Cinzel', serif;
+      color: #fff;
+      font-size: 1.1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .footer-col ul {
+      list-style: none;
+    }
+
+    .footer-col li {
+      margin-bottom: 0.65rem;
+    }
+
+    .footer-col a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
       font-size: 0.9rem;
     }
-    footer a {
-      color: var(--gold-light);
-      text-decoration: none;
-      margin: 0 0.75rem;
+
+    .footer-col a:hover { color: var(--gold-light); }
+
+    .footer-bottom {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      text-align: center;
+      font-size: 0.85rem;
     }
-    footer a:hover {
-      text-decoration: underline;
+
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .pricing-card.featured { transform: none; }
     }
   </style>
 </head>
 <body>
 
-  <header class="hero">
-    <img src="athena-icon.png" alt="ATHENA Logo" style="width: 120px; height: 120px; border-radius: 26px; box-shadow: 0 10px 30px rgba(0,0,0,0.6), 0 0 20px rgba(245, 158, 11, 0.35); margin-bottom: 1.5rem;" />
-    <div class="badge">⚖️ A Mais Avançada Inteligência Artificial Jurídica</div>
-    <h1>ATHENA Mentoria Jurídica</h1>
-    <p class="lead">Preparação de alta performance para Carreiras Jurídicas e Concursos Públicos com o Método 80/20 de Pareto, Jurisprudência consolidada do STF/STJ e simulados comentados.</p>
-    <div style="max-width: 720px; margin: 0 auto 2.5rem; border-radius: 1rem; overflow: hidden; box-shadow: 0 15px 35px rgba(0,0,0,0.6); border: 1px solid rgba(245, 158, 11, 0.3);">
-      <img src="athena-banner.png" alt="ATHENA Banner" style="width: 100%; height: auto; display: block;" />
-    </div>
-    <div class="cta-group">
-      <a href="https://github.com/jh0nnyg4rcia/athena-app/releases" class="btn-gold">
-        📲 Baixar Aplicativo Android
+  <!-- NAVBAR -->
+  <header class="glass-nav">
+    <div class="nav-container">
+      <a href="#" class="logo-box">
+        <img src="athena-icon.png" alt="ATHENA" class="logo-img">
+        <span class="logo-text">ATHENA</span>
       </a>
-      <a href="privacidade.html" class="btn-outline">
-        🛡️ Política de Privacidade
-      </a>
+
+      <ul class="nav-links">
+        <li><a href="#metodologia" class="nav-link">Metodologia</a></li>
+        <li><a href="#blocos" class="nav-link">6 Blocos</a></li>
+        <li><a href="#simulador" class="nav-link">Simulador IA</a></li>
+        <li><a href="#trilha" class="nav-link">Trilha 100 Dias</a></li>
+        <li><a href="#planos" class="nav-link">Planos</a></li>
+        <li><a href="#faq" class="nav-link">FAQ</a></li>
+      </ul>
+
+      <div class="nav-cta">
+        <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" download>
+          📲 Baixar App
+        </a>
+      </div>
     </div>
   </header>
 
-  <main class="features">
-    <div class="feature-card">
-      <h3>🏛️ Trilha de 100 Dias de Pareto</h3>
-      <p>Estude os 20% das matérias e teses que respondem por 80% das questões das bancas de elite (Magistratura, Ministério Público e Defensoria).</p>
-    </div>
-    <div class="feature-card">
-      <h3>🧠 Jurisprudência STF e STJ</h3>
-      <p>Revisão diária com teses de repercussão geral, recursos repetitivos e enunciados sumulares sem alucinações.</p>
-    </div>
-    <div class="feature-card">
-      <h3>🎯 10 Questões Inéditas por Aula</h3>
-      <p>Simulados objetivos e dissertativos com gabarito fundamentado letra por letra para fixação definitiva da matéria.</p>
-    </div>
-  </main>
+  <!-- HERO SECTION -->
+  <section class="hero-section">
+    <div class="container">
+      <div class="badge-pill">🏛️ Inteligência Artificial para Carreiras Jurídicas</div>
+      
+      <h1 class="hero-title font-serif">
+        A Mais Avançada Mentoria Jurídica com IA para Carreiras de Elite
+      </h1>
 
+      <p class="hero-subtitle">
+        Conquiste a sua vaga na <strong>Magistratura, Ministério Público, Defensorias e OAB</strong>. Domine o núcleo de 20% das disciplinas que respondem por 80% das provas com jurisprudência do STF/STJ e simulados comentados alternativa por alternativa.
+      </p>
+
+      <div class="hero-ctas">
+        <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" download>
+          📲 Baixar APK Android (Grátis)
+        </a>
+        <a href="#simulador" class="btn btn-outline">
+          🧠 Testar a IA ao Vivo
+        </a>
+      </div>
+
+      <div class="hero-banner-wrap">
+        <img src="athena-banner.png" alt="ATHENA Mentoria Jurídica — Banner Oficial" class="hero-banner-img">
+      </div>
+    </div>
+  </section>
+
+  <!-- METRICS / TRUST -->
+  <section class="metrics-section">
+    <div class="container">
+      <div class="metrics-grid">
+        <div>
+          <div class="metric-number">100</div>
+          <div class="metric-label">Dias de Trilha Estruturada</div>
+        </div>
+        <div>
+          <div class="metric-number">80/20</div>
+          <div class="metric-label">Método de Pareto Focado</div>
+        </div>
+        <div>
+          <div class="metric-number">1.000+</div>
+          <div class="metric-label">Questões Inéditas Comentadas</div>
+        </div>
+        <div>
+          <div class="metric-number">0%</div>
+          <div class="metric-label">Alucinações Jurisprudenciais</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- METODOLOGIA PARETO -->
+  <section id="metodologia" style="padding: 6rem 0;">
+    <div class="container">
+      <div class="section-head">
+        <div class="section-tag">Eficiência Absoluta</div>
+        <h2 class="section-title font-serif">O Fim do Estudo Disperso</h2>
+        <p class="section-desc">Por que ler manuais enciclopédicos de 2.000 páginas se as bancas de concurso repetem padrões claros de cobrança?</p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem;">
+        <div class="card" style="border-left: 4px solid #ef4444;">
+          <h3 class="font-serif" style="color: #f87171; font-size: 1.35rem; margin-bottom: 1rem;">❌ Estudo Tradicional Disperso</h3>
+          <ul style="color: var(--text-muted); list-style: none; space-y: 0.75rem;">
+            <li style="margin-bottom: 0.75rem;">• Leitura passiva de milhares de páginas que nunca caem na prova.</li>
+            <li style="margin-bottom: 0.75rem;">• Memorização de número de acórdãos sem compreender a <em>Ratio Decidendi</em>.</li>
+            <li style="margin-bottom: 0.75rem;">• Sensação constante de sobrecarga e curva de esquecimento acelerada.</li>
+            <li>• Falta de prática diária de resolução de questões com feedback imediato.</li>
+          </ul>
+        </div>
+
+        <div class="card" style="border-left: 4px solid var(--gold); background: linear-gradient(180deg, #131d33 0%, #0d1424 100%);">
+          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.35rem; margin-bottom: 1rem;">⚡ O Método ATHENA (Pareto 80/20)</h3>
+          <ul style="color: #d1d5db; list-style: none;">
+            <li style="margin-bottom: 0.75rem;">• Foco cirúrgico nos 20% das teses que respondem por 80% das aprovações.</li>
+            <li style="margin-bottom: 0.75rem;">• Jurisprudência consolidada do STF e STJ com teses vinculantes e repercussão geral.</li>
+            <li style="margin-bottom: 0.75rem;">• 6 Blocos diários que combinam doutrina, lei seca, jurisprudência e 10 questões.</li>
+            <li>• Economia estimada de mais de 350 horas de estudo no ano.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- OS 6 BLOCOS PEDAGÓGICOS -->
+  <section id="blocos" style="padding: 6rem 0; background: rgba(15, 22, 38, 0.4);">
+    <div class="container">
+      <div class="section-head">
+        <div class="section-tag">Engenharia Pedagógica</div>
+        <h2 class="section-title font-serif">Os 6 Blocos da Mentoria Diária</h2>
+        <p class="section-desc">Cada dia na plataforma ATHENA é dividido em 6 módulos sequenciais para garantir retenção definitiva e segurança técnica.</p>
+      </div>
+
+      <div class="blocks-grid">
+        <div class="card">
+          <div class="block-number">01</div>
+          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Jurisprudência em Teses</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem;">Análise minuciosa de julgados paradigmáticos do STF e STJ, com a <em>Ratio Decidendi</em> destacada e livre de alucinações.</p>
+        </div>
+
+        <div class="card">
+          <div class="block-number">02</div>
+          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Fundamentação Constitucional</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem;">Articulação com o texto expresso da Constituição Federal de 1988 e a legislação infraconstitucional vigente.</p>
+        </div>
+
+        <div class="card">
+          <div class="block-number">03</div>
+          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Doutrina Majoritária</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem;">Síntese das correntes dominantes nos tribunais e as pegadinhas conceituais favoritas de bancas examinadoras.</p>
+        </div>
+
+        <div class="card">
+          <div class="block-number">04</div>
+          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Casos Práticos Forenses</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem;">Aplicação direta do direito a cenários concretos da prática judiciária, preparando o candidato para as fases discursivas.</p>
+        </div>
+
+        <div class="card">
+          <div class="block-number">05</div>
+          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">10 Questões Comentadas</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem;">Simulado inédito de fixação imediata com justificativa jurídica fundamentada para cada alternativa (A, B, C e D).</p>
+        </div>
+
+        <div class="card">
+          <div class="block-number">06</div>
+          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Desafio Discursivo & Oral</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem;">Treinamento de argumentação oral e redação jurídica com avaliação e pontuação de precisão terminológica pela IA.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIMULADOR INTERATIVO AO VIVO -->
+  <section id="simulador" style="padding: 6rem 0;">
+    <div class="container">
+      <div class="section-head">
+        <div class="section-tag">Demonstração Interativa</div>
+        <h2 class="section-title font-serif">Experimente a IA da ATHENA Agora</h2>
+        <p class="section-desc">Resolva a questão real de Direito Constitucional abaixo e veja o gabarito fundamentado gerado instantaneamente:</p>
+      </div>
+
+      <div class="simulator-wrap">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+          <span style="color: var(--gold-light); font-weight: 700; font-size: 0.9rem; text-transform: uppercase;">
+            ⚖️ Direito Constitucional • Magistratura / MP
+          </span>
+          <span style="background: rgba(245, 158, 11, 0.2); color: var(--gold-light); padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 700;">
+            +50 XP
+          </span>
+        </div>
+
+        <p style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1.75rem; line-height: 1.6;">
+          Com base na Constituição Federal de 1988 e na jurisprudência vinculante do Supremo Tribunal Federal (STF) sobre Direitos Fundamentais, assinale a alternativa <strong>CORRETA</strong>:
+        </p>
+
+        <div id="quiz-options">
+          <div class="quiz-option" onclick="handleSelectOption(this, false, 'A')">
+            <div class="quiz-letter">A</div>
+            <div>A inviolabilidade do domicílio é absoluta, não admitindo ingresso sem mandado em caso de flagrante delito durante a noite.</div>
+          </div>
+
+          <div class="quiz-option" onclick="handleSelectOption(this, true, 'B')">
+            <div class="quiz-letter">B</div>
+            <div>A entrada forçada em domicílio sem mandado judicial só é lícita, mesmo em período noturno, quando amparada em fundadas razões devidamente justificadas a posteriori.</div>
+          </div>
+
+          <div class="quiz-option" onclick="handleSelectOption(this, false, 'C')">
+            <div class="quiz-letter">C</div>
+            <div>A exigência de aviso prévio às autoridades para reunião pacífica em locais abertos ao público constitui condição indispensável de validade sob pena de ilicitude do ato.</div>
+          </div>
+
+          <div class="quiz-option" onclick="handleSelectOption(this, false, 'D')">
+            <div class="quiz-letter">D</div>
+            <div>O direito à escusa de consciência permite ao cidadão recusar o cumprimento de obrigação legal sem qualquer sujeição a prestação alternativa fixada em lei.</div>
+          </div>
+        </div>
+
+        <div id="explanation-box" class="explanation-box">
+          <h4 style="color: #10b981; font-weight: 800; font-size: 1.1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span>🎉 Gabarito Oficial Comentado pela IA ATHENA</span>
+          </h4>
+          <p style="color: #d1d5db; font-size: 0.95rem; margin-bottom: 0.5rem;">
+            <strong>Alternativa B está CORRETA.</strong> Trata-se da tese fixada pelo STF no <strong>Tema 280 da Repercussão Geral (RE 603.616)</strong>: <em>"A entrada forçada em domicílio sem mandado judicial só é lícita, mesmo em período noturno, quando amparada em fundadas razões, devidamente justificadas a posteriori, que indiquem que dentro da casa ocorre situação de flagrante delito."</em>
+          </p>
+          <p style="color: #9ca3af; font-size: 0.85rem;">
+            As demais alternativas são incorretas: A) O domicílio não é inviolável de forma absoluta (Art. 5º, XI); C) No Tema 855/STF, fixou-se que a falta de aviso prévio não invalida a manifestação se a comunicação for obtida por outros meios; D) A recusa desprovida de cumprimento de prestação alternativa acarreta a perda de direitos políticos (Art. 5º, VIII c/c Art. 15, IV, CF/88).
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MOCKUPS / TELAS REAIS -->
+  <section style="padding: 6rem 0; background: rgba(15, 22, 38, 0.4);">
+    <div class="container">
+      <div class="section-head">
+        <div class="section-tag">Interface Premium</div>
+        <h2 class="section-title font-serif">Projetado para Foco Absoluto</h2>
+        <p class="section-desc">Uma experiência visual elegante, fluida e escura, desenvolvida para não cansar sua visão mesmo em longas jornadas de estudo.</p>
+      </div>
+
+      <div class="screenshots-scroll">
+        <div class="mockup-item">
+          <img src="images/1_BoasVindas_1080x1920.png" alt="Tela Inicial ATHENA">
+        </div>
+        <div class="mockup-item">
+          <img src="images/2_Trilha100Dias_1080x1920.png" alt="Trilha dos 100 Dias">
+        </div>
+        <div class="mockup-item">
+          <img src="images/3_MentoriaJuridica_1080x1920.png" alt="Mentoria e Jurisprudência">
+        </div>
+        <div class="mockup-item">
+          <img src="images/4_SimuladoQuestoes_1080x1920.png" alt="Simulado Comentado">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CARREIRAS ATENDIDAS -->
+  <section id="trilha" style="padding: 6rem 0;">
+    <div class="container">
+      <div class="section-head">
+        <div class="section-tag">Para os Mais Concorridos</div>
+        <h2 class="section-title font-serif">Carreiras Jurídicas de Elite</h2>
+        <p class="section-desc">A mentoria é calibrada nas matrizes curriculares dos concursos mais exigentes do país:</p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem;">
+        <div class="card" style="text-align: center;">
+          <div style="font-size: 2.2rem; margin-bottom: 0.75rem;">⚖️</div>
+          <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.2rem; margin-bottom: 0.5rem;">Magistratura</h4>
+          <p style="color: var(--text-muted); font-size: 0.9rem;">Juiz de Direito Estadual e Juiz Federal.</p>
+        </div>
+
+        <div class="card" style="text-align: center;">
+          <div style="font-size: 2.2rem; margin-bottom: 0.75rem;">🏛️</div>
+          <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.2rem; margin-bottom: 0.5rem;">Ministério Público</h4>
+          <p style="color: var(--text-muted); font-size: 0.9rem;">Promotor de Justiça (MPE) e Procurador da República (MPF).</p>
+        </div>
+
+        <div class="card" style="text-align: center;">
+          <div style="font-size: 2.2rem; margin-bottom: 0.75rem;">🛡️</div>
+          <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.2rem; margin-bottom: 0.5rem;">Defensoria Pública</h4>
+          <p style="color: var(--text-muted); font-size: 0.9rem;">Defensor Público Estadual (DPE) e Federal (DPU).</p>
+        </div>
+
+        <div class="card" style="text-align: center;">
+          <div style="font-size: 2.2rem; margin-bottom: 0.75rem;">📜</div>
+          <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.2rem; margin-bottom: 0.5rem;">Procuradorias & OAB</h4>
+          <p style="color: var(--text-muted); font-size: 0.9rem;">AGU, Procuradorias dos Estados, Delegado de Polícia e Exame de Ordem.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLANOS E ASSINATURA -->
+  <section id="planos" style="padding: 6rem 0; background: rgba(15, 22, 38, 0.4);">
+    <div class="container">
+      <div class="section-head">
+        <div class="section-tag">Acesso & Investimento</div>
+        <h2 class="section-title font-serif">Escolha o Seu Plano de Aprovação</h2>
+        <p class="section-desc">Comece gratuitamente agora mesmo e tenha acesso a toda a inteligência jurídica da ATHENA.</p>
+      </div>
+
+      <div class="pricing-grid">
+        <!-- PLANO 1: DEGUSTAÇÃO -->
+        <div class="card pricing-card">
+          <h3 class="font-serif" style="font-size: 1.35rem; color: #fff; margin-bottom: 0.5rem;">Degustação</h3>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Para você experimentar o poder da IA.</p>
+          <div style="font-size: 2.8rem; font-weight: 800; color: #fff; margin-bottom: 1.5rem;">
+            R$ 0 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ 7 dias</span>
+          </div>
+          <ul style="list-style: none; margin-bottom: 2rem; color: #d1d5db; font-size: 0.95rem;">
+            <li style="margin-bottom: 0.75rem;">✓ Acesso aos primeiros dias da Trilha</li>
+            <li style="margin-bottom: 0.75rem;">✓ 10 Questões comentadas por dia</li>
+            <li style="margin-bottom: 0.75rem;">✓ Jurisprudência com Ratio Decidendi</li>
+            <li>✓ Sem necessidade de cartão de crédito</li>
+          </ul>
+          <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-outline" style="width: 100%;" download>
+            Começar Grátis (7 Dias)
+          </a>
+        </div>
+
+        <!-- PLANO 2: MENSAL (DESTAQUE) -->
+        <div class="card pricing-card featured">
+          <div class="popular-tag">Mais Escolhido</div>
+          <h3 class="font-serif" style="font-size: 1.35rem; color: var(--gold-light); margin-bottom: 0.5rem;">Mentoria Completa</h3>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Acesso irrestrito a toda a plataforma.</p>
+          <div style="font-size: 2.8rem; font-weight: 800; color: var(--gold-light); margin-bottom: 1.5rem;">
+            R$ 97 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ mês</span>
+          </div>
+          <ul style="list-style: none; margin-bottom: 2rem; color: #d1d5db; font-size: 0.95rem;">
+            <li style="margin-bottom: 0.75rem;">✓ Trilha completa dos 100 Dias de Pareto</li>
+            <li style="margin-bottom: 0.75rem;">✓ Mais de 1.000 questões com gabarito item por item</li>
+            <li style="margin-bottom: 0.75rem;">✓ Atualização de Jurisprudência STF/STJ em tempo real</li>
+            <li style="margin-bottom: 0.75rem;">✓ Avaliação de Provas Orais e Discursivas com IA</li>
+            <li>✓ Cancele a qualquer momento sem taxas</li>
+          </ul>
+          <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" style="width: 100%;" download>
+            Assinar Mentoria Completa
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" style="padding: 6rem 0;">
+    <div class="container">
+      <div class="section-head">
+        <div class="section-tag">Tire Suas Dúvidas</div>
+        <h2 class="section-title font-serif">Perguntas Frequentes</h2>
+      </div>
+
+      <div class="faq-list">
+        <div class="faq-item active">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span>Como funciona a degustação de 7 dias grátis?</span>
+            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
+          </div>
+          <div class="faq-answer">
+            Basta baixar o aplicativo Android ou acessar a plataforma web e se cadastrar com Nome, CPF e E-mail. Você receberá um Código de Acesso exclusivo de 6 dígitos e poderá estudar imediatamente sem qualquer cobrança.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span>A jurisprudência do STF e STJ é realmente atualizada?</span>
+            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
+          </div>
+          <div class="faq-answer">
+            Sim. A ATHENA conta com curadoria especializada que valida todas as teses de Repercussão Geral, Recursos Repetitivos e Enunciados Sumulares com parâmetros de baixa temperatura na IA, eliminando números fictícios ou teses superadas.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span>O aplicativo funciona em qualquer celular Android?</span>
+            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
+          </div>
+          <div class="faq-answer">
+            Sim. O aplicativo é compatível com smartphones Android rodando a partir do Android 7.0 (Nougat) até as versões mais recentes (Android 14 e 15), com otimização para economia de bateria e baixo consumo de dados.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span>Como posso solicitar o cancelamento ou a exclusão dos meus dados?</span>
+            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
+          </div>
+          <div class="faq-answer">
+            Em estrita conformidade com a LGPD e as normas da Google Play, você pode solicitar a exclusão definitiva da sua conta ou o cancelamento da assinatura a qualquer momento enviando um e-mail para <strong>jhonny.spider@gmail.com</strong>.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA FINAL -->
+  <section style="padding: 6rem 0; text-align: center; background: radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.12) 0%, transparent 70%);">
+    <div class="container">
+      <h2 class="font-serif" style="font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; margin-bottom: 1.25rem;">
+        Pronto para Elevar o Seu Nível de Estudos?
+      </h2>
+      <p style="color: var(--text-muted); font-size: 1.15rem; max-width: 600px; margin: 0 auto 2.5rem;">
+        Junte-se à nova era da preparação jurídica com a mentoria adaptativa da ATHENA.
+      </p>
+      <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" style="font-size: 1.1rem; padding: 1.15rem 2.5rem;" download>
+        📲 Baixar o Aplicativo Agora
+      </a>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
   <footer>
-    <p>&copy; 2026 ATHENA Mentoria Jurídica. Desenvolvido por Jhonny Garcia.</p>
-    <p style="margin-top: 0.75rem;">
-      <a href="privacidade.html">Política de Privacidade (LGPD)</a> •
-      <a href="mailto:jhonny.spider@gmail.com">Contato de Suporte</a>
-    </p>
+    <div class="footer-grid">
+      <div class="footer-col">
+        <div class="logo-box" style="margin-bottom: 1rem;">
+          <img src="athena-icon.png" alt="ATHENA" class="logo-img">
+          <span class="logo-text">ATHENA</span>
+        </div>
+        <p style="font-size: 0.88rem; line-height: 1.6;">
+          Plataforma de inteligência artificial jurídica de alta performance voltada para carreiras de elite e concursos públicos.
+        </p>
+      </div>
+
+      <div class="footer-col">
+        <h4>Navegação</h4>
+        <ul>
+          <li><a href="#metodologia">Metodologia Pareto</a></li>
+          <li><a href="#blocos">Os 6 Blocos</a></li>
+          <li><a href="#simulador">Simulador Interativo</a></li>
+          <li><a href="#planos">Planos & Preços</a></li>
+          <li><a href="#faq">Perguntas Frequentes</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Legal e Segurança</h4>
+        <ul>
+          <li><a href="privacidade.html">Política de Privacidade (LGPD)</a></li>
+          <li><a href="termos.html">Termos de Uso e Serviço</a></li>
+          <li><a href="mailto:jhonny.spider@gmail.com">Contato do Encarregado (DPO)</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Download</h4>
+        <ul>
+          <li><a href="download/ATHENA-Mentoria-Juridica.apk" download>Baixar APK Android</a></li>
+          <li><a href="https://play.google.com/store/apps/details?id=com.athena.mentoria" target="_blank" rel="noopener">Google Play Store</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p>&copy; 2026 ATHENA Mentoria Jurídica • Domínio Oficial: <strong>projetoathena.app.br</strong></p>
+      <p style="margin-top: 0.4rem; color: #64748b; font-size: 0.8rem;">
+        Desenvolvido com excelência técnica por Jhonny Garcia. Todos os direitos reservados.
+      </p>
+    </div>
   </footer>
+
+  <!-- Interatividade JS -->
+  <script>
+    function handleSelectOption(element, isCorrect, letter) {
+      const options = document.querySelectorAll('.quiz-option');
+      options.forEach(opt => {
+        opt.style.pointerEvents = 'none';
+      });
+
+      if (isCorrect) {
+        element.classList.add('correct');
+      } else {
+        element.classList.add('wrong');
+        // destaca a correta
+        options[1].classList.add('correct');
+      }
+
+      const explanation = document.getElementById('explanation-box');
+      explanation.style.display = 'block';
+    }
+
+    function toggleFaq(element) {
+      const parent = element.parentElement;
+      parent.classList.toggle('active');
+    }
+  </script>
 
 </body>
 </html>

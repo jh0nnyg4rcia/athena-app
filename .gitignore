@@ -15,6 +15,7 @@ android/app/build/
 android/local.properties
 android/.idea/
 *.apk
+!docs/download/*.apk
 *.aab
 
 # Internal IDE and Telemetry
