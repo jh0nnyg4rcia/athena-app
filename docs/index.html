@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ATHENA — Mentoria Jurídica com Inteligência Artificial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #070a12;
+      --card-bg: #0f172a;
+      --gold: #f59e0b;
+      --gold-light: #fbbf24;
+      --emerald: #10b981;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, var(--bg-dark) 70%);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .hero {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 5rem 1.5rem 3rem;
+      text-align: center;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      color: var(--gold-light);
+      padding: 0.4rem 1.25rem;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+    }
+    h1 {
+      font-family: 'Cinzel', serif;
+      font-size: 3.2rem;
+      font-weight: 900;
+      color: #fff;
+      line-height: 1.15;
+      margin-bottom: 1.5rem;
+      background: linear-gradient(135deg, #ffffff 30%, var(--gold-light) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .lead {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 720px;
+      margin: 0 auto 2.5rem;
+    }
+    .cta-group {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 4rem;
+    }
+    .btn-gold {
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      color: #0b0f19;
+      font-weight: 700;
+      font-size: 1.05rem;
+      padding: 1rem 2rem;
+      border-radius: 0.75rem;
+      text-decoration: none;
+      box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.4);
+      transition: transform 0.2s, box-shadow 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .btn-gold:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 15px 30px -5px rgba(245, 158, 11, 0.5);
+    }
+    .btn-outline {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-weight: 600;
+      font-size: 1.05rem;
+      padding: 1rem 2rem;
+      border-radius: 0.75rem;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .features {
+      max-width: 1024px;
+      margin: 0 auto;
+      padding: 0 1.5rem 4rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.75rem;
+    }
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 1.25rem;
+      padding: 2.25rem;
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    }
+    .feature-card h3 {
+      font-family: 'Cinzel', serif;
+      font-size: 1.3rem;
+      color: var(--gold-light);
+      margin-bottom: 0.75rem;
+    }
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 0.98rem;
+    }
+    footer {
+      margin-top: auto;
+      background: #050810;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    footer a {
+      color: var(--gold-light);
+      text-decoration: none;
+      margin: 0 0.75rem;
+    }
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="hero">
+    <div class="badge">⚖️ A Mais Avançada Inteligência Artificial Jurídica</div>
+    <h1>ATHENA Mentoria Jurídica</h1>
+    <p class="lead">Preparação de alta performance para Carreiras Jurídicas e Concursos Públicos com o Método 80/20 de Pareto, Jurisprudência consolidada do STF/STJ e simulados comentados.</p>
+    <div class="cta-group">
+      <a href="https://github.com/jh0nnyg4rcia/athena-app/releases" class="btn-gold">
+        📲 Baixar Aplicativo Android
+      </a>
+      <a href="privacidade.html" class="btn-outline">
+        🛡️ Política de Privacidade
+      </a>
+    </div>
+  </header>
+
+  <main class="features">
+    <div class="feature-card">
+      <h3>🏛️ Trilha de 100 Dias de Pareto</h3>
+      <p>Estude os 20% das matérias e teses que respondem por 80% das questões das bancas de elite (Magistratura, Ministério Público e Defensoria).</p>
+    </div>
+    <div class="feature-card">
+      <h3>🧠 Jurisprudência STF e STJ</h3>
+      <p>Revisão diária com teses de repercussão geral, recursos repetitivos e enunciados sumulares sem alucinações.</p>
+    </div>
+    <div class="feature-card">
+      <h3>🎯 10 Questões Inéditas por Aula</h3>
+      <p>Simulados objetivos e dissertativos com gabarito fundamentado letra por letra para fixação definitiva da matéria.</p>
+    </div>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 ATHENA Mentoria Jurídica. Desenvolvido por Jhonny Garcia.</p>
+    <p style="margin-top: 0.75rem;">
+      <a href="privacidade.html">Política de Privacidade (LGPD)</a> •
+      <a href="mailto:jhonny.spider@gmail.com">Contato de Suporte</a>
+    </p>
+  </footer>
+
+</body>
+</html>
