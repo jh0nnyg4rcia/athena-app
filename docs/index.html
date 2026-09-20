@@ -62,14 +62,39 @@
 
     .font-serif { font-family: 'Cinzel', serif; }
 
+    /* Top Announcement Bar */
+    .top-announcement-bar {
+      background: linear-gradient(90deg, #92400e 0%, #d97706 50%, #92400e 100%);
+      color: #fff;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      text-align: center;
+      border-bottom: 1px solid rgba(251, 191, 36, 0.3);
+      position: relative;
+      z-index: 55;
+    }
+
+    .pill-google-play {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      padding: 0.2rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.76rem;
+      color: #fef3c7;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
     /* Glassmorphism Navbar */
     .glass-nav {
-      position: fixed;
+      position: sticky;
       top: 0;
       left: 0;
       right: 0;
       z-index: 50;
-      background: rgba(8, 12, 20, 0.85);
+      background: rgba(8, 12, 20, 0.92);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -171,6 +196,26 @@
       transform: translateY(-2px);
     }
 
+    .btn-google-play {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0.75rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #e2e8f0;
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: all 0.2s ease;
+    }
+
+    .btn-google-play:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--gold);
+      transform: translateY(-2px);
+    }
+
     .badge-pill {
       display: inline-flex;
       align-items: center;
@@ -196,7 +241,7 @@
 
     /* Hero */
     .hero-section {
-      padding: 8.5rem 1.5rem 5rem;
+      padding: 4.5rem 1.5rem 4rem;
       text-align: center;
     }
 
@@ -580,6 +625,14 @@
 </head>
 <body>
 
+  <!-- TOP ANNOUNCEMENT BAR: PERÍODO DE TESTE & GOOGLE PLAY -->
+  <div class="top-announcement-bar">
+    <div class="container" style="display: flex; align-items: center; justify-content: center; gap: 0.85rem; flex-wrap: wrap; text-align: center;">
+      <span>🧪 <strong>FASE OFICIAL DE TESTES & VALIDAÇÃO:</strong> Acesso 100% liberado para novos alunos!</span>
+      <span class="pill-google-play">🟢 Em breve na Google Play Store</span>
+    </div>
+  </div>
+
   <!-- NAVBAR -->
   <header class="glass-nav">
     <div class="nav-container">
@@ -590,9 +643,9 @@
 
       <ul class="nav-links">
         <li><a href="#metodologia" class="nav-link">Metodologia</a></li>
+        <li><a href="#mobilidade" class="nav-link">Sem Planner</a></li>
         <li><a href="#blocos" class="nav-link">6 Blocos</a></li>
         <li><a href="#simulador" class="nav-link">Simulador IA</a></li>
-        <li><a href="#trilha" class="nav-link">Trilha 100 Dias</a></li>
         <li><a href="#planos" class="nav-link">Planos</a></li>
         <li><a href="#faq" class="nav-link">FAQ</a></li>
       </ul>
@@ -608,7 +661,7 @@
   <!-- HERO SECTION -->
   <section class="hero-section">
     <div class="container">
-      <div class="badge-pill">🏛️ Inteligência Artificial para Carreiras Jurídicas</div>
+      <div class="badge-pill">🏛️ Período Oficial de Testes & Validação • Acesso Liberado</div>
       
       <h1 class="hero-title font-serif">
         A Mais Avançada Mentoria Jurídica com IA para Carreiras de Elite
@@ -620,12 +673,28 @@
 
       <div class="hero-ctas">
         <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" download>
-          📲 Baixar APK Android (Grátis)
+          📲 Baixar APK Android (Instalação Direta)
         </a>
+        <div class="btn-google-play" title="Em breve na loja oficial Google Play">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0;">
+            <path d="M3.609 1.814L13.792 12 3.61 22.186a2.02 2.02 0 01-.61-1.442V3.256c0-.547.225-1.06.609-1.442z" fill="#00D3FF"/>
+            <path d="M17.202 8.59L13.792 12l3.41 3.41.096-.055 4.02-2.316c1.148-.66 1.148-1.748 0-2.408l-4.02-2.316-.096.275z" fill="#FFD400"/>
+            <path d="M13.792 12L3.609 1.814c.32-.32.784-.46 1.258-.188l12.335 7.104-3.41 3.27z" fill="#00F076"/>
+            <path d="M13.792 12l3.41 3.41-12.335 7.104c-.474.273-.938.132-1.258-.188L13.792 12z" fill="#F84D4D"/>
+          </svg>
+          <div style="text-align: left; line-height: 1.2;">
+            <span style="font-size: 0.7rem; color: var(--text-muted); display: block;">Google Play Store</span>
+            <strong style="font-size: 0.82rem; color: #fbbf24;">Em breve disponível</strong>
+          </div>
+        </div>
         <a href="#simulador" class="btn btn-outline">
           🧠 Testar a IA ao Vivo
         </a>
       </div>
+
+      <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: -1.5rem; margin-bottom: 3.5rem;">
+        ⚡ <strong>Acesso 100% Gratuito no Período de Testes</strong> • Apenas R$ 19,90/mês após a validação
+      </p>
 
       <div class="hero-banner-wrap">
         <img src="athena-banner.png" alt="ATHENA Mentoria Jurídica — Banner Oficial" class="hero-banner-img">
@@ -687,6 +756,65 @@
           </ul>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- MARKETING MOBILIDADE / SEM PLANNER / TUDO NO MESMO LUGAR -->
+  <section id="mobilidade" style="padding: 6rem 0; background: radial-gradient(circle at 50% 30%, rgba(245, 158, 11, 0.08) 0%, rgba(15, 22, 38, 0.6) 70%); border-top: 1px solid rgba(255, 255, 255, 0.06); border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
+    <div class="container">
+      <div class="section-head">
+        <div class="section-tag">Liberdade & Praticidade Absoluta</div>
+        <h2 class="section-title font-serif">Você Não Precisa de Planner.<br>Estude em Qualquer Lugar, na Palma da Sua Mão.</h2>
+        <p class="section-desc">Chega de perder tempo organizando cronogramas ou carregando livros pesados. Todo o seu material de aprovação reunido no mesmo lugar.</p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem;">
+        
+        <!-- CARD 1: SEM PLANNER -->
+        <div class="card" style="border-top: 4px solid var(--gold);">
+          <div style="font-size: 2.3rem; margin-bottom: 0.85rem;">🗓️ ❌</div>
+          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.3rem; margin-bottom: 0.75rem;">Zero Planners, Zero Complicação</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem; line-height: 1.7;">
+            Você não precisa de planners de papel, planilhas complexas de Excel ou cronogramas difíceis de cumprir. A ATHENA já entrega sua <strong>Trilha dos 100 Dias pronta e estruturada pelo Método 80/20 de Pareto</strong>. Basta abrir o aplicativo e seguir o bloco diário planejado pela IA.
+          </p>
+        </div>
+
+        <!-- CARD 2: ESTUDE EM QUALQUER LUGAR (NA FILA, TRANSPORTE, ESPERA) -->
+        <div class="card" style="border-top: 4px solid #10b981;">
+          <div style="font-size: 2.3rem; margin-bottom: 0.85rem;">🚶‍♂️ ⏱️</div>
+          <h3 class="font-serif" style="color: #34d399; font-size: 1.3rem; margin-bottom: 0.75rem;">Estude Numa Fila ou Enquanto Espera</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem; line-height: 1.7;">
+            A sua aprovação é conquistada no aproveitamento inteligente do tempo. <strong>Está numa fila de banco ou supermercado? Esperando uma consulta? No trânsito ou numa pausa de 15 minutos?</strong> Abra a ATHENA no celular e resolva questões comentadas ou revise uma tese vinculante. O estudo acontece onde você estiver.
+          </p>
+        </div>
+
+        <!-- CARD 3: TUDO NO MESMO LUGAR -->
+        <div class="card" style="border-top: 4px solid #60a5fa;">
+          <div style="font-size: 2.3rem; margin-bottom: 0.85rem;">📱 🏛️</div>
+          <h3 class="font-serif" style="color: #93c5fd; font-size: 1.3rem; margin-bottom: 0.75rem;">Tudo no Mesmo Lugar</h3>
+          <p style="color: var(--text-muted); font-size: 0.95rem; line-height: 1.7;">
+            Acabe com a confusão de alternar entre vade mecum impresso, sites de tribunais, resumos em PDF e bancos de questões. <strong>Legislação, doutrina majoritária, informativos STF/STJ com ratio decidendi, simulados com gabarito item a item e simulador de prova oral</strong> estão todos integrados na palma da sua mão.
+          </p>
+        </div>
+
+      </div>
+
+      <!-- DESTAQUE MOBILE -->
+      <div style="margin-top: 3.5rem; background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(16, 185, 129, 0.06) 100%); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 1.25rem; padding: 2.25rem; text-align: center;">
+        <h4 class="font-serif" style="color: #fff; font-size: 1.35rem; margin-bottom: 0.75rem;">Sua Mentoria Completa no Bolso, Pronta Para Usar</h4>
+        <p style="color: #cbd5e1; max-width: 760px; margin: 0 auto 1.5rem; font-size: 1rem;">
+          Com a ATHENA, qualquer intervalo vira uma sessão produtiva de estudos de alto rendimento. Sem peso na mochila, sem desculpas.
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap;">
+          <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" download>
+            📲 Baixar APK Android (Grátis nos Testes)
+          </a>
+          <span style="color: var(--text-muted); font-size: 0.88rem; border: 1px solid rgba(255,255,255,0.15); padding: 0.65rem 1.2rem; border-radius: 0.75rem; background: rgba(0,0,0,0.25);">
+            🟢 Em breve na Google Play Store
+          </span>
+        </div>
+      </div>
+
     </div>
   </section>
 
@@ -868,45 +996,51 @@
       <div class="section-head">
         <div class="section-tag">Acesso & Investimento</div>
         <h2 class="section-title font-serif">Escolha o Seu Plano de Aprovação</h2>
-        <p class="section-desc">Comece gratuitamente agora mesmo e tenha acesso a toda a inteligência jurídica da ATHENA.</p>
+        <p class="section-desc">Estamos em <strong>período oficial de testes e validação</strong> com acesso 100% gratuito. Experimente agora toda a inteligência da ATHENA.</p>
       </div>
 
       <div class="pricing-grid">
-        <!-- PLANO 1: DEGUSTAÇÃO -->
-        <div class="card pricing-card">
-          <h3 class="font-serif" style="font-size: 1.35rem; color: #fff; margin-bottom: 0.5rem;">Degustação</h3>
-          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Para você experimentar o poder da IA.</p>
-          <div style="font-size: 2.8rem; font-weight: 800; color: #fff; margin-bottom: 1.5rem;">
-            R$ 0 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ 7 dias</span>
+        <!-- PLANO 1: PERÍODO DE TESTE (ATUAL) -->
+        <div class="card pricing-card" style="border-top: 4px solid #10b981;">
+          <div style="display: inline-block; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.75rem; border-radius: 9999px; text-transform: uppercase; margin-bottom: 0.75rem;">Fase Atual • Testes Abertos</div>
+          <h3 class="font-serif" style="font-size: 1.35rem; color: #fff; margin-bottom: 0.5rem;">Período de Testes</h3>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Acesso gratuito liberado para você testar e validar a metodologia.</p>
+          <div style="font-size: 2.8rem; font-weight: 800; color: #34d399; margin-bottom: 1.5rem;">
+            R$ 0 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ período de testes</span>
           </div>
           <ul style="list-style: none; margin-bottom: 2rem; color: #d1d5db; font-size: 0.95rem;">
-            <li style="margin-bottom: 0.75rem;">✓ Acesso aos primeiros dias da Trilha</li>
-            <li style="margin-bottom: 0.75rem;">✓ 10 Questões comentadas por dia</li>
-            <li style="margin-bottom: 0.75rem;">✓ Jurisprudência com Ratio Decidendi</li>
-            <li>✓ Sem necessidade de cartão de crédito</li>
+            <li style="margin-bottom: 0.75rem;">✓ Acesso liberado aos blocos da Trilha dos 100 Dias</li>
+            <li style="margin-bottom: 0.75rem;">✓ Resolução de questões com comentários alternativa por alternativa</li>
+            <li style="margin-bottom: 0.75rem;">✓ Jurisprudência consolidada do STF/STJ com Ratio Decidendi</li>
+            <li style="margin-bottom: 0.75rem;">✓ Treinamento de prova oral e discursiva avaliado por IA</li>
+            <li>✓ 100% gratuito, sem necessidade de cartão de crédito</li>
           </ul>
           <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-outline" style="width: 100%;" download>
-            Começar Grátis (7 Dias)
+            📲 Começar no Período de Testes
           </a>
         </div>
 
-        <!-- PLANO 2: MENSAL (DESTAQUE) -->
+        <!-- PLANO 2: MENSAL (APÓS PERÍODO DE TESTE) -->
         <div class="card pricing-card featured">
-          <div class="popular-tag">Mais Escolhido</div>
+          <div class="popular-tag">Melhor Custo-Benefício</div>
           <h3 class="font-serif" style="font-size: 1.35rem; color: var(--gold-light); margin-bottom: 0.5rem;">Mentoria Completa</h3>
-          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Acesso irrestrito a toda a plataforma.</p>
-          <div style="font-size: 2.8rem; font-weight: 800; color: var(--gold-light); margin-bottom: 1.5rem;">
-            R$ 97 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ mês</span>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.75rem;">Acesso ilimitado e contínuo a todas as disciplinas e atualizações.</p>
+          <div style="font-size: 2.8rem; font-weight: 800; color: var(--gold-light); margin-bottom: 0.25rem;">
+            R$ 19,90 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ mês</span>
           </div>
+          <p style="color: #34d399; font-size: 0.82rem; font-weight: 600; margin-bottom: 1.5rem;">
+            Cobrado apenas após o término do período de teste • Menos de R$ 0,70/dia
+          </p>
           <ul style="list-style: none; margin-bottom: 2rem; color: #d1d5db; font-size: 0.95rem;">
-            <li style="margin-bottom: 0.75rem;">✓ Trilha completa dos 100 Dias de Pareto</li>
-            <li style="margin-bottom: 0.75rem;">✓ Mais de 1.000 questões com gabarito item por item</li>
+            <li style="margin-bottom: 0.75rem;">✓ Trilha completa dos 100 Dias estruturada pelo Método 80/20</li>
+            <li style="margin-bottom: 0.75rem;">✓ Mais de 1.000 questões inéditas com gabarito fundamentado</li>
             <li style="margin-bottom: 0.75rem;">✓ Atualização de Jurisprudência STF/STJ em tempo real</li>
-            <li style="margin-bottom: 0.75rem;">✓ Avaliação de Provas Orais e Discursivas com IA</li>
-            <li>✓ Cancele a qualquer momento sem taxas</li>
+            <li style="margin-bottom: 0.75rem;">✓ Avaliação de Provas Orais e Discursivas com IA sem limites</li>
+            <li style="margin-bottom: 0.75rem;">✓ Todo o material na palma da mão (sem precisar de planners)</li>
+            <li>✓ Sem carência e sem fidelidade: cancele quando quiser</li>
           </ul>
           <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" style="width: 100%;" download>
-            Assinar Mentoria Completa
+            Garantir Vaga por R$ 19,90/mês
           </a>
         </div>
       </div>
@@ -924,11 +1058,11 @@
       <div class="faq-list">
         <div class="faq-item active">
           <div class="faq-question" onclick="toggleFaq(this)">
-            <span>Como funciona a degustação de 7 dias grátis?</span>
+            <span>Como funciona o período de testes gratuito?</span>
             <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
           </div>
           <div class="faq-answer">
-            Basta baixar o aplicativo Android ou acessar a plataforma web e se cadastrar com Nome, CPF e E-mail. Você receberá um Código de Acesso exclusivo de 6 dígitos e poderá estudar imediatamente sem qualquer cobrança.
+            A plataforma ATHENA está atualmente em seu período oficial de validação e testes. Basta baixar o aplicativo Android ou acessar via navegador e se cadastrar com Nome Completo, CPF e E-mail. Você receberá seu Código de Acesso exclusivo de 6 dígitos e poderá utilizar as funcionalidades gratuitamente, sem precisar cadastrar cartão de crédito. Após o encerramento do período de testes, a assinatura completa custará apenas R$ 19,90 por mês.
           </div>
         </div>
 
@@ -938,27 +1072,17 @@
             <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
           </div>
           <div class="faq-answer">
-            Sim. A ATHENA conta com curadoria especializada que valida todas as teses de Repercussão Geral, Recursos Repetitivos e Enunciados Sumulares com parâmetros de baixa temperatura na IA, eliminando números fictícios ou teses superadas.
+            Sim. A ATHENA conta com curadoria jurídica especializada que valida todas as teses de Repercussão Geral, Recursos Repetitivos e Enunciados Sumulares com parâmetros de baixa temperatura na IA, eliminando números fictícios ou teses superadas.
           </div>
         </div>
 
         <div class="faq-item">
           <div class="faq-question" onclick="toggleFaq(this)">
-            <span>O aplicativo funciona em qualquer celular Android?</span>
+            <span>O aplicativo está disponível na Google Play Store?</span>
             <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
           </div>
           <div class="faq-answer">
-            Sim. O aplicativo é compatível com smartphones Android rodando a partir do Android 7.0 (Nougat) até as versões mais recentes (Android 14 e 15), com otimização para economia de bateria e baixo consumo de dados.
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <div class="faq-question" onclick="toggleFaq(this)">
-            <span>Como posso solicitar o cancelamento ou a exclusão dos meus dados?</span>
-            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-          </div>
-          <div class="faq-answer">
-            Em estrita conformidade com a LGPD e as normas da Google Play, você pode solicitar a exclusão definitiva da sua conta ou o cancelamento da assinatura a qualquer momento enviando um e-mail para <strong>jhonny.spider@gmail.com</strong>.
+            Em breve a ATHENA estará disponível diretamente na Google Play Store. Enquanto a homologação final é concluída, você já pode baixar e instalar o aplicativo Android oficial diretamente pelo arquivo APK disponibilizado em nosso site, com segurança, total suporte e atualizações automáticas.
           </div>
         </div>
       </div>
@@ -968,15 +1092,30 @@
   <!-- CTA FINAL -->
   <section style="padding: 6rem 0; text-align: center; background: radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.12) 0%, transparent 70%);">
     <div class="container">
+      <div class="section-tag" style="margin-bottom: 0.5rem;">Acesso Imediato</div>
       <h2 class="font-serif" style="font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; margin-bottom: 1.25rem;">
         Pronto para Elevar o Seu Nível de Estudos?
       </h2>
-      <p style="color: var(--text-muted); font-size: 1.15rem; max-width: 600px; margin: 0 auto 2.5rem;">
-        Junte-se à nova era da preparação jurídica com a mentoria adaptativa da ATHENA.
+      <p style="color: var(--text-muted); font-size: 1.15rem; max-width: 650px; margin: 0 auto 2rem;">
+        Estude em qualquer lugar, na palma da sua mão, sem complicação de planners. Aproveite o período de testes gratuito e prepare-se com a inteligência da ATHENA.
       </p>
-      <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" style="font-size: 1.1rem; padding: 1.15rem 2.5rem;" download>
-        📲 Baixar o Aplicativo Agora
-      </a>
+      <div style="display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap;">
+        <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" style="font-size: 1.1rem; padding: 1.15rem 2.5rem;" download>
+          📲 Baixar APK Android Agora (Grátis)
+        </a>
+        <div style="display: inline-flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); padding: 0.9rem 1.5rem; border-radius: 0.75rem; color: #cbd5e1; font-size: 0.95rem;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3.609 1.814L13.792 12 3.61 22.186a2.02 2.02 0 01-.61-1.442V3.256c0-.547.225-1.06.609-1.442z" fill="#00D3FF"/>
+            <path d="M17.202 8.59L13.792 12l3.41 3.41.096-.055 4.02-2.316c1.148-.66 1.148-1.748 0-2.408l-4.02-2.316-.096.275z" fill="#FFD400"/>
+            <path d="M13.792 12L3.609 1.814c.32-.32.784-.46 1.258-.188l12.335 7.104-3.41 3.27z" fill="#00F076"/>
+            <path d="M13.792 12l3.41 3.41-12.335 7.104c-.474.273-.938.132-1.258-.188L13.792 12z" fill="#F84D4D"/>
+          </svg>
+          <span>Google Play Store <strong style="color: var(--gold-light); font-size: 0.85rem;">(Em breve)</strong></span>
+        </div>
+      </div>
+      <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 1.25rem;">
+        Período oficial de testes gratuito liberado • R$ 19,90/mês após o término dos testes
+      </p>
     </div>
   </section>
 
@@ -997,6 +1136,7 @@
         <h4>Navegação</h4>
         <ul>
           <li><a href="#metodologia">Metodologia Pareto</a></li>
+          <li><a href="#mobilidade">Sem Planner</a></li>
           <li><a href="#blocos">Os 6 Blocos</a></li>
           <li><a href="#simulador">Simulador Interativo</a></li>
           <li><a href="#planos">Planos & Preços</a></li>
@@ -1016,8 +1156,8 @@
       <div class="footer-col">
         <h4>Download</h4>
         <ul>
-          <li><a href="download/ATHENA-Mentoria-Juridica.apk" download>Baixar APK Android</a></li>
-          <li><a href="https://play.google.com/store/apps/details?id=com.athena.mentoria" target="_blank" rel="noopener">Google Play Store</a></li>
+          <li><a href="download/ATHENA-Mentoria-Juridica.apk" download>Baixar APK Android (Instalação Direta)</a></li>
+          <li><span style="color: var(--text-muted); font-size: 0.88rem;">Google Play Store <em style="color: var(--gold-light); font-size: 0.75rem; font-style: normal; margin-left: 4px; background: rgba(245,158,11,0.15); padding: 2px 6px; border-radius: 4px;">(Em breve)</em></span></li>
         </ul>
       </div>
     </div>
