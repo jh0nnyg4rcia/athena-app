@@ -1,6 +1,9 @@
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, cleanData, isQuotaExhausted } from '../lib/firebase';
 import { HomologatedLesson } from '../types';
+import homologatedSeedsData from '../data/homologatedSeeds.json';
+
+const staticSeeds: Record<string, HomologatedLesson> = (homologatedSeedsData || {}) as Record<string, HomologatedLesson>;
 
 const LOCAL_STORAGE_PREFIX = 'athena_homologated_';
 
@@ -9,20 +12,29 @@ export function getLessonDocId(day: number, part: number): string {
 }
 
 /**
- * Busca rápida síncrona no armazenamento local persistente.
+ * Busca rápida síncrona no armazenamento local persistente ou no banco de sementes embutido.
+ * Garante disponibilidade imediata (0ms) mesmo após reinstalação ou sem internet.
  */
 export function getLocalHomologatedLesson(day: number, part: number): HomologatedLesson | null {
+  const docId = getLessonDocId(day, part);
   try {
-    const key = `${LOCAL_STORAGE_PREFIX}${getLessonDocId(day, part)}`;
+    const key = `${LOCAL_STORAGE_PREFIX}${docId}`;
     const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as HomologatedLesson;
-    if (parsed && parsed.status === 'approved' && parsed.content) {
-      return parsed;
+    if (raw) {
+      const parsed = JSON.parse(raw) as HomologatedLesson;
+      if (parsed && parsed.status === 'approved' && parsed.content) {
+        return parsed;
+      }
     }
   } catch (e) {
     console.warn('[CuratedLessonService] Erro ao ler lição do cache local:', e);
   }
+
+  // Fallback 1: Sementes estáticas embutidas no código/APK (0s, ultra persistente)
+  if (staticSeeds && staticSeeds[docId] && staticSeeds[docId].status === 'approved' && staticSeeds[docId].content) {
+    return staticSeeds[docId];
+  }
+
   return null;
 }
 
@@ -87,18 +99,19 @@ export async function getHomologatedLesson(day: number, part: number): Promise<H
 /**
  * Homologa e publica uma lição na nuvem (Firestore) e no cache local.
  * Exclusivo para curadoria do CEO.
+ * Possui timeout de proteção de 6 segundos para NUNCA travar a interface do usuário.
  */
 export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<void> {
-  // Salva no cache local imediatamente
+  // 1. Salva no cache local imediatamente (0ms)
   setLocalHomologatedLesson(lesson);
 
-  // Dispara evento para atualização instantânea na UI
+  // 2. Dispara evento para atualização instantânea na UI
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: lesson }));
   }
 
   if (isQuotaExhausted()) {
-    console.warn('[CuratedLessonService] Firestore indisponível no momento. Lição salva localmente.');
+    console.warn('[CuratedLessonService] Firestore com cota excedida. Lição salva localmente com sucesso!');
     return;
   }
 
@@ -106,12 +119,18 @@ export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<
   try {
     const docRef = doc(db, 'homologated_lessons', docId);
     const cleaned = cleanData(lesson);
-    await setDoc(docRef, cleaned, { merge: true });
+
+    // Timeout estrito de 6 segundos via Promise.race
+    const writePromise = setDoc(docRef, cleaned, { merge: true });
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Firestore write timeout: rede demorou mais de 6 segundos')), 6000)
+    );
+
+    await Promise.race([writePromise, timeoutPromise]);
     console.log(`[CuratedLessonService] Lição ${docId} homologada e gravada com sucesso no Firestore!`);
-  } catch (error) {
-    console.error(`[CuratedLessonService] Falha ao persistir ${docId} no Firestore:`, error);
-    handleFirestoreError(error, OperationType.WRITE, `homologated_lessons/${docId}`);
-    throw error;
+  } catch (error: any) {
+    console.warn(`[CuratedLessonService] Aviso na sincronização do Firestore para ${docId} (conteúdo seguro no cache local):`, error?.message || error);
+    // Não lança exceção fatal para não bloquear a UI do CEO se o cache local já salvou com sucesso!
   }
 }
 

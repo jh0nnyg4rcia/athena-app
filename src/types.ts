@@ -146,9 +146,20 @@ export interface HomologatedLesson {
   topic?: string;
   content: string;
   blocks?: string[];
+  challenge?: ChallengeData | null;
   status: 'approved' | 'draft';
   approvedBy: string;
   approvedAt: number;
   modelUsed?: string;
   version?: number;
+}
+
+export interface RegisteredStudent {
+  uid: string;
+  fullName: string;
+  cpf: string;
+  email: string;
+  accessCode: string;
+  createdAt: number;
+  trialExpiresAt: number;
 }

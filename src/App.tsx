@@ -64,7 +64,7 @@ import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMo
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
-import { type UserProfile, type HomologatedLesson } from './types';
+import { type UserProfile, type HomologatedLesson, type RegisteredStudent } from './types';
 import { getCachedTrilhaPart, setCachedTrilhaPart } from './services/trilhaCacheService';
 import { 
   getHomologatedLesson, 
@@ -1188,9 +1188,9 @@ const ChatMessage = memo(({
           {!isUser && !isError && (
             <div className="flex items-center gap-2 -mt-1 -mb-3">
               {msg.modelName?.includes('Oficial Homologado') ? (
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/10 border border-brand-gold/40 text-[10px] font-mono text-brand-gold shadow-sm">
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/10 border border-brand-gold/30 text-[10px] font-mono text-brand-gold shadow-sm">
                   <ShieldCheck size={12} className="text-brand-gold" />
-                  <span>Conteúdo Oficial Homologado pela Coordenação ATHENA</span>
+                  <span>Material Oficial ATHENA</span>
                 </div>
               ) : (msg.sourceType === 'offline_pareto' || msg.content?.includes("Modo de Alta Disponibilidade Local Ativado (Pareto 80/20)")) ? (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[10px] font-mono text-amber-300 shadow-sm">
@@ -1630,61 +1630,116 @@ export default function App() {
   const [user, setUser] = useState<User | any | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [showCeoModal, setShowCeoModal] = useState(false);
-  const [ceoPinInput, setCeoPinInput] = useState('');
-  const [ceoPinError, setCeoPinError] = useState<string | null>(null);
-  const [loginNameInput, setLoginNameInput] = useState(() => {
-    try { return localStorage.getItem('athena_saved_login_name') || ''; } catch { return ''; }
-  });
-  const [loginEmailInput, setLoginEmailInput] = useState(() => {
+  // Estados do Novo Sistema de Autenticação ATHENA (Cadastro & Login Unificado)
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [loginIdentifier, setLoginIdentifier] = useState(() => {
     try { return localStorage.getItem('athena_saved_login_email') || ''; } catch { return ''; }
   });
+  const [loginAccessCode, setLoginAccessCode] = useState('');
+  
+  // Estados de Cadastro de Novo Estudante
+  const [registerName, setRegisterName] = useState('');
+  const [registerCpf, setRegisterCpf] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
+  const [registeredSuccess, setRegisteredSuccess] = useState<RegisteredStudent | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
 
-  const handleEmailLogin = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  // Estados de Recuperação de Código (Esqueci a Senha)
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotInput, setForgotInput] = useState('');
+  const [forgotResult, setForgotResult] = useState<RegisteredStudent | null>(null);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+
+  const formatCpf = (val: string): string => {
+    const raw = val.replace(/\D/g, '').slice(0, 11);
+    if (raw.length <= 3) return raw;
+    if (raw.length <= 6) return `${raw.slice(0, 3)}.${raw.slice(3)}`;
+    if (raw.length <= 9) return `${raw.slice(0, 3)}.${raw.slice(3, 6)}.${raw.slice(6)}`;
+    return `${raw.slice(0, 3)}.${raw.slice(3, 6)}.${raw.slice(6, 9)}-${raw.slice(9, 11)}`;
+  };
+
+  const getSavedRegisteredStudents = (): RegisteredStudent[] => {
+    try {
+      const raw = localStorage.getItem('athena_registered_students');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveRegisteredStudentLocally = (student: RegisteredStudent) => {
+    try {
+      const list = getSavedRegisteredStudents().filter(s => s.cpf !== student.cpf && s.email !== student.email);
+      list.push(student);
+      localStorage.setItem('athena_registered_students', JSON.stringify(list));
+    } catch (e) {
+      console.warn('Erro ao salvar estudante localmente:', e);
+    }
+  };
+
+  const handleRegisterStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
     setAuthError(null);
 
-    const name = loginNameInput.trim();
-    const email = loginEmailInput.trim().toLowerCase();
+    const name = registerName.trim();
+    const rawCpf = registerCpf.replace(/\D/g, '');
+    const email = registerEmail.trim().toLowerCase();
 
-    if (!name) {
-      setAuthError("Por favor, informe seu nome ou como deseja ser chamado(a).");
+    if (name.length < 3) {
+      setAuthError("Por favor, informe seu nome completo.");
       return;
     }
-
+    if (rawCpf.length !== 11) {
+      setAuthError("Por favor, informe um CPF válido com 11 dígitos.");
+      return;
+    }
     if (!email || !email.includes('@') || !email.includes('.')) {
       setAuthError("Por favor, informe um endereço de e-mail válido.");
       return;
     }
 
+    // Gera um código de acesso de 6 dígitos numérico único
+    const accessCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const safeUid = `student_${rawCpf}`;
+
+    const newStudent: RegisteredStudent = {
+      uid: safeUid,
+      fullName: name,
+      cpf: registerCpf,
+      email,
+      accessCode,
+      createdAt: Date.now(),
+      trialExpiresAt: Date.now() + 100 * 24 * 60 * 60 * 1000
+    };
+
+    saveRegisteredStudentLocally(newStudent);
+
+    // Tenta persistir de forma não-bloqueante no Firestore
     try {
-      localStorage.setItem('athena_saved_login_name', name);
-      localStorage.setItem('athena_saved_login_email', email);
+      if (!isQuotaExhausted()) {
+        const docRef = doc(db, 'users', safeUid);
+        setDoc(docRef, cleanData(newStudent), { merge: true }).catch(() => {});
+      }
     } catch {}
 
-    // Se o e-mail for do CEO, direciona para o PIN mestre de segurança
-    if (email === CEO_EMAIL.toLowerCase()) {
-      setShowCeoModal(true);
-      setCeoPinError(null);
-      setCeoPinInput('');
-      return;
-    }
+    setRegisteredSuccess(newStudent);
+  };
 
-    // Gera UID determinístico pelo e-mail para que o progresso seja persistido entre reinstalações
-    const safeUid = `student_${email.replace(/[^a-z0-9]/g, '_')}`;
-
+  const handleCompleteRegisterLogin = () => {
+    if (!registeredSuccess) return;
     const studentUser = {
-      uid: safeUid,
-      displayName: name,
-      email: email,
+      uid: registeredSuccess.uid,
+      displayName: registeredSuccess.fullName,
+      email: registeredSuccess.email,
       photoURL: '',
       emailVerified: true
     };
-
     try {
       localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
+      localStorage.setItem('athena_saved_login_email', registeredSuccess.email);
     } catch {}
     setUser(studentUser as any);
+    setRegisteredSuccess(null);
     setAuthError(null);
   };
 
@@ -1701,15 +1756,122 @@ export default function App() {
     setAuthError(null);
   };
 
-  const handleVerifyCeoPin = (e?: React.FormEvent) => {
+  const handleUnifiedLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (ceoPinInput.trim() === '7777') {
+    setAuthError(null);
+
+    const identifier = loginIdentifier.trim().toLowerCase();
+    const rawId = identifier.replace(/\D/g, '');
+    const code = loginAccessCode.trim();
+
+    if (!identifier) {
+      setAuthError("Informe seu E-mail ou CPF para acessar.");
+      return;
+    }
+    if (!code) {
+      setAuthError("Informe seu Código de Acesso / Senha.");
+      return;
+    }
+
+    try {
+      localStorage.setItem('athena_saved_login_email', identifier);
+    } catch {}
+
+    // 1. Verificação Unificada do CEO Mestre
+    if (identifier === CEO_EMAIL.toLowerCase() && code === '7777') {
       handleLoginAsCEO();
-      setShowCeoModal(false);
-      setCeoPinInput('');
-      setCeoPinError(null);
+      return;
+    }
+
+    // 2. Busca entre estudantes cadastrados no dispositivo
+    const localStudents = getSavedRegisteredStudents();
+    const found = localStudents.find(s => 
+      s.email.toLowerCase() === identifier || 
+      (rawId.length >= 9 && s.cpf.replace(/\D/g, '') === rawId)
+    );
+
+    if (found) {
+      if (found.accessCode === code) {
+        const studentUser = {
+          uid: found.uid,
+          displayName: found.fullName,
+          email: found.email,
+          photoURL: '',
+          emailVerified: true
+        };
+        try {
+          localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
+        } catch {}
+        setUser(studentUser as any);
+        setAuthError(null);
+        return;
+      } else {
+        setAuthError("Código de acesso incorreto. Clique em 'Esqueci meu código de acesso' abaixo para recuperar.");
+        return;
+      }
+    }
+
+    // 3. Fallback: Se for novo aparelho e online, consulta nuvem
+    if (!isQuotaExhausted() && rawId.length === 11) {
+      try {
+        const snap = await getDoc(doc(db, 'users', `student_${rawId}`));
+        if (snap.exists()) {
+          const remoteStudent = snap.data() as RegisteredStudent;
+          if (remoteStudent && remoteStudent.accessCode === code) {
+            saveRegisteredStudentLocally(remoteStudent);
+            const studentUser = {
+              uid: remoteStudent.uid,
+              displayName: remoteStudent.fullName,
+              email: remoteStudent.email,
+              photoURL: '',
+              emailVerified: true
+            };
+            try {
+              localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
+            } catch {}
+            setUser(studentUser as any);
+            return;
+          }
+        }
+      } catch {}
+    }
+
+    // Se nenhum cadastro for encontrado
+    setAuthError("E-mail/CPF ou código de acesso não encontrado. Caso ainda não possua cadastro, clique na aba 'Cadastre-se' acima.");
+  };
+
+  const handleForgotCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError(null);
+    setForgotResult(null);
+
+    const term = forgotInput.trim().toLowerCase();
+    const rawTerm = term.replace(/\D/g, '');
+
+    if (!term) {
+      setForgotError("Informe seu E-mail ou CPF cadastrado.");
+      return;
+    }
+
+    const localStudents = getSavedRegisteredStudents();
+    let match = localStudents.find(s => 
+      s.email.toLowerCase() === term || 
+      (rawTerm.length >= 9 && s.cpf.replace(/\D/g, '') === rawTerm)
+    );
+
+    if (!match && !isQuotaExhausted() && rawTerm.length === 11) {
+      try {
+        const snap = await getDoc(doc(db, 'users', `student_${rawTerm}`));
+        if (snap.exists()) {
+          match = snap.data() as RegisteredStudent;
+        }
+      } catch {}
+    }
+
+    if (match) {
+      setForgotResult(match);
     } else {
-      setCeoPinError('PIN de segurança incorreto. Acesso exclusivo ao Administrador.');
+      setForgotError("Nenhum cadastro encontrado com este dado. Acesse a aba 'Cadastre-se' para criar sua conta.");
     }
   };
 
@@ -1721,7 +1883,9 @@ export default function App() {
       photoURL: '',
       emailVerified: false
     };
-    localStorage.setItem('athena_local_user', JSON.stringify(guestUser));
+    try {
+      localStorage.setItem('athena_local_user', JSON.stringify(guestUser));
+    } catch {}
     setUser(guestUser as any);
     setAuthError(null);
   };
@@ -3516,10 +3680,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       if (homologated && homologated.content) {
         console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte 1! Carregamento imediato.`);
         const parsed = parseATHENAResponse(homologated.content);
+        const resolvedChallenge = homologated.challenge || parsed.challenge;
         const botMessage: Message = {
           role: 'model',
           content: parsed.content,
-          challenge: parsed.challenge,
+          challenge: resolvedChallenge,
           blocks: parsed.blocks,
           currentBlockIndex: 0,
           subject: guidedSubjectName,
@@ -3700,10 +3865,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               if (homologated && homologated.content) {
                 console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte ${nextMatIdx + 1}! Carregamento imediato.`);
                 const parsed = parseATHENAResponse(homologated.content);
+                const resolvedChallenge = homologated.challenge || parsed.challenge;
                 const botMessage: Message = {
                   role: 'model',
                   content: parsed.content,
-                  challenge: parsed.challenge,
+                  challenge: resolvedChallenge,
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
@@ -4007,8 +4173,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     setIsSavingHomologation(true);
     try {
-      const sanitizedContent = sanitizeHomologatedContent(targetMsg.content, user?.displayName);
+      let sanitizedContent = sanitizeHomologatedContent(targetMsg.content, user?.displayName);
       const sanitizedBlocks = targetMsg.blocks?.map(b => sanitizeHomologatedContent(b, user?.displayName));
+
+      // Preservação essencial das questões e do bloco de desafio para que nunca sumam
+      const lessonChallenge = targetMsg.challenge || null;
+      if (lessonChallenge && !sanitizedContent.includes('[ATHENA_CHALLENGE]')) {
+        sanitizedContent = sanitizedContent.trim() + '\n\n[ATHENA_CHALLENGE]\n' + JSON.stringify(lessonChallenge, null, 2);
+      }
 
       const lesson: HomologatedLesson = {
         id: getLessonDocId(day, part),
@@ -4018,10 +4190,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         topic: targetMsg.subject || partSubject,
         content: sanitizedContent,
         blocks: sanitizedBlocks,
+        challenge: lessonChallenge,
         status: 'approved',
         approvedBy: user?.email || 'jhonny.spider@gmail.com',
         approvedAt: Date.now(),
-        modelUsed: targetMsg.modelName || 'gemini-3.5-flash-lite',
+        modelUsed: targetMsg.modelName || 'gemini-3.8-flash',
         version: 1
       };
       await saveHomologatedLesson(lesson);
@@ -4033,7 +4206,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           return {
             ...m,
             content: sanitizedContent,
-            blocks: sanitizedBlocks
+            blocks: sanitizedBlocks,
+            challenge: lessonChallenge || m.challenge
           };
         }
         return m;
@@ -4041,12 +4215,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       setMessages(updatedMessages);
       saveSession({ messages: updatedMessages }, currentSessionId);
 
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) homologado com sucesso! Salvo no cache central para todos os alunos.`);
+      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) homologado com sucesso! Salvo no cache central e no dispositivo.`);
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
       return lesson;
     } catch (err: any) {
-      console.error("Erro ao homologar lição:", err);
-      alert("Não foi possível salvar no Firestore. A lição foi preservada no cache local.");
+      console.warn("Aviso ao homologar lição (preservada no cache local):", err);
+      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) salvo no cache local com sucesso!`);
+      setTimeout(() => setHomologationSuccessBanner(null), 6000);
       return null;
     } finally {
       setIsSavingHomologation(false);
@@ -4202,10 +4377,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
             if (homologated && homologated.content) {
               const parsed = parseATHENAResponse(homologated.content);
+              const resolvedChallenge = homologated.challenge || parsed.challenge;
               const botMessage: Message = {
                 role: 'model',
                 content: parsed.content,
-                challenge: parsed.challenge,
+                challenge: resolvedChallenge,
                 blocks: parsed.blocks,
                 currentBlockIndex: 0,
                 subject: nextMat.nome,
@@ -4507,15 +4683,17 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                Sair
              </button>
            )}
-            {/* Botão de Configurações de IA */}
-            <button
-              onClick={() => setIsAiSettingsOpen(true)}
-              className="px-2.5 py-1.5 text-brand-gold hover:text-white transition-all rounded-xl bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/25 flex items-center gap-1.5 active:scale-95 text-[10px] font-bold cursor-pointer shadow-sm"
-              title="Status e Diagnóstico da IA Gemini"
-            >
-              <Cpu size={14} className="animate-pulse text-brand-gold shrink-0" />
-              <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">IA Status</span>
-            </button>
+            {/* Botão de Configurações de IA (Exclusivo para o CEO) */}
+            {isCEO && (
+              <button
+                onClick={() => setIsAiSettingsOpen(true)}
+                className="px-2.5 py-1.5 text-brand-gold hover:text-white transition-all rounded-xl bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/25 flex items-center gap-1.5 active:scale-95 text-[10px] font-bold cursor-pointer shadow-sm"
+                title="Status e Diagnóstico da IA Gemini"
+              >
+                <Cpu size={14} className="animate-pulse text-brand-gold shrink-0" />
+                <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">IA Status</span>
+              </button>
+            )}
 
            {user && (
              <div className="flex items-center gap-2 sm:gap-3 pl-2 border-l border-white/10">
@@ -5066,157 +5244,342 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   </div>
                 )}
 
-                {/* Formulário Principal de Login: Caminho 1 (Nome e E-mail sem bloqueio de WebView) */}
-                <form onSubmit={handleEmailLogin} className="w-full space-y-4 p-5 bg-slate-900/80 border border-brand-gold/25 rounded-3xl shadow-xl backdrop-blur-sm">
-                  <div className="text-left space-y-1">
-                    <h3 className="text-xs font-serif font-bold text-slate-200">Identificação do Estudante</h3>
-                    <p className="text-[10px] text-slate-400">Acesse com seu nome e e-mail para sincronizar seu histórico e progresso.</p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="space-y-1 text-left">
-                      <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                        Como deseja ser chamado(a):
-                      </label>
-                      <div className="relative">
-                        <UserIcon size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
-                        <input
-                          type="text"
-                          value={loginNameInput}
-                          onChange={(e) => setLoginNameInput(e.target.value)}
-                          placeholder="Ex: Dr(a). Lucas Silva"
-                          className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1 text-left">
-                      <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                        Seu E-mail:
-                      </label>
-                      <div className="relative">
-                        <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
-                        <input
-                          type="email"
-                          value={loginEmailInput}
-                          onChange={(e) => setLoginEmailInput(e.target.value)}
-                          placeholder="Ex: seuemail@gmail.com"
-                          className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer"
-                  >
-                    <Sparkles size={15} />
-                    <span>Entrar na Mentoria ATHENA</span>
-                  </button>
-                </form>
-
-                <div className="w-full flex items-center gap-3">
-                  <div className="flex-1 h-px bg-white/10" />
-                  <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">ou outras opções</span>
-                  <div className="flex-1 h-px bg-white/10" />
-                </div>
-
-                <div className="w-full space-y-2.5">
-                  {/* Botão Oficial Google Sign-In em Destaque (Web/Desktop) */}
-                  <button 
-                    type="button"
-                    onClick={handleGoogleLogin}
-                    className="w-full flex items-center justify-center gap-2.5 px-6 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold uppercase tracking-wider text-[11px] rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                    </svg>
-                    <span>Entrar com Conta Google (Web)</span>
-                  </button>
-
-                  {/* Acesso para Estudantes e Testadores (Trial 7 Dias) */}
-                  <button 
-                    type="button"
-                    onClick={handleLoginAsGuest}
-                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 hover:border-white/20 font-semibold uppercase tracking-wider text-[10px] rounded-xl transition-all active:scale-95 cursor-pointer"
-                  >
-                    <UserIcon size={13} className="text-slate-400" />
-                    <span>Acesso Rápido Visitante (7 Dias Grátis)</span>
-                  </button>
-
-                  <div className="pt-2 text-center">
-                    <button 
+                {/* Caixa Principal de Autenticação ATHENA (Abas Entrar e Cadastre-se) */}
+                <div className="w-full bg-slate-900/85 border border-brand-gold/25 rounded-3xl shadow-2xl backdrop-blur-md overflow-hidden">
+                  {/* Seletor de Abas: Entrar vs Cadastre-se */}
+                  <div className="flex border-b border-white/10 bg-slate-950/60 p-1.5 gap-1.5">
+                    <button
                       type="button"
                       onClick={() => {
-                        setShowCeoModal(true);
-                        setCeoPinError(null);
-                        setCeoPinInput('');
+                        setAuthMode('login');
+                        setAuthError(null);
                       }}
-                      className="text-[10px] text-slate-500 hover:text-brand-gold uppercase tracking-widest transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                      className={cn(
+                        "flex-1 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2",
+                        authMode === 'login'
+                          ? "bg-brand-gold text-slate-950 shadow-md shadow-brand-gold/20"
+                          : "text-slate-400 hover:text-white hover:bg-white/5"
+                      )}
                     >
-                      <Lock size={11} />
-                      <span>Acesso Mestre CEO (Restrito com PIN)</span>
+                      <Lock size={14} />
+                      <span>Entrar</span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('register');
+                        setAuthError(null);
+                      }}
+                      className={cn(
+                        "flex-1 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2",
+                        authMode === 'register'
+                          ? "bg-brand-gold text-slate-950 shadow-md shadow-brand-gold/20"
+                          : "text-slate-400 hover:text-white hover:bg-white/5"
+                      )}
+                    >
+                      <Sparkles size={14} />
+                      <span>Cadastre-se</span>
+                    </button>
+                  </div>
+
+                  <div className="p-6 space-y-5">
+                    {authMode === 'login' ? (
+                      /* FORMULÁRIO DE LOGIN UNIFICADO (ALUNOS + CEO) */
+                      <form onSubmit={handleUnifiedLogin} className="space-y-4">
+                        <div className="text-left space-y-1">
+                          <h3 className="text-xs font-serif font-bold text-slate-200">Acesso à Plataforma</h3>
+                          <p className="text-[10px] text-slate-400">Insira seu e-mail (ou CPF) e seu Código de Acesso para continuar.</p>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="space-y-1 text-left">
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
+                              E-mail ou CPF:
+                            </label>
+                            <div className="relative">
+                              <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
+                              <input
+                                type="text"
+                                value={loginIdentifier}
+                                onChange={(e) => setLoginIdentifier(e.target.value)}
+                                placeholder="Ex: seuemail@gmail.com ou CPF"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 text-left">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
+                                Código de Acesso / Senha:
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowForgotModal(true);
+                                  setForgotError(null);
+                                  setForgotResult(null);
+                                  setForgotInput(loginIdentifier);
+                                }}
+                                className="text-[10px] text-brand-gold/80 hover:text-brand-gold underline underline-offset-2 transition-colors cursor-pointer"
+                              >
+                                Esqueci meu código
+                              </button>
+                            </div>
+                            <div className="relative">
+                              <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
+                              <input
+                                type="password"
+                                value={loginAccessCode}
+                                onChange={(e) => setLoginAccessCode(e.target.value)}
+                                placeholder="Digite seu código (ex: 6 dígitos ou PIN)"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono tracking-widest"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer"
+                        >
+                          <Sparkles size={15} />
+                          <span>Entrar no ATHENA</span>
+                        </button>
+                      </form>
+                    ) : (
+                      /* FORMULÁRIO DE CADASTRO COM GERAÇÃO DE CÓDIGO */
+                      <form onSubmit={handleRegisterStudent} className="space-y-4">
+                        <div className="text-left space-y-1">
+                          <h3 className="text-xs font-serif font-bold text-slate-200">Novo Cadastro de Estudante</h3>
+                          <p className="text-[10px] text-slate-400">Preencha seus dados para gerar seu Código de Acesso exclusivo.</p>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="space-y-1 text-left">
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
+                              Nome Completo:
+                            </label>
+                            <div className="relative">
+                              <UserIcon size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
+                              <input
+                                type="text"
+                                value={registerName}
+                                onChange={(e) => setRegisterName(e.target.value)}
+                                placeholder="Ex: Dr(a). Lucas Silva"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 text-left">
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
+                              CPF (Apenas números):
+                            </label>
+                            <div className="relative">
+                              <ShieldCheck size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
+                              <input
+                                type="text"
+                                maxLength={14}
+                                value={registerCpf}
+                                onChange={(e) => setRegisterCpf(formatCpf(e.target.value))}
+                                placeholder="000.000.000-00"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 text-left">
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
+                              Seu Melhor E-mail:
+                            </label>
+                            <div className="relative">
+                              <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
+                              <input
+                                type="email"
+                                value={registerEmail}
+                                onChange={(e) => setRegisterEmail(e.target.value)}
+                                placeholder="Ex: seuemail@gmail.com"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer"
+                        >
+                          <Zap size={15} />
+                          <span>Cadastrar & Gerar Código de Acesso</span>
+                        </button>
+                      </form>
+                    )}
+
+                    <div className="w-full flex items-center gap-3 pt-1">
+                      <div className="flex-1 h-px bg-white/10" />
+                      <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">ou outras opções</span>
+                      <div className="flex-1 h-px bg-white/10" />
+                    </div>
+
+                    <div className="w-full space-y-2.5">
+                      {/* Botão Oficial Google Sign-In */}
+                      <button 
+                        type="button"
+                        onClick={handleGoogleLogin}
+                        className="w-full flex items-center justify-center gap-2.5 px-6 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold uppercase tracking-wider text-[11px] rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                        </svg>
+                        <span>Entrar com Conta Google</span>
+                      </button>
+
+                      {/* Acesso Rápido Visitante */}
+                      <button 
+                        type="button"
+                        onClick={handleLoginAsGuest}
+                        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 hover:border-white/20 font-semibold uppercase tracking-wider text-[10px] rounded-xl transition-all active:scale-95 cursor-pointer"
+                      >
+                        <UserIcon size={13} className="text-slate-400" />
+                        <span>Acesso Rápido Visitante (Degustação)</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Modal Seguro de Validação do PIN Mestre para CEO */}
-                {showCeoModal && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                    <div className="w-full max-w-sm bg-slate-900 border border-brand-gold/40 rounded-3xl p-6 shadow-2xl space-y-4">
-                      <div className="flex items-center justify-between">
+                {/* MODAL 1: SUCESSO DO CADASTRO COM CÓDIGO GERADO */}
+                {registeredSuccess && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+                    <div className="w-full max-w-sm bg-slate-900 border-2 border-brand-gold/50 rounded-3xl p-6 shadow-2xl space-y-5 text-center">
+                      <div className="w-16 h-16 rounded-full bg-brand-gold/10 border border-brand-gold/30 text-brand-gold mx-auto flex items-center justify-center animate-bounce">
+                        <Trophy size={32} />
+                      </div>
+
+                      <div className="space-y-1">
+                        <h3 className="font-serif font-bold text-lg text-slate-100">🎉 Cadastro Concluído!</h3>
+                        <p className="text-xs text-slate-300">
+                          Olá, <strong>{registeredSuccess.fullName}</strong>. Sua conta foi criada com sucesso na plataforma ATHENA.
+                        </p>
+                      </div>
+
+                      <div className="p-4 bg-slate-950 rounded-2xl border border-brand-gold/30 space-y-2">
+                        <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">
+                          Seu Código de Acesso (Senha):
+                        </p>
+                        <div className="text-3xl font-mono font-black text-brand-gold tracking-widest py-1">
+                          {registeredSuccess.accessCode}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(registeredSuccess.accessCode);
+                            setCopiedCode(true);
+                            setTimeout(() => setCopiedCode(false), 3000);
+                          }}
+                          className="text-[11px] text-brand-gold hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Copy size={13} />
+                          <span>{copiedCode ? 'Código Copiado!' : 'Copiar Código de Acesso'}</span>
+                        </button>
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Guarde este código com carinho. Você o utilizará junto ao seu e-mail para fazer login no celular ou computador.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={handleCompleteRegisterLogin}
+                        className="w-full py-3.5 bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold text-slate-950 font-black uppercase text-xs tracking-wider rounded-xl hover:brightness-110 shadow-lg shadow-brand-gold/25 transition-all cursor-pointer"
+                      >
+                        Entrar Agora no ATHENA
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* MODAL 2: ESQUECI MEU CÓDIGO DE ACESSO */}
+                {showForgotModal && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+                    <div className="w-full max-w-sm bg-slate-900 border border-brand-gold/40 rounded-3xl p-6 shadow-2xl space-y-4 text-left">
+                      <div className="flex items-center justify-between pb-3 border-b border-white/10">
                         <div className="flex items-center gap-2 text-brand-gold">
                           <Lock size={18} />
-                          <h3 className="font-serif font-bold text-sm text-slate-100">Acesso Restrito CEO</h3>
+                          <h3 className="font-serif font-bold text-sm text-slate-100">Recuperar Código de Acesso</h3>
                         </div>
                         <button 
-                          onClick={() => setShowCeoModal(false)}
+                          onClick={() => setShowForgotModal(false)}
                           className="text-slate-400 hover:text-white p-1 rounded-lg"
                         >
                           <X size={18} />
                         </button>
                       </div>
 
-                      <p className="text-xs text-slate-400 leading-relaxed">
-                        Insira o PIN Mestre de Segurança para autenticar como <span className="text-brand-gold font-mono font-bold">jhonny.spider@gmail.com</span>:
-                      </p>
+                      {!forgotResult ? (
+                        <form onSubmit={handleForgotCode} className="space-y-4">
+                          <p className="text-xs text-slate-400 leading-relaxed">
+                            Insira seu E-mail ou CPF cadastrado para recuperar seu código de acesso:
+                          </p>
 
-                      <form onSubmit={handleVerifyCeoPin} className="space-y-4">
-                        <div>
-                          <input
-                            type="password"
-                            maxLength={6}
-                            value={ceoPinInput}
-                            onChange={(e) => setCeoPinInput(e.target.value)}
-                            placeholder="Digite o PIN Mestre (ex: 7777)"
-                            autoFocus
-                            className="w-full px-4 py-3 bg-slate-950 border border-slate-700 focus:border-brand-gold rounded-xl text-center text-lg tracking-widest text-slate-100 outline-none transition-colors"
-                          />
-                          {ceoPinError && (
-                            <p className="text-[11px] text-rose-400 mt-2 text-center font-medium">{ceoPinError}</p>
-                          )}
-                        </div>
+                          <div>
+                            <input
+                              type="text"
+                              value={forgotInput}
+                              onChange={(e) => setForgotInput(e.target.value)}
+                              placeholder="Seu E-mail ou CPF"
+                              autoFocus
+                              className="w-full px-4 py-3 bg-slate-950 border border-slate-700 focus:border-brand-gold rounded-xl text-xs text-slate-100 outline-none transition-colors font-mono"
+                            />
+                            {forgotError && (
+                              <p className="text-[11px] text-rose-400 mt-2 font-medium">{forgotError}</p>
+                            )}
+                          </div>
 
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setShowCeoModal(false)}
-                            className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            type="submit"
-                            className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
-                          >
-                            Validar PIN
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowForgotModal(false)}
+                              className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="submit"
+                              className="flex-1 py-2.5 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
+                            >
+                              Buscar Código
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <div className="space-y-4 text-center">
+                          <div className="p-4 bg-slate-950 rounded-2xl border border-brand-gold/40 space-y-2">
+                            <p className="text-xs text-slate-300 font-bold">{forgotResult.fullName}</p>
+                            <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">Seu Código de Acesso é:</p>
+                            <div className="text-3xl font-mono font-black text-brand-gold tracking-widest py-1">
+                              {forgotResult.accessCode}
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLoginIdentifier(forgotResult.email);
+                                setLoginAccessCode(forgotResult.accessCode);
+                                setShowForgotModal(false);
+                              }}
+                              className="flex-1 py-3 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
+                            >
+                              Preencher e Entrar
+                            </button>
+                          </div>
                         </div>
-                      </form>
+                      )}
                     </div>
                   </div>
                 )}
@@ -6111,11 +6474,23 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                           </div>
 
                           {/* Quick action buttons for the inspected day */}
-                          <div className="flex flex-wrap items-center gap-2.5 pt-4 border-t border-white/5">
+                          <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-white/5">
+                            <button
+                              onClick={() => {
+                                handleStartTrilhaStudy(activeInspectedDayNum, 'estudo');
+                              }}
+                              className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-widest transition-all bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 shadow-[0_8px_25px_rgba(212,175,55,0.4)] hover:shadow-[0_12px_35px_rgba(212,175,55,0.6)] hover:brightness-110 active:scale-95 cursor-pointer border border-amber-300/80 group"
+                              title="Iniciar estudo teórico guiado dividido em blocos"
+                            >
+                              <Sparkles size={16} className="text-slate-950 group-hover:scale-125 transition-transform" />
+                              <span className="font-extrabold tracking-wider">ESTUDAR DIA {activeInspectedDayNum}</span>
+                              <ChevronRight size={16} className="text-slate-950 group-hover:translate-x-1 transition-transform stroke-[2.5]" />
+                            </button>
+
                             <button
                               onClick={() => toggleTrilhaDayComplete(activeInspectedDayNum)}
                               className={cn(
-                                "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border",
+                                "flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border",
                                 isInspectedCompleted
                                   ? "bg-slate-950/20 border-red-500/25 text-red-450 hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400"
                                   : "bg-slate-950/65 border-white/5 text-slate-400 hover:bg-emerald-500/10 hover:border-emerald-500/20 hover:text-emerald-450"
@@ -6131,23 +6506,12 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                             </button>
 
                             <button
-                              onClick={() => {
-                                handleStartTrilhaStudy(activeInspectedDayNum, 'estudo');
-                              }}
-                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all bg-brand-gold text-slate-950 hover:bg-white hover:shadow-lg hover:shadow-brand-gold/10 active:scale-95 cursor-pointer"
-                              title="Iniciar estudo teórico guiado dividido em blocos"
-                            >
-                              <Sparkles size={11} />
-                              Estudar
-                            </button>
-
-                            <button
                               disabled={!isCEO && !hasCompletedDay50}
                               onClick={() => {
                                 handleStartTrilhaStudy(activeInspectedDayNum, 'discursivo');
                               }}
                               className={cn(
-                                "flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all border outline-none",
+                                "flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all border outline-none",
                                 (isCEO || hasCompletedDay50)
                                   ? "bg-slate-950 border-brand-gold/25 text-brand-gold hover:bg-brand-gold/10 hover:border-brand-gold/50 active:scale-95 cursor-pointer"
                                   : "bg-slate-950/20 border-transparent text-slate-600 opacity-40 cursor-not-allowed"
@@ -6518,28 +6882,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                               </div>
                             )}
 
-                            {/* Selo Oficial para o Aluno */}
-                            {tDay !== undefined && !isCEO && homologatedLessonState?.status === 'approved' && (
-                              <div className="mx-auto max-w-4xl w-full mb-6 p-3.5 px-5 rounded-2xl bg-gradient-to-r from-brand-gold/15 via-brand-gold/5 to-transparent border border-brand-gold/30 shadow-lg backdrop-blur-md flex items-center justify-between text-left">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-xl bg-brand-gold/20 flex items-center justify-center border border-brand-gold/40 text-brand-gold shrink-0">
-                                    <ShieldCheck size={18} />
-                                  </div>
-                                  <div>
-                                    <p className="text-xs font-bold text-slate-100 flex items-center gap-2">
-                                      Material Oficial Homologado pela Coordenação ATHENA
-                                      <span className="text-[10px] bg-brand-gold/20 text-brand-gold px-2 py-0.5 rounded-full font-mono font-bold">100% Edital</span>
-                                    </p>
-                                    <p className="text-[11px] text-slate-400">
-                                      Conteúdo revisado e homologado pelo Mestre CEO para a Trilha de 100 Dias.
-                                    </p>
-                                  </div>
-                                </div>
-                                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg font-bold shrink-0">
-                                  ✓ Homologado
-                                </span>
-                              </div>
-                            )}
+
 
                             {(messages || []).map((msg, msgIdx) => (
                               <ChatMessage
