@@ -48,7 +48,6 @@ import {
   Unlock,
   AlertTriangle,
   Cpu,
-  Key,
   Check,
   Activity,
   ShieldCheck,
@@ -62,7 +61,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer, getGeminiApiKey, setCustomApiKey, isNativeMobile, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
+import { askATHENA, evaluateAnswer, isNativeMobile, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
@@ -2116,8 +2115,6 @@ export default function App() {
 
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
-  const [customApiKeyInput, setCustomApiKeyInput] = useState(() => getGeminiApiKey());
-  const [keySaveSuccess, setKeySaveSuccess] = useState(false);
   const [testAiLoading, setTestAiLoading] = useState(false);
   const [testAiResult, setTestAiResult] = useState<GeminiConnectionTestResult | null>(null);
   const [selectedAiModel, setSelectedAiModel] = useState<string>(() => getSelectedModel());
@@ -7307,7 +7304,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
       )}
     </AnimatePresence>
 
-    {/* Modal de Configuração de IA e Chave Gemini */}
+    {/* Modal de Configuração de IA (proxy servidor) */}
     <AnimatePresence>
       {isAiSettingsOpen && (
         <motion.div
@@ -7393,7 +7390,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                 <div className="flex items-center justify-between pt-1 border-t border-white/5">
                   <span className="text-[9px] text-slate-500">Modo de Execução:</span>
                   <span className="text-[9px] font-mono text-brand-gold">
-                    {isNativeMobile() ? 'Nativo Android (REST)' : 'Web Resiliente'}
+                    {isNativeMobile() ? 'Nativo via proxy backend' : 'Web via proxy backend'}
                   </span>
                 </div>
               </div>
@@ -7430,56 +7427,16 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                     </div>
                     <div className="text-[10px] space-y-0.5 text-slate-300">
                       <p><span className="text-slate-400">Modelo:</span> {testAiResult.model}</p>
-                      <p><span className="text-slate-400">Chave:</span> {testAiResult.apiKeyPreview}</p>
+                      <p><span className="text-slate-400">Proxy:</span> {testAiResult.apiKeyPreview}</p>
                       <p><span className="text-slate-400">Retorno:</span> {testAiResult.message}</p>
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-wider text-slate-300 block">
-                  Chave da API Gemini (Google AI Studio)
-                </label>
-                <input
-                  type="password"
-                  value={customApiKeyInput}
-                  onChange={(e) => setCustomApiKeyInput(e.target.value)}
-                  placeholder="Chave API..."
-                  className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-brand-gold font-mono tracking-wider"
-                />
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  O aplicativo já inclui uma chave de alta performance embutida pelo Mestre Jhonny. Caso queira usar sua chave pessoal do Google AI Studio, basta colá-la acima.
-                </p>
-              </div>
-
-              <div className="pt-2 flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCustomApiKey(customApiKeyInput);
-                    setKeySaveSuccess(true);
-                    setTimeout(() => setKeySaveSuccess(false), 3000);
-                  }}
-                  className="w-full py-3 bg-brand-gold text-slate-950 rounded-xl font-black uppercase text-xs tracking-wider flex items-center justify-center gap-2 hover:bg-white transition-all shadow-lg active:scale-95 cursor-pointer"
-                >
-                  {keySaveSuccess ? <Check size={14} /> : <Key size={14} />}
-                  <span>{keySaveSuccess ? "Chave Salva com Sucesso!" : "Salvar Chave"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCustomApiKey("");
-                    setCustomApiKeyInput(getGeminiApiKey());
-                    setKeySaveSuccess(true);
-                    setTimeout(() => setKeySaveSuccess(false), 2000);
-                  }}
-                  className="w-full py-2 bg-slate-950 text-slate-400 hover:text-slate-200 rounded-xl text-[11px] font-bold border border-white/5 transition-colors cursor-pointer"
-                >
-                  Restaurar Chave Padrão
-                </button>
-              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                A chave da API Gemini permanece exclusivamente no servidor (variável de ambiente). O aplicativo móvel e o navegador nunca recebem nem armazenam essa credencial.
+              </p>
             </div>
           </motion.div>
         </motion.div>

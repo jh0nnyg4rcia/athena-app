@@ -4,22 +4,49 @@ dist/
 coverage/
 .DS_Store
 *.log
-.env
-.env.local
-!.env.example
+*.tmp
+*.swp
 
-# Android
+# Environment and secrets — never commit real values
+.env
+.env.*
+!.env.example
+!.env*.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+credentials.json
+*-credentials.json
+serviceAccount*.json
+**/service-account*.json
+keystore.properties
+**/keystore.properties
+!**/keystore.properties.example
+
+# Android signing, local SDK and artifacts
 android/.gradle/
-android/build/
-android/app/build/
+android/**/build/
 android/local.properties
 android/.idea/
+android/.cxx/
+android/captures/
 *.apk
 *.aab
+*.apks
+*.ipa
+*.jks
+*.keystore
 docs/download/*.apk
+
+# Firebase / Google client files (inject via CI or local copy)
+**/google-services.json
+**/GoogleService-Info.plist
 
 # Internal IDE and Telemetry
 .antigravity/
 .agents/
 .vscode/
+.idea/
 .firebase/

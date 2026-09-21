@@ -24,8 +24,25 @@ jobs:
       - name: Instalar Dependências Web
         run: npm ci
 
+      - name: Injetar google-services.json (secret CI)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "Secret GOOGLE_SERVICES_JSON ausente. Não versionar google-services.json no Git."
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+
       - name: Compilar Aplicação Web (Vite)
-        run: npm run build
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: |
+          if [ -z "$VITE_API_URL" ]; then
+            echo "Secret VITE_API_URL ausente. O APK precisa da URL HTTPS do proxy (sem chave Gemini)."
+            exit 1
+          fi
+          npm run build
 
       - name: Sincronizar com Capacitor Android
         run: npx cap sync android

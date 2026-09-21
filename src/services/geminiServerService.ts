@@ -1,15 +1,26 @@
+/**
+ * Serviço Gemini exclusivo do Express. Nunca importar este módulo no cliente
+ * (App.tsx / geminiService.ts): o SDK e GEMINI_API_KEY não podem ir ao bundle/APK.
+ */
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold, ThinkingLevel } from "@google/genai";
 import { ATHENA_LEGAL_CORPUS } from "./legalCorpusSource";
 
+function requireGeminiApiKey(): string {
+  const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY ausente no servidor. Configure .env.local (sem prefixo VITE_).");
+  }
+  return apiKey;
+}
+
 const getAI = () => new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "",
+  apiKey: requireGeminiApiKey(),
   httpOptions: {
     headers: {
       'User-Agent': 'aistudio-build',
     }
   }
 });
-const ai = getAI();
 
 // Cache Registry para Context Caching do Corpus Jurídico 2026
 interface CacheEntry {
@@ -36,7 +47,7 @@ async function getOrCreateLegalCorpusCache(model: string): Promise<string | null
 
   try {
     console.log(`[ATHENA Context Cache] Inicializando cache de contexto legal para: ${model}...`);
-    const cache = await ai.caches.create({
+    const cache = await getAI().caches.create({
       model,
       config: {
         displayName: `athena_legal_corpus_${model.replace(/[^a-zA-Z0-9]/g, '_')}`,
@@ -275,14 +286,56 @@ Regras de Negócio:
 `;
 };
 
+export async function testGeminiPing(preferredModel?: string): Promise<{ success: boolean; model: string; message: string }> {
+  if (!process.env.GEMINI_API_KEY) {
+    return {
+      success: false,
+      model: preferredModel || "nenhum",
+      message: "GEMINI_API_KEY ausente no servidor. Configure o arquivo .env."
+    };
+  }
+
+  const models = [
+    preferredModel || "gemini-3.8-flash",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.1-pro-preview"
+  ].filter((item, index, self) => self.indexOf(item) === index);
+
+  let lastError: any = null;
+  for (const model of models) {
+    try {
+      const response = await getAI().models.generateContent({
+        model,
+        contents: [{ role: "user", parts: [{ text: "Responda estritamente: ATHENA IA CONECTADA." }] }],
+        config: { temperature: 0 }
+      });
+      const text = (response?.text || "").trim();
+      if (text) {
+        return { success: true, model, message: text };
+      }
+    } catch (error) {
+      lastError = error;
+      console.warn(`[ATHENA Context Cache] Falha no ping do modelo ${model}:`, (error as Error)?.message || error);
+    }
+  }
+
+  return {
+    success: false,
+    model: models[0],
+    message: lastError instanceof Error ? lastError.message : "Falha ao contatar a API Gemini no servidor."
+  };
+}
+
 export async function askATHENA(
   message: string, 
   history: any[] = [], 
   userName: string = "Mestre", 
   file?: { mimeType: string, data: string },
   mentorshipStyle: 'teorico' | 'jurisprudente' | 'pratico' | 'automatico' = 'teorico',
-  mentorshipPhase: 'objetiva' | 'subjetiva' | 'oral' = 'objetiva'
-) {
+  mentorshipPhase: 'objetiva' | 'subjetiva' | 'oral' = 'objetiva',
+  preferredModel?: string
+): Promise<{ text: string; model: string }> {
   const parts: any[] = [{ text: message }];
   if (file) {
     parts.push({
@@ -297,12 +350,16 @@ export async function askATHENA(
 
   // Model Tiering Oficial 2026:
   // Priorizamos gemini-3.8-flash (2.7s, máxima fidelidade e zero alucinação) com fallback para gemini-3.6-flash e gemini-3.1-pro-preview
-  const modelAttempts = [
+  const rawAttempts = [
+    { model: preferredModel || "gemini-3.8-flash", useThinking: Boolean(preferredModel?.includes("pro")) },
     { model: "gemini-3.8-flash", useThinking: false },
     { model: "gemini-3.6-flash", useThinking: false },
     { model: "gemini-3.5-flash", useThinking: false },
     { model: "gemini-3.1-pro-preview", useThinking: true }
   ];
+  const modelAttempts = rawAttempts.filter((item, index, self) =>
+    index === self.findIndex(m => m.model === item.model)
+  );
 
   let lastError: any = null;
 
@@ -355,7 +412,7 @@ export async function askATHENA(
       
       let response: any = null;
       try {
-        response = await ai.models.generateContent({
+        response = await getAI().models.generateContent({
           model: attempt.model,
           contents: callContents,
           config
@@ -367,7 +424,7 @@ export async function askATHENA(
           cacheRegistry.delete(attempt.model);
           delete config.cachedContent;
           config.systemInstruction = `${ATHENA_SYSTEM_INSTRUCTION(userName, mentorshipStyle, mentorshipPhase)}\n\n${ATHENA_LEGAL_CORPUS}`;
-          response = await ai.models.generateContent({
+          response = await getAI().models.generateContent({
             model: attempt.model,
             contents: [
               ...history,
@@ -380,7 +437,10 @@ export async function askATHENA(
         }
       }
 
-      return response?.text || "ATHENA está meditando sobre a justiça. Tente novamente.";
+      return {
+        text: response?.text || "ATHENA está meditando sobre a justiça. Tente novamente.",
+        model: attempt.model
+      };
     } catch (error) {
       console.warn(`ATHENA: Erro com o modelo ${attempt.model}:`, error);
       lastError = error;
@@ -468,7 +528,7 @@ Forneça sua correção detalhada em formato markdown elegante contendo sugestõ
         }
 
         console.log(`ATHENA Evaluation: Tentando chamada com o modelo: ${attempt.model}`);
-        response = await ai.models.generateContent({
+        response = await getAI().models.generateContent({
           model: attempt.model,
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           config
