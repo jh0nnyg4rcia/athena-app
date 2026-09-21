@@ -1,34 +1,15 @@
 Add-Type -AssemblyName System.Drawing
 
-$srcPath = "C:\Users\jhonn\.gemini\antigravity\brain\1c04ebe6-7be3-46de-bfc6-f58960b534a3\.user_uploaded\media_1789876682928.jpg"
-if (!(Test-Path $srcPath)) {
-    Write-Error "Source image not found: $srcPath"
+$root = "C:\Users\jhonn\antigravity\athena"
+$iconPath = Join-Path $root "docs\athena-icon.png"
+
+if (!(Test-Path $iconPath)) {
+    Write-Error "Arquivo de ícone não encontrado: $iconPath"
     exit 1
 }
 
-$img = [System.Drawing.Image]::FromFile($srcPath)
-Write-Output "Source Image Size: $($img.Width)x$($img.Height)"
-
-$cropSize = 540
-$cropX = [Math]::Max(0, [int](512 - ($cropSize / 2)))
-$cropY = [Math]::Max(0, [int](279 - ($cropSize / 2)))
-
-Write-Output "Crop rect: X=$cropX, Y=$cropY, Size=$cropSize"
-
-$cropRect = New-Object System.Drawing.Rectangle $cropX, $cropY, $cropSize, $cropSize
-$cropped = New-Object System.Drawing.Bitmap $cropSize, $cropSize
-$g = [System.Drawing.Graphics]::FromImage($cropped)
-$g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-$g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-$g.DrawImage($img, (New-Object System.Drawing.Rectangle 0, 0, $cropSize, $cropSize), $cropRect, [System.Drawing.GraphicsUnit]::Pixel)
-$g.Dispose()
-
-$athenaPublic = "C:\Users\jhonn\antigravity\athena\public"
-if (!(Test-Path $athenaPublic)) { New-Item -ItemType Directory -Path $athenaPublic -Force }
-
-$apoloPublic = "C:\Users\jhonn\antigravity\Projeto-Apolo---Mentor-de-Concursos-AGU\public"
-if (!(Test-Path $apoloPublic)) { New-Item -ItemType Directory -Path $apoloPublic -Force }
+$srcImg = [System.Drawing.Image]::FromFile($iconPath)
+Write-Output "Imagem fonte carregada: $($srcImg.Width)x$($srcImg.Height)"
 
 function Save-ResizedIcon($srcBmp, $destPath, $size) {
     $resized = New-Object System.Drawing.Bitmap $size, $size
@@ -36,46 +17,55 @@ function Save-ResizedIcon($srcBmp, $destPath, $size) {
     $gr.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $gr.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $gr.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $gr.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
     $gr.DrawImage($srcBmp, 0, 0, $size, $size)
     $gr.Dispose()
+    
     $destDir = [System.IO.Path]::GetDirectoryName($destPath)
-    if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force }
+    if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+    
     $resized.Save($destPath, [System.Drawing.Imaging.ImageFormat]::Png)
     $resized.Dispose()
-    Write-Output "Generated: $destPath ($size x $size)"
+    Write-Output "Ícone gerado: $destPath ($size x $size)"
 }
 
-# Web / PWA icons in athena
-Save-ResizedIcon $cropped (Join-Path $athenaPublic "icon-512.png") 512
-Save-ResizedIcon $cropped (Join-Path $athenaPublic "icon-192.png") 192
-Save-ResizedIcon $cropped (Join-Path $athenaPublic "apple-touch-icon.png") 180
-Save-ResizedIcon $cropped (Join-Path $athenaPublic "favicon.png") 64
-Save-ResizedIcon $cropped (Join-Path $athenaPublic "favicon.ico") 48
+# 1. Ícones Web e PWA (public/)
+$publicDir = Join-Path $root "public"
+Save-ResizedIcon $srcImg (Join-Path $publicDir "icon-512.png") 512
+Save-ResizedIcon $srcImg (Join-Path $publicDir "icon-192.png") 192
+Save-ResizedIcon $srcImg (Join-Path $publicDir "apple-touch-icon.png") 180
+Save-ResizedIcon $srcImg (Join-Path $publicDir "favicon.png") 64
+Save-ResizedIcon $srcImg (Join-Path $publicDir "favicon.ico") 48
 
-# Projeto-Apolo icons
-Save-ResizedIcon $cropped (Join-Path $apoloPublic "icon-512.png") 512
-Save-ResizedIcon $cropped (Join-Path $apoloPublic "icon-192.png") 192
-Save-ResizedIcon $cropped (Join-Path $apoloPublic "apple-touch-icon.png") 180
-Save-ResizedIcon $cropped (Join-Path $apoloPublic "favicon.png") 64
+# 2. Ícones Nativos Android (android/app/src/main/res/mipmap-*)
+$resDir = Join-Path $root "android\app\src\main\res"
 
-# Android mipmap icons in athena
-$resDir = "C:\Users\jhonn\antigravity\athena\android\app\src\main\res"
 $densities = @{
-    "mipmap-mdpi" = 48
-    "mipmap-hdpi" = 72
-    "mipmap-xhdpi" = 96
-    "mipmap-xxhdpi" = 144
-    "mipmap-xxxhdpi" = 192
+    "mipmap-mdpi"    = @{ Base = 48; Foreground = 108 }
+    "mipmap-hdpi"    = @{ Base = 72; Foreground = 162 }
+    "mipmap-xhdpi"   = @{ Base = 96; Foreground = 216 }
+    "mipmap-xxhdpi"  = @{ Base = 144; Foreground = 324 }
+    "mipmap-xxxhdpi" = @{ Base = 192; Foreground = 432 }
 }
 
 foreach ($d in $densities.Keys) {
-    $size = $densities[$d]
-    $dirPath = Join-Path $resDir $d
-    Save-ResizedIcon $cropped (Join-Path $dirPath "ic_launcher.png") $size
-    Save-ResizedIcon $cropped (Join-Path $dirPath "ic_launcher_round.png") $size
-    Save-ResizedIcon $cropped (Join-Path $dirPath "ic_launcher_foreground.png") $size
+    $baseSize = $densities[$d].Base
+    $fgSize   = $densities[$d].Foreground
+    $dirPath  = Join-Path $resDir $d
+    
+    Save-ResizedIcon $srcImg (Join-Path $dirPath "ic_launcher.png") $baseSize
+    Save-ResizedIcon $srcImg (Join-Path $dirPath "ic_launcher_round.png") $baseSize
+    Save-ResizedIcon $srcImg (Join-Path $dirPath "ic_launcher_foreground.png") $fgSize
 }
 
-$cropped.Dispose()
-$img.Dispose()
-Write-Output "SUCCESS: All icons generated successfully!"
+# 3. Atualizar também no Kit da Área de Trabalho
+$desktopKit = "C:\Users\jhonn\OneDrive\Desktop\ATHENA-GooglePlay-Kit"
+if (!(Test-Path $desktopKit)) {
+    $desktopKit = "C:\Users\jhonn\Desktop\ATHENA-GooglePlay-Kit"
+}
+if (Test-Path $desktopKit) {
+    Save-ResizedIcon $srcImg (Join-Path $desktopKit "1_Icone_PlayStore_512x512.png") 512
+}
+
+$srcImg.Dispose()
+Write-Output "SUCESSO: Todos os ícones do ATHENA foram gerados com a arte oficial!"
