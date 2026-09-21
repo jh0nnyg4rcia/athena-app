@@ -40,8 +40,12 @@ export const isNativeMobile = (): boolean => {
   return isCap || isCapProto;
 };
 
+const PRODUCTION_PROXY_URL =
+  "https://southamerica-east1-gen-lang-client-0822763072.cloudfunctions.net/athenaApi";
+
 const getApiUrl = (endpoint: string): string => {
-  const base = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+  const configured = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+  const base = configured || (isNativeMobile() ? PRODUCTION_PROXY_URL : "");
   if (isNativeMobile() && !base) {
     throw new Error(
       "VITE_API_URL não configurada no build nativo. O APK não pode chamar a API Gemini diretamente; defina a URL HTTPS do proxy ATHENA no momento do build."

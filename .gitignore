@@ -44,7 +44,9 @@ docs/download/*.apk
 **/google-services.json
 **/GoogleService-Info.plist
 
-# Internal IDE and Telemetry
+# Firebase Cloud Functions build output
+functions/lib/
+functions/node_modules/
 .antigravity/
 .agents/
 .vscode/
