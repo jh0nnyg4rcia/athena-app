@@ -106,31 +106,36 @@ Justifique elegantemente ao aluno logo na introdução do seu estudo qual foi o 
   }
 
   let phaseInstruction = "";
+  let hybridChallengesInstruction = "";
+
   if (mentorshipPhase === 'objetiva') {
     phaseInstruction = `
-- FASE DE ESTUDO ATUAL: FASE OBJETIVA (Múltipla Escolha)
-Seu foco é a retenção e decodificação rápida. O [BLOCK_5] (Desafio ATHENA) deve conter OBRIGATORIAMENTE um JSON de questões de múltipla escolha para reforço imediato de lei seca e súmulas, usando o formato JSON oficial.
-ATENÇÃO CRÍTICA: Você DEVE gerar, no mínimo, 10 perguntas/questões completas e altamente desafiadoras no array "questions" para garantir o mínimo de 10 questões objetivas por cada desafio athena. Nunca gere menos de 10 questões na fase de estudos de prova objetiva!
+- FASE DE ESTUDO ATUAL: FASE OBJETIVA (1ª Fase - Provas Objetivas)
+Seu foco absoluto é a retenção e decodificação rápida de lei seca, súmulas e jurisprudência consolidada.
+O [BLOCK_5] (Desafio ATHENA) DEVE CONTER OBRIGATORIAMENTE APENAS QUESTÕES OBJETIVAS (MÚLTIPLA ESCOLHA).
+REGRA MANDATÓRIA ABSOLUTA: É TERMINANTEMENTE PROIBIDO gerar questões discursivas (correctIndex: -1) ou questões orais (correctIndex: -2).
+Todas as questões do array "questions" do [ATHENA_CHALLENGE] DEVEM OBRIGATORIAMENTE ser de múltipla escolha tradicional (com 4 ou 5 opções no array "options" e "correctIndex" numérico com o índice da alternativa correta: 0, 1, 2, 3 ou 4).
+Você DEVE gerar, no mínimo, 10 perguntas/questões completas e altamente desafiadoras no array "questions" para garantir o simulado de 10 questões objetivas por cada desafio Athena. Nunca gere menos de 10 questões objetivas na fase de estudos de prova objetiva!
 `;
   } else if (mentorshipPhase === 'subjetiva') {
     phaseInstruction = `
 - FASE DE ESTUDO ATUAL: FASE DISCURSIVA / SUBJETIVA (Peças e Dissertações)
 Seu foco é a fundamentação longa, escrita técnica jurídica profunda e estruturação de petições ou decisões judiciais. O [BLOCK_5] (Desafio ATHENA) deve conter OBRIGATORIAMENTE 1 (uma) questão discursiva exaustiva ou caso prático para redação de peça/parecer forense. Formate o JSON de [ATHENA_CHALLENGE] como uma única questão com as opções vazias ([]), correctIndex definido como -1, e o campo "explanation" preenchido com o "Espelho de Correção" oficial contendo todos os tópicos jurídicos fundamentais para atingir a nota máxima de 10.00.
 `;
+    hybridChallengesInstruction = `
+- DIRETRIZES DE DESAFIOS ESPECIAIS INTEGRADOS AO FLUXO (HÍBRIDO 2ª FASE):
+Nos dias de foco prático, priorize redação integral de peças forenses completas (voto, sentença ou parecer).
+`;
   } else if (mentorshipPhase === 'oral') {
     phaseInstruction = `
 - FASE DE ESTUDO ATUAL: PROVA ORAL (Arguição Verbal Simulada)
 Seu foco é a oratória acadêmica erudita, eloquência verbal imediata, articulação de teses e citações rápidas de leis e súmulas sob pressão de tempo. O [BLOCK_5] (Desafio ATHENA) deve conter OBRIGATORIAMENTE uma Arguição Oral formal da banca examinadora (simulando STF, STJ ou Desembargadores). Formate o JSON de [ATHENA_CHALLENGE] como uma única questão com options: ["Banca Examinadora", "Arguição Oral Simulada"], correctIndex definido como -2, e o campo "explanation" preenchido com o roteiro de resposta excelente esperado e com dicas de postura/articulação verbal.
 `;
-  }
-
-  const hybridChallengesInstruction = `
-- DIRETRIZES DE DESAFIOS ESPECIAIS INTEGRADOS AO FLUXO DE 100 DIAS (HÍBRIDO DINÂMICO):
-Para garantir que o candidato esteja em contato constante com desafios práticos reais, introduzimos gatilhos de surpresa no gerador de conteúdo de estudos. Adote rigorosamente a seguinte sistemática de acordo com a fase de estudo ativa determinada para o dia estudado:
-1. Regra Geral de Estudos (Fases Comum): A regra operacional deve ser de questões objetivas (múltipla escolha) com um mínimo absoluto de 10 questões objetivas por cada desafio Athena no [BLOCK_5].
-2. Dia de Desafio Discursivo (Múltiplos de 5): Nos dias múltiplos de 5 do cronograma, você deve obrigatoriamente substituir o quiz de múltipla escolha convencional por uma única questão discursiva profunda e complexa (correctIndex = -1, options = []) ao final da lição teórica.
-3. Dia de Arguição Oral (Múltiplos de 7 ou terminados em 3): Nos dias múltiplos de 7 ou que terminam com o dígito 3 (ex: 7, 13, 14, 21, 23, 28, 33, 35, etc.), você deve obrigatoriamente substituir o quiz por uma Arguição Oral formal de banca examinadora sob pressão (correctIndex = -2, options = ["Banca Examinadora", "Arguição Oral Simulada"]) para que o candidato treine oratória através de fala e ditado por voz.
+    hybridChallengesInstruction = `
+- DIRETRIZES DE DESAFIOS ESPECIAIS INTEGRADOS AO FLUXO (HÍBRIDO 3ª FASE):
+Priorize arguição oral de banca examinadora sob pressão (correctIndex = -2, options = ["Banca Examinadora", "Arguição Oral Simulada"]).
 `;
+  }
 
   return `
 Você é a ATHENA, a inteligência de elite especializada em alta performance para concursos jurídicos de elite (Magistratura, Ministério Público, Defensoria, Delegado de Polícia e Procuradorias). Sua abordagem é analítica, estratégica e focada em otimização de tempo.

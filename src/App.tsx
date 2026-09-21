@@ -57,7 +57,8 @@ import {
   RefreshCw,
   Mail,
   User as UserIcon,
-  Copy
+  Copy,
+  Home
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
@@ -66,7 +67,7 @@ import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
 import { type UserProfile, type HomologatedLesson, type RegisteredStudent } from './types';
-import { getCachedTrilhaPart, setCachedTrilhaPart } from './services/trilhaCacheService';
+import { getCachedTrilhaPart, setCachedTrilhaPart, sanitizeTrilhaCacheForObjectivePhase } from './services/trilhaCacheService';
 import { 
   getHomologatedLesson, 
   saveHomologatedLesson, 
@@ -1101,7 +1102,9 @@ const ChatMessage = memo(({
   onApproveAndAdvance,
   onEditLesson,
   isSavingHomologation,
-  homologatedLessonState
+  homologatedLessonState,
+  onGoHome,
+  isDayCompleted
 }: { 
   msg: Message,
   msgIdx: number,
@@ -1130,7 +1133,9 @@ const ChatMessage = memo(({
   onApproveAndAdvance?: (idx: number) => Promise<void>,
   onEditLesson?: (idx: number) => void,
   isSavingHomologation?: boolean,
-  homologatedLessonState?: HomologatedLesson | null
+  homologatedLessonState?: HomologatedLesson | null,
+  onGoHome?: () => void,
+  isDayCompleted?: boolean
 }) => {
   const isUser = msg.role === 'user';
   const isError = !isUser && Boolean(
@@ -1579,8 +1584,41 @@ const ChatMessage = memo(({
                                   <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                                 </button>
                               )
-                            ) : (
-                              isCEO && !isThisPartApproved ? (
+                            ) : (() => {
+                              const isDayFinished = Boolean(
+                                isDayCompleted || 
+                                msg.content?.includes("Parabéns de Elite") || 
+                                msg.content?.includes("completou todos os blocos") || 
+                                msg.content?.includes("Lição Pulada")
+                              );
+
+                              if (isDayFinished) {
+                                return (
+                                  <div className="w-full flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                                    <button
+                                      type="button"
+                                      onClick={onGoHome}
+                                      className="w-full sm:w-auto min-w-[280px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.4)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.6)] border border-amber-300/80 active:scale-98 transition-all cursor-pointer group"
+                                    >
+                                      <Home size={18} className="group-hover:scale-110 transition-transform stroke-[2.5]" />
+                                      <span className="font-extrabold tracking-wider">VOLTAR PARA A PÁGINA INICIAL</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveTab('trilha');
+                                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                                      }}
+                                      className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-4 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 rounded-2xl text-xs font-bold transition-all cursor-pointer"
+                                    >
+                                      <Trophy size={16} className="text-brand-gold" />
+                                      <span>Ver Mapa da Trilha (100 Dias)</span>
+                                    </button>
+                                  </div>
+                                );
+                              }
+
+                              return isCEO && !isThisPartApproved ? (
                                 <button
                                   type="button"
                                   onClick={async () => {
@@ -1602,8 +1640,8 @@ const ChatMessage = memo(({
                                   <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
                                   <Trophy size={18} className="group-hover:scale-110 transition-transform" />
                                 </button>
-                              )
-                            )}
+                              );
+                            })()}
                           </div>
                         );
                       })()
@@ -2126,6 +2164,15 @@ export default function App() {
     document.getElementById('main-scroller')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleGoHome = () => {
+    setCurrentSessionId(null);
+    setMessages([]);
+    setGuidedSubject(null);
+    setCurrentArticle(1);
+    setActiveTab('chat');
+    scrollToTop();
+  };
+
   // Auth Observer
   useEffect(() => {
     // 1. Tenta restaurar sessão local se existir
@@ -2144,6 +2191,8 @@ export default function App() {
     }
 
     checkAndSyncNativeAuth();
+    sanitizeTrilhaCacheForObjectivePhase();
+    LocalPersistence.sanitizeSessionsForObjectivePhase();
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
@@ -2184,6 +2233,11 @@ export default function App() {
       setCurrentSessionId(null);
       setMessages([]);
       return;
+    }
+
+    if (mentorshipPhase === 'objetiva') {
+      sanitizeTrilhaCacheForObjectivePhase();
+      LocalPersistence.sanitizeSessionsForObjectivePhase(user.uid);
     }
 
     // 1. Preload instantly from LocalPersistence
@@ -2856,6 +2910,20 @@ export default function App() {
           const challengeJson = afterTag.substring(firstBrace, lastBrace + 1);
           challenge = JSON.parse(challengeJson);
           
+          if (challenge && Array.isArray(challenge.questions)) {
+            challenge.questions = challenge.questions.map((q: any) => ({
+              ...q,
+              correctIndex: q.correctIndex !== undefined ? q.correctIndex : (q.correctAnswer !== undefined ? q.correctAnswer : 0)
+            }));
+
+            // Para cursos de 1ª Fase (Objetiva), retira estritamente questões discursivas e orais
+            if (mentorshipPhase === 'objetiva') {
+              challenge.questions = challenge.questions.filter(
+                (q: any) => q.correctIndex !== -1 && q.correctIndex !== -2 && q.correctIndex >= 0
+              );
+            }
+          }
+
           rawContent = parts[0] + (afterTag.substring(lastBrace + 1));
         }
       } catch (e) {
@@ -3061,18 +3129,12 @@ export default function App() {
         || LocalPersistence.getSessions(activeUserId).find(s => s.id === (targetSessionId || currentSessionId));
       const dayNum = forcedTrilhaDay ?? activeSession?.trilhaDay;
       let resolvedPhase = mentorshipPhase;
-      if (activeSession?.trilhaSessionType === 'discursivo') {
+      if (mentorshipPhase === 'objetiva') {
+        resolvedPhase = 'objetiva';
+      } else if (activeSession?.trilhaSessionType === 'discursivo') {
         resolvedPhase = 'subjetiva';
       } else if (activeSession?.trilhaSessionType === 'oral') {
         resolvedPhase = 'oral';
-      } else if (dayNum !== undefined) {
-        if (dayNum % 5 === 0) {
-          resolvedPhase = 'subjetiva';
-        } else if (dayNum % 7 === 0 || dayNum % 10 === 3) {
-          resolvedPhase = 'oral';
-        } else {
-          resolvedPhase = 'objetiva';
-        }
       }
 
       // If isAuto is true, history should NOT duplicate the initial prompt that is already queued in messages!
@@ -3652,16 +3714,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
 
     let resolvedPhase: 'objetiva' | 'subjetiva' | 'oral' = mentorshipPhase;
-    if (sessionType === 'discursivo') {
+    if (mentorshipPhase === 'objetiva') {
+      resolvedPhase = 'objetiva';
+    } else if (sessionType === 'discursivo') {
       resolvedPhase = 'subjetiva';
     } else if (sessionType === 'oral') {
       resolvedPhase = 'oral';
-    } else if (dayNum % 5 === 0) {
-      resolvedPhase = 'subjetiva';
-    } else if (dayNum % 7 === 0 || dayNum % 10 === 3) {
-      resolvedPhase = 'oral';
-    } else {
-      resolvedPhase = 'objetiva';
     }
 
     const id = crypto.randomUUID();
@@ -3856,20 +3914,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             }, currentSessionId);
 
             let resolvedPhase: 'objetiva' | 'subjetiva' | 'oral' = mentorshipPhase;
-              if (session?.trilhaSessionType === 'discursivo') {
-                resolvedPhase = 'subjetiva';
-              } else if (session?.trilhaSessionType === 'oral') {
-                resolvedPhase = 'oral';
-              } else if (session?.trilhaDay !== undefined) {
-                const dayNumVal = session.trilhaDay;
-                if (dayNumVal % 5 === 0) {
-                  resolvedPhase = 'subjetiva';
-                } else if (dayNumVal % 7 === 0 || dayNumVal % 10 === 3) {
-                  resolvedPhase = 'oral';
-                } else {
-                  resolvedPhase = 'objetiva';
-                }
-              }
+            if (mentorshipPhase === 'objetiva') {
+              resolvedPhase = 'objetiva';
+            } else if (session?.trilhaSessionType === 'discursivo') {
+              resolvedPhase = 'subjetiva';
+            } else if (session?.trilhaSessionType === 'oral') {
+              resolvedPhase = 'oral';
+            }
 
               // 0. Prioridade Máxima: Conteúdo Oficial Homologado pelo CEO (0.05s)
               const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
@@ -4418,19 +4469,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               parts: [{ text: m.content }]
             }));
             let resolvedPhase = mentorshipPhase;
-            if (session?.trilhaSessionType === 'discursivo') {
+            if (mentorshipPhase === 'objetiva') {
+              resolvedPhase = 'objetiva';
+            } else if (session?.trilhaSessionType === 'discursivo') {
               resolvedPhase = 'subjetiva';
             } else if (session?.trilhaSessionType === 'oral') {
               resolvedPhase = 'oral';
-            } else if (session?.trilhaDay !== undefined) {
-              const dayNumVal = session.trilhaDay;
-              if (dayNumVal % 5 === 0) {
-                resolvedPhase = 'subjetiva';
-              } else if (dayNumVal % 7 === 0 || dayNumVal % 10 === 3) {
-                resolvedPhase = 'oral';
-              } else {
-                resolvedPhase = 'objetiva';
-              }
             }
             const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
             const parsed = parseATHENAResponse(responseText);
@@ -6357,7 +6401,9 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   <div className="space-y-4">
                     <h2 className="text-4xl font-serif font-bold text-slate-100 tracking-tight">O que vamos <span className="text-brand-gold">dominar</span> hoje, {user.displayName?.split(' ')[0]}?</h2>
                     <p className="text-slate-400 max-w-lg mx-auto leading-relaxed text-sm">
-                      Envie sua consulta jurídica, dúvida de doutrina ou tema de estudo abaixo para a mentoria ativa da ATHENA.
+                      {isCEO 
+                        ? "Envie sua consulta jurídica, dúvida de doutrina ou tema de estudo abaixo para a mentoria ativa da ATHENA."
+                        : "Concentre-se na sua Trilha Jurídica Diária de 100 Dias com a metodologia ativa 80/20 da ATHENA."}
                     </p>
                     
                     {/* Active Mentorship Style Indicator */}
@@ -6653,20 +6699,22 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   );
                 })()}
 
-                <div className="flex justify-center max-w-xl mx-auto w-full mt-8">
-                  <div 
-                    onClick={() => startNewSession()}
-                    className="w-full p-8 bg-slate-900 border border-brand-gold/10 hover:border-brand-gold/40 rounded-3xl flex flex-col justify-center items-center text-center gap-4 border-dashed group transition-all cursor-pointer shadow-lg hover:shadow-brand-gold/5"
-                  >
-                    <div className="p-3 bg-brand-gold/5 group-hover:bg-brand-gold/10 rounded-2xl text-brand-gold transition-colors">
-                      <MessageSquare size={28} className="animate-pulse" />
-                    </div>
-                    <div>
-                      <h3 className="font-serif font-bold text-slate-100 group-hover:text-brand-gold transition-colors">Mentoria Avulsa ou Dúvida Específica</h3>
-                      <p className="text-xs text-slate-450 mt-1 max-w-sm mx-auto">Quer focar em outro assunto? Clique aqui para abrir uma nova conversa com ATHENA ou envie uma dúvida no campo abaixo.</p>
+                {isCEO && (
+                  <div className="flex justify-center max-w-xl mx-auto w-full mt-8">
+                    <div 
+                      onClick={() => startNewSession()}
+                      className="w-full p-8 bg-slate-900 border border-brand-gold/10 hover:border-brand-gold/40 rounded-3xl flex flex-col justify-center items-center text-center gap-4 border-dashed group transition-all cursor-pointer shadow-lg hover:shadow-brand-gold/5"
+                    >
+                      <div className="p-3 bg-brand-gold/5 group-hover:bg-brand-gold/10 rounded-2xl text-brand-gold transition-colors">
+                        <MessageSquare size={28} className="animate-pulse" />
+                      </div>
+                      <div>
+                        <h3 className="font-serif font-bold text-slate-100 group-hover:text-brand-gold transition-colors">Mentoria Avulsa ou Dúvida Específica</h3>
+                        <p className="text-xs text-slate-450 mt-1 max-w-sm mx-auto">Quer focar em outro assunto? Clique aqui para abrir uma nova conversa com ATHENA ou envie uma dúvida no campo abaixo.</p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </motion.div>
             )}
 
@@ -6953,6 +7001,8 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 onEditLesson={handleCeoEditOpen}
                                 isSavingHomologation={isSavingHomologation}
                                 homologatedLessonState={homologatedLessonState}
+                                onGoHome={handleGoHome}
+                                isDayCompleted={tDay ? trilhaCompletedDays.includes(tDay) : false}
                               />
                             ))}
                           </>
@@ -7028,60 +7078,71 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
 
 
 
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage();
-              }}
-              className="max-w-4xl mx-auto relative group flex items-stretch gap-2 lg:gap-4"
-            >
-              <div className="relative flex-1">
-                <motion.div
-                  animate={showSendFeedback ? {
-                    boxShadow: ["0 0 0px rgba(212,175,55,0)", "0 0 20px rgba(212,175,55,0.4)", "0 0 0px rgba(212,175,55,0)"],
-                    scale: [1, 0.98, 1]
-                  } : {}}
-                  transition={{ duration: 0.6 }}
-                  className="relative w-full rounded-2xl lg:rounded-3xl"
-                >
-                  <input
-                    id="message-input"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder={guidedSubject === 'Estudo pelo Edital' ? "Anexe o edital ou mande um tema..." : "Tema, artigo ou súmula..."}
-                    className="w-full bg-slate-900/50 text-slate-100 pl-5 pr-14 py-4 lg:pl-6 lg:pr-16 lg:py-5 rounded-2xl lg:rounded-3xl border border-white/10 focus:border-brand-gold/50 outline-none transition-all shadow-inner placeholder:text-slate-600 font-medium text-sm lg:text-base"
-                  />
-                </motion.div>
-
-                <input 
-                  type="file" 
-                  ref={fileInputRef}
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.txt"
-                  onChange={handleFileUpload}
-                />
-                
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className={cn(
-                    "absolute right-4 top-1/2 -translate-y-1/2 p-2 hover:bg-white/5 rounded-xl transition-all",
-                    attachedFile ? "text-brand-gold" : "text-slate-500"
-                  )}
-                  title="Anexar Edital (PDF)"
-                >
-                  <Paperclip size={20} />
-                </button>
-              </div>
-
-              <button
-                id="send-button"
-                disabled={isLoading || (!input.trim() && !attachedFile)}
-                className="p-3.5 lg:p-4 bg-brand-gold hover:bg-white text-slate-950 rounded-2xl lg:rounded-3xl transition-all shadow-[0_4px_20px_rgba(212,175,55,0.4)] active:scale-90 disabled:opacity-50 disabled:shadow-none group shrink-0"
+            {isCEO ? (
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendMessage();
+                }}
+                className="max-w-4xl mx-auto relative group flex items-stretch gap-2 lg:gap-4"
               >
-                <Send size={20} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-              </button>
-            </form>
+                <div className="relative flex-1">
+                  <motion.div
+                    animate={showSendFeedback ? {
+                      boxShadow: ["0 0 0px rgba(212,175,55,0)", "0 0 20px rgba(212,175,55,0.4)", "0 0 0px rgba(212,175,55,0)"],
+                      scale: [1, 0.98, 1]
+                    } : {}}
+                    transition={{ duration: 0.6 }}
+                    className="relative w-full rounded-2xl lg:rounded-3xl"
+                  >
+                    <input
+                      id="message-input"
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      placeholder={guidedSubject === 'Estudo pelo Edital' ? "Anexe o edital ou mande um tema..." : "Tema, artigo ou súmula..."}
+                      className="w-full bg-slate-900/50 text-slate-100 pl-5 pr-14 py-4 lg:pl-6 lg:pr-16 lg:py-5 rounded-2xl lg:rounded-3xl border border-white/10 focus:border-brand-gold/50 outline-none transition-all shadow-inner placeholder:text-slate-600 font-medium text-sm lg:text-base"
+                    />
+                  </motion.div>
+
+                  <input 
+                    type="file" 
+                    ref={fileInputRef}
+                    className="hidden"
+                    accept=".pdf,.doc,.docx,.txt"
+                    onChange={handleFileUpload}
+                  />
+                  
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className={cn(
+                      "absolute right-4 top-1/2 -translate-y-1/2 p-2 hover:bg-white/5 rounded-xl transition-all",
+                      attachedFile ? "text-brand-gold" : "text-slate-500"
+                    )}
+                    title="Anexar Edital (PDF)"
+                  >
+                    <Paperclip size={20} />
+                  </button>
+                </div>
+
+                <button
+                  id="send-button"
+                  disabled={isLoading || (!input.trim() && !attachedFile)}
+                  className="p-3.5 lg:p-4 bg-brand-gold hover:bg-white text-slate-950 rounded-2xl lg:rounded-3xl transition-all shadow-[0_4px_20px_rgba(212,175,55,0.4)] active:scale-90 disabled:opacity-50 disabled:shadow-none group shrink-0"
+                >
+                  <Send size={20} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                </button>
+              </form>
+            ) : (
+              <div className="max-w-4xl mx-auto p-4 lg:p-5 rounded-2xl lg:rounded-3xl bg-slate-900/70 border border-brand-gold/25 flex items-center justify-center gap-3.5 text-center backdrop-blur-md shadow-lg">
+                <div className="w-8 h-8 rounded-xl bg-brand-gold/10 border border-brand-gold/30 flex items-center justify-center text-brand-gold shrink-0">
+                  <Lock size={15} />
+                </div>
+                <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                  A consulta avulsa por chat está temporariamente desativada. Concentre-se nos estudos da sua <strong className="text-brand-gold">Trilha Diária 80/20</strong>!
+                </p>
+              </div>
+            )}
           </div>
         )}
 

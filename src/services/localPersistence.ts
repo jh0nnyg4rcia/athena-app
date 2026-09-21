@@ -183,5 +183,64 @@ export const LocalPersistence = {
     } catch (e) {
       console.warn("Local storage save trilha progress error:", e);
     }
+  },
+
+  /**
+   * Sanitiza as sessões salvas para cursos de 1ª Fase (Objetiva):
+   * Remove questões subjetivas (correctIndex: -1) e orais (correctIndex: -2)
+   * das mensagens já gravadas no histórico de sessões do usuário.
+   */
+  sanitizeSessionsForObjectivePhase(specificUserId?: string): void {
+    try {
+      const keys: string[] = [];
+      if (specificUserId) {
+        keys.push(`athena_sessions_${specificUserId}`);
+      }
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('athena_sessions_') && !keys.includes(key)) {
+          keys.push(key);
+        }
+      }
+
+      for (const key of keys) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        let modified = false;
+        try {
+          const sessions = JSON.parse(raw) as ChatSession[];
+          if (!Array.isArray(sessions)) continue;
+
+          for (const s of sessions) {
+            // Se for sessão de estudo regular da 1ª fase
+            if (s.trilhaSessionType !== 'discursivo' && s.trilhaSessionType !== 'oral') {
+              if (Array.isArray(s.messages)) {
+                for (const m of s.messages) {
+                  if (m.challenge && Array.isArray(m.challenge.questions)) {
+                    const originalLength = m.challenge.questions.length;
+                    m.challenge.questions = m.challenge.questions.filter(
+                      (q: any) => q.correctIndex !== -1 && q.correctIndex !== -2 && q.correctIndex >= 0
+                    );
+                    if (m.challenge.questions.length !== originalLength) {
+                      modified = true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          if (modified) {
+            localStorage.setItem(key, JSON.stringify(sessions));
+            console.log(`[LocalPersistence] Sessões sanitizadas para 1ª Fase em: ${key}`);
+          }
+        } catch (err) {
+          console.warn(`[LocalPersistence] Erro ao sanitizar sessões em ${key}:`, err);
+        }
+      }
+    } catch (e) {
+      console.warn('[LocalPersistence] Falha geral ao sanitizar sessões para 1ª fase:', e);
+    }
   }
 };
+
