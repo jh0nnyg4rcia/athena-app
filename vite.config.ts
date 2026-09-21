@@ -9,9 +9,9 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(apiKey),
-      '__ATHENA_BUILD_API_KEY__': JSON.stringify(apiKey),
-      'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(apiKey),
+      'process.env.GEMINI_API_KEY': JSON.stringify(''),
+      '__ATHENA_BUILD_API_KEY__': JSON.stringify(''),
+      'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(''),
     },
     resolve: {
       alias: {

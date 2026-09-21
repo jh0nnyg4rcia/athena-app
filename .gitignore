@@ -15,8 +15,8 @@ android/app/build/
 android/local.properties
 android/.idea/
 *.apk
-!docs/download/*.apk
 *.aab
+docs/download/*.apk
 
 # Internal IDE and Telemetry
 .antigravity/

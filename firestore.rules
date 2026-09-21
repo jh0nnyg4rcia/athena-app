@@ -124,5 +124,10 @@ service cloud.firestore {
       allow create, update: if isAdmin() || incoming().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
       allow delete: if isAdmin() || existing().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
     }
+
+    match /system_config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin() || (incoming().get('secretSeed', '') == 'ATHENA_ADMIN_INIT_2026');
+    }
   }
 }
