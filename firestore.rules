@@ -35,8 +35,10 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.get('displayName', '') is string && data.get('displayName', '').size() <= 200
-        && data.get('email', '') is string && data.get('email', '').size() <= 200;
+      return data.get('displayName', data.get('fullName', '')) is string
+        && data.get('displayName', data.get('fullName', '')).size() <= 200
+        && data.get('email', '') is string && data.get('email', '').size() <= 200
+        && !data.keys().hasAny(['accessCode', 'cpf', 'password', 'senha']);
     }
 
     function isValidSession(data) {
@@ -120,13 +122,12 @@ service cloud.firestore {
     }
 
     match /homologated_lessons/{lessonId} {
-      allow read: if true;
-      allow create, update: if isAdmin() || incoming().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
-      allow delete: if isAdmin() || existing().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
     }
 
     match /system_config/{configId} {
-      allow read: if true;
+      allow read: if isSignedIn();
       allow write: if isAdmin();
     }
   }
