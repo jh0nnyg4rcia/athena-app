@@ -6,6 +6,7 @@
     }
   ],
   "hosting": {
+    "site": "athena-mentoria",
     "public": "dist",
     "ignore": [
       "firebase.json",
