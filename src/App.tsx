@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useEffect, useMemo, Suspense, lazy } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Scale, 
@@ -113,6 +113,41 @@ import { LocalPersistence } from './services/localPersistence';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+const ATHENA_CEO_EMAIL = 'jhonny.spider@gmail.com';
+
+type AthenaTab = 'chat' | 'stats' | 'reviews' | 'mentees' | 'schedules' | 'trilha';
+
+function isCeoAccount(account: { email?: string | null } | null | undefined): boolean {
+  return (account?.email || '').toLowerCase().trim() === ATHENA_CEO_EMAIL;
+}
+
+type ResumeState = { tab: AthenaTab; sessionId: string | null };
+
+function resumeKey(uid: string) {
+  return `athena_ui_resume_${uid}`;
+}
+
+function loadResume(uid: string): ResumeState | null {
+  try {
+    const raw = localStorage.getItem(resumeKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ResumeState;
+    const tabs: AthenaTab[] = ['chat', 'stats', 'reviews', 'mentees', 'schedules', 'trilha'];
+    if (!tabs.includes(parsed.tab)) return { tab: 'chat', sessionId: parsed.sessionId || null };
+    return { tab: parsed.tab, sessionId: parsed.sessionId || null };
+  } catch {
+    return null;
+  }
+}
+
+function saveResume(uid: string, state: ResumeState) {
+  try {
+    localStorage.setItem(resumeKey(uid), JSON.stringify(state));
+  } catch {
+    /* storage indisponível */
+  }
 }
 
 interface Message {
@@ -1786,16 +1821,7 @@ export default function App() {
   };
 
   const handleLoginAsCEO = () => {
-    const ceoUser = {
-      uid: 'jhonny-spider-ceo',
-      displayName: 'Jhonny (CEO)',
-      email: 'jhonny.spider@gmail.com',
-      photoURL: '',
-      emailVerified: true
-    };
-    localStorage.setItem('athena_local_user', JSON.stringify(ceoUser));
-    setUser(ceoUser as any);
-    setAuthError(null);
+    setAuthError("O acesso de CEO exige login com Google. Não há PIN no aplicativo.");
   };
 
   const handleUnifiedLogin = async (e?: React.FormEvent) => {
@@ -1819,9 +1845,9 @@ export default function App() {
       localStorage.setItem('athena_saved_login_email', identifier);
     } catch {}
 
-    // 1. Verificação Unificada do CEO Mestre
-    if (identifier === CEO_EMAIL.toLowerCase() && code === '7777') {
-      handleLoginAsCEO();
+    // 1. CEO: somente Google Sign-In
+    if (identifier === ATHENA_CEO_EMAIL) {
+      setAuthError("Para acesso administrativo, use Entrar com Google.");
       return;
     }
 
@@ -1943,13 +1969,13 @@ export default function App() {
       console.warn("Erro ao fazer login com Google:", err);
       const msg = err?.message || String(err);
       if (err?.code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
-        setAuthError("Domínio não autorizado no Firebase. Para testar imediatamente, clique em 'Entrar como Aluno'.");
+        setAuthError("Este domínio ainda não está autorizado no Firebase Authentication. Inclua projetoathena.app.br, athena-mentoria.web.app e localhost.");
       } else if (err?.code === 'auth/popup-closed-by-user' || msg.includes('16') || msg.toLowerCase().includes('cancel')) {
         setAuthError("A seleção da Conta Google foi cancelada.");
       } else if (msg.includes('network') || msg.includes('NETWORK')) {
         setAuthError("Falha de conexão com os servidores do Google. Verifique sua conexão com a internet.");
       } else {
-        setAuthError(err?.message || "Não foi possível conectar com a Conta Google no momento. Utilize o acesso de Aluno abaixo.");
+        setAuthError(err?.message || "Não foi possível conectar com a Conta Google.");
       }
     }
   };
@@ -2011,15 +2037,13 @@ export default function App() {
     return () => window.removeEventListener('firestore-quota-exceeded', onQuota);
   }, []);
 
-  const CEO_EMAIL = 'jhonny.spider@gmail.com';
-
   const userProfile: UserProfile | null = useMemo(() => {
     if (!user) return null;
-    const isCeoUser = user.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+    const isCeoUser = isCeoAccount(user);
     if (isCeoUser) {
       return {
         uid: user.uid,
-        email: user.email || CEO_EMAIL,
+        email: user.email || ATHENA_CEO_EMAIL,
         displayName: user.displayName || 'Mestre CEO (Jhonny)',
         photoURL: user.photoURL || '',
         role: 'ceo',
@@ -2042,7 +2066,7 @@ export default function App() {
     };
   }, [user]);
 
-  const isCEO = userProfile?.role === 'ceo' || user?.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+  const isCEO = isCeoAccount(auth.currentUser) || (Boolean(auth.currentUser) && isCeoAccount(user));
 
   const [tokenExhaustedBanner, setTokenExhaustedBanner] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
@@ -2170,20 +2194,26 @@ export default function App() {
     scrollToTop();
   };
 
+  const resumeHydratedForUid = useRef<string | null>(null);
+  const [resumeReady, setResumeReady] = useState(false);
+  const skipResumeSaveRef = useRef(true);
+
   // Auth Observer
   useEffect(() => {
-    // 1. Tenta restaurar sessão local se existir
     const savedLocalUser = localStorage.getItem('athena_local_user');
     if (savedLocalUser) {
       try {
         const parsed = JSON.parse(savedLocalUser);
-        setUser(parsed);
-        setLoadingAuth(false);
+        if (isCeoAccount(parsed)) {
+          localStorage.removeItem('athena_local_user');
+        } else {
+          setUser(parsed);
+          setLoadingAuth(false);
+        }
       } catch (e) {
         console.warn("Erro ao restaurar usuário local:", e);
       }
     } else {
-      // Nenhum usuário local persistido: aguarda autenticação oficial via Google Sign-In
       setLoadingAuth(false);
     }
 
@@ -2192,15 +2222,15 @@ export default function App() {
     LocalPersistence.sanitizeSessionsForObjectivePhase();
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u) {
+      if (u && !u.isAnonymous) {
         setUser(u);
         localStorage.removeItem('athena_local_user');
-      } else if (!localStorage.getItem('athena_local_user')) {
+      } else if (!u && !localStorage.getItem('athena_local_user')) {
         setUser(null);
       }
       setLoadingAuth(false);
 
-      if (u && !isQuotaExhausted()) {
+      if (u && !u.isAnonymous && !isQuotaExhausted()) {
         // Save user profile to Firestore only once per session to preserve quota
         const syncKey = `lastLoginSynced_${u.uid}`;
         if (!sessionStorage.getItem(syncKey)) {
@@ -2241,13 +2271,6 @@ export default function App() {
     const localSessions = LocalPersistence.getSessions(user.uid);
     if (localSessions.length > 0) {
       setSessions(localSessions);
-      if (!currentSessionId) {
-        const last = localSessions[0];
-        setCurrentSessionId(last.id);
-        setMessages(last.messages || []);
-        setGuidedSubject(last.guidedSubject || null);
-        setCurrentArticle(last.currentArticle || 1);
-      }
     }
 
     // 2. Attach Firestore onSnapshot listener only if Firebase Auth is signed in
@@ -2266,14 +2289,6 @@ export default function App() {
       if (docs.length > 0) {
         setSessions(docs);
         docs.forEach(s => LocalPersistence.saveSession(user.uid, s));
-        
-        if (!currentSessionId) {
-          const last = docs[0];
-          setCurrentSessionId(last.id);
-          setMessages(last.messages);
-          setGuidedSubject(last.guidedSubject);
-          setCurrentArticle(last.currentArticle);
-        }
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/sessions`);
@@ -2286,6 +2301,55 @@ export default function App() {
 
     return () => unsubscribe();
   }, [user]);
+
+  useLayoutEffect(() => {
+    if (!user) {
+      resumeHydratedForUid.current = null;
+      setResumeReady(false);
+      return;
+    }
+    if (resumeHydratedForUid.current === user.uid) return;
+    skipResumeSaveRef.current = true;
+    resumeHydratedForUid.current = user.uid;
+
+    const resume = loadResume(user.uid);
+    const localSessions = LocalPersistence.getSessions(user.uid);
+    const wanted = resume?.sessionId
+      ? localSessions.find((s) => s.id === resume.sessionId)
+      : undefined;
+    const allowSession = Boolean(
+      wanted && (isCeoAccount(auth.currentUser) || wanted.trilhaDay !== undefined)
+    );
+
+    let nextTab: AthenaTab = resume?.tab || 'chat';
+    if (nextTab === 'mentees' && !isCeoAccount(auth.currentUser)) {
+      nextTab = 'chat';
+    }
+
+    if (allowSession && wanted) {
+      setCurrentSessionId(wanted.id);
+      setMessages(wanted.messages || []);
+      setGuidedSubject(wanted.guidedSubject || null);
+      setCurrentArticle(wanted.currentArticle || 1);
+      setActiveTab(nextTab);
+    } else {
+      setCurrentSessionId(null);
+      setMessages([]);
+      setGuidedSubject(null);
+      setCurrentArticle(1);
+      setActiveTab(nextTab === 'chat' ? 'chat' : nextTab);
+    }
+    setResumeReady(true);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user || !resumeReady || resumeHydratedForUid.current !== user.uid) return;
+    if (skipResumeSaveRef.current) {
+      skipResumeSaveRef.current = false;
+      return;
+    }
+    saveResume(user.uid, { tab: activeTab, sessionId: currentSessionId });
+  }, [user?.uid, activeTab, currentSessionId, resumeReady]);
 
   // Sync Statistics and Schedules
   useEffect(() => {
@@ -2728,6 +2792,7 @@ export default function App() {
 
   const startNewSession = async (title: string = "Nova Mentoria", sub: string | null = null, art: number = 1) => {
     if (!user) return;
+    if (!isCEO && !sub) return;
     
     const id = crypto.randomUUID();
     const newSession: ChatSession = {
@@ -2761,6 +2826,10 @@ export default function App() {
   const switchSession = (id: string) => {
     const session = sessions.find(s => s.id === id);
     if (session) {
+      if (!isCEO && session.trilhaDay === undefined && !session.guidedSubject) {
+        handleGoHome();
+        return;
+      }
       setCurrentSessionId(id);
       setMessages(session.messages || []);
       setGuidedSubject(session.guidedSubject);
@@ -3087,6 +3156,19 @@ export default function App() {
     let targetSessionId = sessionId;
     const activeArticle = forcedArticle !== undefined ? forcedArticle : currentArticle;
     const activeSubject = forcedSubject !== undefined ? forcedSubject : guidedSubject;
+    const pendingSession =
+      sessions.find((s) => s.id === (targetSessionId || currentSessionId)) ||
+      (user ? LocalPersistence.getSessions(user.uid).find((s) => s.id === (targetSessionId || currentSessionId)) : undefined);
+    const inStructuredStudy = Boolean(
+      forcedTrilhaDay !== undefined ||
+      pendingSession?.trilhaDay !== undefined ||
+      activeSubject ||
+      pendingSession?.guidedSubject ||
+      activeStudyItem
+    );
+    if (!isCEO && !inStructuredStudy) {
+      return;
+    }
 
     const currentAttachedFile = attachedFile;
 
