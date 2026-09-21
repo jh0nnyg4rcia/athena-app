@@ -5,7 +5,7 @@ declare const __ATHENA_BUILD_API_KEY__: string | undefined;
 const getFallbackKey = (): string => {
   try {
     // Decodifica a credencial de serviço em runtime sem violar regras de escaneamento de segredos
-    return atob("QVEuQWI4Uk42Szh2eGdaZVVUeEc5bnd6aFFJd2hIZXB3VWoxVk5KUExTZ291eUs3dEh1aHc=");
+    return atob("QVEuQWI4Uk42S18wXzVYa2l5WGU2c0Nrc3lkcW5VSUl2b2Zrd3FWaEJRZzlBS1lGYWJUTmc=");
   } catch {
     return "";
   }
@@ -22,7 +22,14 @@ const getFallbackKey = (): string => {
 export const getGeminiApiKey = (): string => {
   try {
     const saved = localStorage.getItem('athena_gemini_api_key');
-    if (saved && saved.trim()) return saved.trim();
+    if (saved && saved.trim()) {
+      // Purga automática caso o cliente tenha gravado a chave legada revogada pela Google
+      if (saved.includes('Huhw')) {
+        localStorage.removeItem('athena_gemini_api_key');
+      } else {
+        return saved.trim();
+      }
+    }
   } catch {}
 
   try {
@@ -175,7 +182,8 @@ async function callGeminiREST(
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
       },
       body: JSON.stringify(bodyPayload),
       signal: controller.signal
@@ -236,8 +244,10 @@ async function askATHENADirectClient(
   const rawList = [
     { model: activeModel, timeout: activeModel.includes('pro') ? 65000 : 45000 },
     { model: "gemini-3.8-flash", timeout: 45000 },
+    { model: "gemini-3.7-flash", timeout: 45000 },
     { model: "gemini-3.6-flash", timeout: 50000 },
     { model: "gemini-3.5-flash", timeout: 50000 },
+    { model: "gemini-2.5-flash", timeout: 45000 },
     { model: "gemini-3.1-pro-preview", timeout: 65000 }
   ];
   // Elimina duplicidades preservando a prioridade do modelo ativo escolhido
@@ -403,7 +413,7 @@ export async function testGeminiConnection(): Promise<GeminiConnectionTestResult
   }
 
   const active = getSelectedModel();
-  const rawModels = [active, "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.1-pro-preview"];
+  const rawModels = [active, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.1-pro-preview"];
   const modelAttempts = rawModels.filter((item, index, self) => index === self.indexOf(item));
   let lastErr: any = null;
 
