@@ -13,7 +13,8 @@ const config: CapacitorConfig = {
   plugins: {
     FirebaseAuthentication: {
       skipNativeAuth: false,
-      providers: ['google.com']
+      providers: ['google.com'],
+      authDomain: 'athena-mentoria.firebaseapp.com'
     }
   }
 };
