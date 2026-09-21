@@ -66,6 +66,7 @@ import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
 import { type UserProfile, type HomologatedLesson, type RegisteredStudent } from './types';
+import { hashAccessSecret, newAccessSalt, verifyAccessSecret, cpfLast4 } from './lib/accessSecret';
 import { getCachedTrilhaPart, setCachedTrilhaPart, sanitizeTrilhaCacheForObjectivePhase } from './services/trilhaCacheService';
 import { 
   getHomologatedLesson, 
@@ -1738,16 +1739,19 @@ export default function App() {
       return;
     }
 
-    // Gera um código de acesso de 6 dígitos numérico único
-    const accessCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const accessSalt = newAccessSalt();
+    const accessCodeHash = await hashAccessSecret(accessCode, accessSalt);
     const safeUid = `student_${rawCpf}`;
 
     const newStudent: RegisteredStudent = {
       uid: safeUid,
       fullName: name,
       cpf: registerCpf,
+      cpfLast4: cpfLast4(rawCpf),
       email,
       accessCode,
+      accessCodeHash,
+      accessCodeSalt: accessSalt,
       createdAt: Date.now(),
       trialExpiresAt: Date.now() + 100 * 24 * 60 * 60 * 1000
     };
@@ -1756,11 +1760,20 @@ export default function App() {
     setLoginIdentifier(email);
     setLoginAccessCode(accessCode);
 
-    // Tenta persistir de forma não-bloqueante no Firestore
     try {
       if (!isQuotaExhausted()) {
         const docRef = doc(db, 'users', safeUid);
-        setDoc(docRef, cleanData(newStudent), { merge: true }).catch(() => {});
+        const cloudRecord = {
+          uid: safeUid,
+          fullName: name,
+          email,
+          cpfLast4: cpfLast4(rawCpf),
+          accessCodeHash,
+          accessCodeSalt: accessSalt,
+          createdAt: newStudent.createdAt,
+          trialExpiresAt: newStudent.trialExpiresAt
+        };
+        setDoc(docRef, cleanData(cloudRecord), { merge: true }).catch(() => {});
       }
     } catch {}
 
@@ -1786,16 +1799,7 @@ export default function App() {
   };
 
   const handleLoginAsCEO = () => {
-    const ceoUser = {
-      uid: 'jhonny-spider-ceo',
-      displayName: 'Jhonny (CEO)',
-      email: 'jhonny.spider@gmail.com',
-      photoURL: '',
-      emailVerified: true
-    };
-    localStorage.setItem('athena_local_user', JSON.stringify(ceoUser));
-    setUser(ceoUser as any);
-    setAuthError(null);
+    setAuthError("O acesso de CEO exige login com Google. Não há PIN no aplicativo.");
   };
 
   const handleUnifiedLogin = async (e?: React.FormEvent) => {
@@ -1819,21 +1823,31 @@ export default function App() {
       localStorage.setItem('athena_saved_login_email', identifier);
     } catch {}
 
-    // 1. Verificação Unificada do CEO Mestre
-    if (identifier === CEO_EMAIL.toLowerCase() && code === '7777') {
-      handleLoginAsCEO();
+    // 1. CEO: somente Google Sign-In (PIN local foi removido)
+    if (identifier === CEO_EMAIL.toLowerCase()) {
+      setAuthError("Para acesso administrativo, use Entrar com Google.");
       return;
     }
+
+    const matchesStudent = async (candidate: RegisteredStudent): Promise<boolean> => {
+      if (candidate.accessCodeHash && candidate.accessCodeSalt) {
+        return verifyAccessSecret(code, candidate.accessCodeSalt, candidate.accessCodeHash);
+      }
+      if (candidate.accessCode) {
+        return candidate.accessCode === code;
+      }
+      return false;
+    };
 
     // 2. Busca entre estudantes cadastrados no dispositivo
     const localStudents = getSavedRegisteredStudents();
     const found = localStudents.find(s => 
       s.email.toLowerCase() === identifier || 
-      (rawId.length >= 9 && s.cpf.replace(/\D/g, '') === rawId)
+      (rawId.length >= 9 && (s.cpf || '').replace(/\D/g, '') === rawId)
     );
 
     if (found) {
-      if (found.accessCode === code) {
+      if (await matchesStudent(found)) {
         const studentUser = {
           uid: found.uid,
           displayName: found.fullName,
@@ -1853,14 +1867,14 @@ export default function App() {
       }
     }
 
-    // 3. Fallback: Se for novo aparelho e online, consulta nuvem
-    if (!isQuotaExhausted() && rawId.length === 11) {
+    // 3. Fallback nuvem: exige Firebase Auth; compara hash, nunca código em texto
+    if (!isQuotaExhausted() && rawId.length === 11 && auth.currentUser) {
       try {
         const snap = await getDoc(doc(db, 'users', `student_${rawId}`));
         if (snap.exists()) {
           const remoteStudent = snap.data() as RegisteredStudent;
-          if (remoteStudent && remoteStudent.accessCode === code) {
-            saveRegisteredStudentLocally(remoteStudent);
+          if (remoteStudent && await matchesStudent(remoteStudent)) {
+            saveRegisteredStudentLocally({ ...remoteStudent, accessCode: undefined });
             const studentUser = {
               uid: remoteStudent.uid,
               displayName: remoteStudent.fullName,
@@ -1898,23 +1912,15 @@ export default function App() {
     const localStudents = getSavedRegisteredStudents();
     let match = localStudents.find(s => 
       s.email.toLowerCase() === term || 
-      (rawTerm.length >= 9 && s.cpf.replace(/\D/g, '') === rawTerm)
+      (rawTerm.length >= 9 && (s.cpf || '').replace(/\D/g, '') === rawTerm)
     );
 
-    if (!match && !isQuotaExhausted() && rawTerm.length === 11) {
-      try {
-        const snap = await getDoc(doc(db, 'users', `student_${rawTerm}`));
-        if (snap.exists()) {
-          match = snap.data() as RegisteredStudent;
-        }
-      } catch {}
+    if (match?.accessCode) {
+      setForgotResult(match);
+      return;
     }
 
-    if (match) {
-      setForgotResult(match);
-    } else {
-      setForgotError("Nenhum cadastro encontrado com este dado. Acesse a aba 'Cadastre-se' para criar sua conta.");
-    }
+    setForgotError("Por segurança o código não é enviado pela nuvem. Use o mesmo aparelho do cadastro ou fale com o suporte.");
   };
 
   const handleLoginAsGuest = () => {
@@ -2192,15 +2198,16 @@ export default function App() {
     LocalPersistence.sanitizeSessionsForObjectivePhase();
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u) {
+      // Login Google real substitui a sessão. Conta anônima não apaga e-mail+código local.
+      if (u && !u.isAnonymous) {
         setUser(u);
         localStorage.removeItem('athena_local_user');
-      } else if (!localStorage.getItem('athena_local_user')) {
+      } else if (!u && !localStorage.getItem('athena_local_user')) {
         setUser(null);
       }
       setLoadingAuth(false);
 
-      if (u && !isQuotaExhausted()) {
+      if (u && !u.isAnonymous && !isQuotaExhausted()) {
         // Save user profile to Firestore only once per session to preserve quota
         const syncKey = `lastLoginSynced_${u.uid}`;
         if (!sessionStorage.getItem(syncKey)) {
@@ -5384,7 +5391,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                                 type="password"
                                 value={loginAccessCode}
                                 onChange={(e) => setLoginAccessCode(e.target.value)}
-                                placeholder="Digite seu código (ex: 6 dígitos ou PIN)"
+                                placeholder="Digite seu código de 6 dígitos"
                                 className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono tracking-widest"
                               />
                             </div>
