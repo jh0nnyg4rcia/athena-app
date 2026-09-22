@@ -101,6 +101,19 @@ export function hasCachedTrilhaPart(
 
 export function listCachedTrilhaParts(): Array<{ day: number; part: number; style: string; text: string; timestamp: number }> {
   const byId = new Map<string, { day: number; part: number; style: string; text: string; timestamp: number }>();
+  if (typeof window === 'undefined') {
+    for (const part of listRememberedTrilhaParts()) {
+      if (!part?.text) continue;
+      byId.set(part.id, {
+        day: part.day,
+        part: part.part,
+        style: part.style,
+        text: part.text,
+        timestamp: part.timestamp || Date.now()
+      });
+    }
+    return Array.from(byId.values());
+  }
   try {
     const re = new RegExp(`^${CACHE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}d(\\d+)_p(\\d+)_(.+)$`);
     for (let i = 0; i < localStorage.length; i++) {
