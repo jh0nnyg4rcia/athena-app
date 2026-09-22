@@ -95,9 +95,7 @@ import {
 import { 
   db, 
   auth, 
-  signInWithGoogle, 
   logOut, 
-  checkAndSyncNativeAuth,
   handleFirestoreError, 
   OperationType, 
   cleanData,
@@ -1833,10 +1831,6 @@ export default function App() {
     setAuthError(null);
   };
 
-  const handleLoginAsCEO = () => {
-    setAuthError("O acesso de CEO exige login com Google. Não há PIN no aplicativo.");
-  };
-
   const handleUnifiedLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError(null);
@@ -1858,13 +1852,7 @@ export default function App() {
       localStorage.setItem('athena_saved_login_email', identifier);
     } catch {}
 
-    // 1. CEO: somente Google Sign-In
-    if (identifier === ATHENA_CEO_EMAIL) {
-      setAuthError("Para acesso administrativo, use Entrar com Google.");
-      return;
-    }
-
-    // 2. Busca entre estudantes cadastrados no dispositivo
+    // 2. Busca entre estudantes cadastrados no dispositivo (CEO incluso por e-mail + código)
     const localStudents = getSavedRegisteredStudents();
     const found = localStudents.find(s => 
       s.email.toLowerCase() === identifier || 
@@ -1969,28 +1957,6 @@ export default function App() {
     } catch {}
     setUser(guestUser as any);
     setAuthError(null);
-  };
-
-  const handleGoogleLogin = async () => {
-    setAuthError(null);
-    try {
-      const cred = await signInWithGoogle();
-      if (cred && 'user' in cred && cred.user) {
-        setUser(cred.user);
-      }
-    } catch (err: any) {
-      console.warn("Erro ao fazer login com Google:", err);
-      const msg = err?.message || String(err);
-      if (err?.code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
-        setAuthError("Este domínio ainda não está autorizado no Firebase Authentication. Inclua projetoathena.app.br, athena-mentoria.web.app e localhost.");
-      } else if (err?.code === 'auth/popup-closed-by-user' || msg.includes('16') || msg.toLowerCase().includes('cancel')) {
-        setAuthError("A seleção da Conta Google foi cancelada.");
-      } else if (msg.includes('network') || msg.includes('NETWORK')) {
-        setAuthError("Falha de conexão com os servidores do Google. Verifique sua conexão com a internet.");
-      } else {
-        setAuthError(err?.message || "Não foi possível conectar com a Conta Google.");
-      }
-    }
   };
 
   const handleLogout = async () => {
@@ -2131,7 +2097,7 @@ export default function App() {
     };
   }, [user]);
 
-  const isCEO = isCeoAccount(auth.currentUser) || isCeoAccount(user);
+  const isCEO = isCeoAccount(user);
 
   const [tokenExhaustedBanner, setTokenExhaustedBanner] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
@@ -2269,9 +2235,7 @@ export default function App() {
     if (savedLocalUser) {
       try {
         const parsed = JSON.parse(savedLocalUser);
-        if (isCeoAccount(parsed)) {
-          localStorage.removeItem('athena_local_user');
-        } else {
+        if (parsed?.uid) {
           setUser(parsed);
           setLoadingAuth(false);
         }
@@ -2282,38 +2246,28 @@ export default function App() {
       setLoadingAuth(false);
     }
 
-    checkAndSyncNativeAuth();
     sanitizeTrilhaCacheForObjectivePhase();
     LocalPersistence.sanitizeSessionsForObjectivePhase();
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u && !u.isAnonymous) {
-        setUser(u);
-        localStorage.removeItem('athena_local_user');
-      } else if (!u && !localStorage.getItem('athena_local_user')) {
-        setUser(null);
+        try {
+          await logOut();
+        } catch {}
       }
-      setLoadingAuth(false);
-
-      if (u && !u.isAnonymous && !isQuotaExhausted()) {
-        // Save user profile to Firestore only once per session to preserve quota
-        const syncKey = `lastLoginSynced_${u.uid}`;
-        if (!sessionStorage.getItem(syncKey)) {
-          sessionStorage.setItem(syncKey, 'true');
-          const userRef = doc(db, 'users', u.uid);
-          try {
-            const cleaned = cleanData({
-              displayName: u.displayName || 'Usuário',
-              email: u.email || '',
-              photoURL: u.photoURL || '',
-              lastLogin: Date.now()
-            });
-            await setDoc(userRef, cleaned, { merge: true });
-          } catch (error) {
-            console.warn("Notice: User profile sync postponed (resilient local mode active):", error);
+      const saved = localStorage.getItem('athena_local_user');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed?.uid) {
+            setUser(parsed);
+            setLoadingAuth(false);
+            return;
           }
-        }
+        } catch {}
       }
+      setUser(null);
+      setLoadingAuth(false);
     });
     return () => unsubscribe();
   }, []);
@@ -2395,11 +2349,11 @@ export default function App() {
       ? localSessions.find((s) => s.id === resume.sessionId)
       : undefined;
     const allowSession = Boolean(
-      wanted && (isCeoAccount(auth.currentUser) || wanted.trilhaDay !== undefined)
+      wanted && (isCeoAccount(user) || wanted.trilhaDay !== undefined)
     );
 
     let nextTab: AthenaTab = resume?.tab || 'chat';
-    if (nextTab === 'mentees' && !isCeoAccount(auth.currentUser)) {
+    if (nextTab === 'mentees' && !isCeoAccount(user)) {
       nextTab = 'chat';
     }
 
@@ -5725,22 +5679,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                     </div>
 
                     <div className="w-full space-y-2.5">
-                      {/* Botão Oficial Google Sign-In */}
-                      <button 
-                        type="button"
-                        onClick={handleGoogleLogin}
-                        className="w-full flex items-center justify-center gap-2.5 px-6 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold uppercase tracking-wider text-[11px] rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24">
-                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                        </svg>
-                        <span>Entrar com Conta Google</span>
-                      </button>
-
-                      {/* Acesso Rápido Visitante */}
                       <button 
                         type="button"
                         onClick={handleLoginAsGuest}
