@@ -250,6 +250,8 @@ interface Review {
   article: number;
   content: string;
   timestamp: number;
+  day?: number;
+  part?: number;
 }
 
 interface UserStat {
@@ -6032,7 +6034,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               >
                 <div className="text-center space-y-4">
                    <h2 className="text-3xl font-serif font-bold text-slate-100"><span className="text-brand-gold">Revisão</span> Comprimida</h2>
-                   <p className="text-slate-400 text-sm">Acesse rapidamente os pontos-chave de todos os artigos já estudados.</p>
+                   <p className="text-slate-400 text-sm">Somente o Bloco 6 (Revisão Comprimida) de cada parte, organizado por dia da trilha.</p>
                 </div>
                 <Suspense fallback={<div className="h-48 bg-slate-900 border border-white/5 rounded-[2.5rem] animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Carregando lista de revisões comprimidas...</div>}>
                   <ReviewList 

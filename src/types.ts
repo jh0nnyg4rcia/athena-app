@@ -52,6 +52,8 @@ export interface Review {
   article: number;
   content: string;
   timestamp: number;
+  day?: number;
+  part?: number;
 }
 
 export interface UserStat {

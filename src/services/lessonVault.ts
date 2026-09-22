@@ -1,9 +1,10 @@
-import { HomologatedLesson, TrilhaPartCache } from '../types';
+import { HomologatedLesson, Review, TrilhaPartCache } from '../types';
 
 const DB_NAME = 'athena_lesson_vault';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const LESSONS_STORE = 'lessons';
 const TRILHA_STORE = 'trilha_parts';
+const REVIEWS_STORE = 'compressed_reviews';
 
 export type VaultTrilhaPart = TrilhaPartCache & {
   id: string;
@@ -32,6 +33,9 @@ function openVault(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(TRILHA_STORE)) {
         db.createObjectStore(TRILHA_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(REVIEWS_STORE)) {
+        db.createObjectStore(REVIEWS_STORE, { keyPath: 'id' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -141,6 +145,22 @@ export async function putVaultTrilhaPart(entry: VaultTrilhaPart): Promise<void> 
   }
 }
 
+export async function putVaultReviews(reviews: Review[]): Promise<void> {
+  try {
+    await Promise.all(reviews.filter((r) => r?.id && r.content).map((r) => idbPut(REVIEWS_STORE, r)));
+  } catch (err) {
+    console.warn('[LessonVault] Falha ao gravar revisões comprimidas no IndexedDB:', err);
+  }
+}
+
+export async function listVaultReviews(): Promise<Review[]> {
+  try {
+    return await idbGetAll<Review>(REVIEWS_STORE);
+  } catch {
+    return [];
+  }
+}
+
 function migrateLocalStorageIntoVault(): void {
   if (typeof window === 'undefined') return;
   try {
@@ -155,6 +175,13 @@ function migrateLocalStorageIntoVault(): void {
           if (lesson?.id) {
             memoryLessons.set(lesson.id, lesson);
             void idbPut(LESSONS_STORE, lesson);
+          }
+        } else if (key.startsWith('athena_compressed_reviews_')) {
+          const parsed = JSON.parse(raw) as Review[];
+          if (Array.isArray(parsed)) {
+            parsed.forEach((review) => {
+              if (review?.id && review.content) void idbPut(REVIEWS_STORE, review);
+            });
           }
         } else if (key.startsWith('athena_trilha_cache_')) {
           const match = key.match(/athena_trilha_cache_d(\d+)_p(\d+)_(.+)$/);
