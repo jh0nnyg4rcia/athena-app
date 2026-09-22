@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BookOpen, ChevronRight, Trash2, X, History } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 interface Review {
   id: string;
@@ -21,6 +22,7 @@ export function ReviewList({
   onDelete: (id: string) => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   if (reviews.length === 0) {
     return (
@@ -29,7 +31,7 @@ export function ReviewList({
           <BookOpen className="text-slate-700" size={32} />
         </div>
         <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Nenhuma revisão comprimida ainda.</p>
-        <p className="text-xs text-slate-600 mt-2">Conclua lições no estudo guiado para salvar revisões.</p>
+        <p className="text-xs text-slate-600 mt-2">As revisões do Bloco 6 são salvas automaticamente ao gerar, homologar ou carregar a lição do cache.</p>
       </div>
     );
   }
@@ -39,18 +41,21 @@ export function ReviewList({
       {reviews.sort((a, b) => b.timestamp - a.timestamp).map((review) => (
         <motion.div
           key={review.id}
-          whileHover={{ y: -4, border: '1px solid rgba(212, 175, 55, 0.3)' }}
-          className="p-5 bg-slate-900 border border-white/5 rounded-3xl cursor-pointer group transition-all relative"
+          whileHover={{ y: -4 }}
+          className="p-5 bg-slate-900 border border-white/5 hover:border-brand-gold/30 rounded-3xl cursor-pointer group transition-all relative"
         >
           <div className="flex items-center justify-between mb-3">
             <span 
               onClick={() => onSelect(review)}
-              className="text-[10px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-2 py-0.5 rounded-full"
+              className="text-[10px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-2 py-0.5 rounded-full max-w-[70%] truncate"
+              title={review.subject}
             >
-              {review.subject.split(' ')[0]}
+              {review.subject}
             </span>
             <div className="flex items-center gap-3">
-              <span className="text-[10px] text-slate-500 font-bold">Art. {review.article}</span>
+              <span className="text-[10px] text-slate-500 font-bold">
+                {review.subject.startsWith('Dia ') ? `Ponto ${review.article}` : `Art. ${review.article}`}
+              </span>
               <div className="relative flex items-center gap-1">
                 <AnimatePresence mode="wait">
                   {confirmDelete === review.id ? (
@@ -102,13 +107,24 @@ export function ReviewList({
               </div>
             </div>
           </div>
-          <div onClick={() => onSelect(review)}>
-            <p className="text-sm font-serif font-bold text-slate-100 group-hover:text-brand-gold transition-colors line-clamp-2 leading-relaxed">
-              {review.content.split('\n')[0].replace(/^[•\s*-]+/, '')}
-            </p>
+          <div
+            onClick={() => {
+              setOpenId(openId === review.id ? null : review.id);
+              onSelect(review);
+            }}
+          >
+            {openId === review.id ? (
+              <div className="markdown-body text-sm text-slate-200 leading-relaxed">
+                <ReactMarkdown>{review.content}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="text-sm font-serif font-bold text-slate-100 group-hover:text-brand-gold transition-colors line-clamp-2 leading-relaxed">
+                {review.content.split('\n').find((l) => l.trim())?.replace(/^[•\s*#-]+/, '') || 'Revisão comprimida'}
+              </p>
+            )}
             <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-4 font-bold uppercase tracking-widest">
-              <span>Reler revisão</span>
-              <ChevronRight size={12} className="group-hover:translate-x-1 transition-transform" />
+              <span>{openId === review.id ? 'Recolher' : 'Ler revisão completa'}</span>
+              <ChevronRight size={12} className={openId === review.id ? 'rotate-90 transition-transform' : 'group-hover:translate-x-1 transition-transform'} />
             </div>
           </div>
         </motion.div>

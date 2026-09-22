@@ -107,10 +107,19 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { IncidenceChart } from './components/IncidenceChart';
-import { cacheArticle, cacheQuestion } from './services/localCache';
+import { cacheArticle, cacheQuestion, getCachedArticles } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
 import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, keepObjectiveChallengeQuestions, sanitizeAthenaVoice } from './lib/athenaVoice';
+import {
+  harvestCompressedReviews,
+  upsertCompressedReview,
+  deleteCompressedReview,
+  mergeReviewLists,
+  extractReviewBlock,
+  buildCompressedReview,
+  persistReviewFromMessage
+} from './lib/compressedReviews';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -2003,13 +2012,63 @@ export default function App() {
   const [trilhaCompletedDays, setTrilhaCompletedDays] = useState<number[]>([]);
   const [selectedTrilhaWeek, setSelectedTrilhaWeek] = useState<number>(1);
   const [dashboardDay, setDashboardDay] = useState<number | null>(null);
+  const [compressedReviews, setCompressedReviews] = useState<Review[]>([]);
   const reviews = useMemo(() => {
-    const all: Review[] = [];
+    const fromSessions: Review[] = [];
     sessions.forEach(s => {
-      if (s.reviews) all.push(...s.reviews);
+      if (s.reviews) fromSessions.push(...s.reviews);
     });
-    return all.sort((a, b) => b.timestamp - a.timestamp);
-  }, [sessions]);
+    return mergeReviewLists(compressedReviews, fromSessions);
+  }, [sessions, compressedReviews]);
+
+  useEffect(() => {
+    if (!user) {
+      setCompressedReviews([]);
+      return;
+    }
+    let cancelled = false;
+    const run = async (fetchCloud: boolean) => {
+      try {
+        const articles = await getCachedArticles();
+        const next = await harvestCompressedReviews(user.uid, {
+          sessions,
+          articles,
+          fetchCloud
+        });
+        if (!cancelled) setCompressedReviews(next);
+      } catch {
+        /* cache local permanece */
+      }
+    };
+    void run(true);
+    const onHomologated = () => {
+      void run(false);
+    };
+    window.addEventListener('athena-lesson-homologated', onHomologated);
+    window.addEventListener('athena-trilha-cached', onHomologated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('athena-lesson-homologated', onHomologated);
+      window.removeEventListener('athena-trilha-cached', onHomologated);
+    };
+  }, [user?.uid, sessions.length, activeTab]);
+
+  useEffect(() => {
+    if (!user) return;
+    const sess = sessions.find((s) => s.id === currentSessionId);
+    let next: Review[] | null = null;
+    for (const m of messages) {
+      if (m.role !== 'model') continue;
+      next = persistReviewFromMessage(user.uid, m, {
+        sessionId: currentSessionId || undefined,
+        guidedSubject: sess?.guidedSubject || guidedSubject,
+        currentArticle: sess?.currentArticle || currentArticle,
+        trilhaDay: sess?.trilhaDay,
+        trilhaMaterialIndex: sess?.trilhaMaterialIndex
+      });
+    }
+    if (next) setCompressedReviews(next);
+  }, [user?.uid, messages, currentSessionId]);
   const [userStats, setUserStats] = useState<UserStat[]>([]);
   const [gamification, setGamification] = useState<GamificationData>({
     totalXP: 0,
@@ -2536,6 +2595,23 @@ export default function App() {
     }
   };
 
+  const persistBlock6 = (
+    msg: Message,
+    extra?: { sessionId?: string | null; day?: number; part?: number; subject?: string | null; article?: number }
+  ) => {
+    if (!user || msg.role !== 'model') return;
+    const sess = sessions.find((s) => s.id === (extra?.sessionId || currentSessionId));
+    setCompressedReviews(
+      persistReviewFromMessage(user.uid, msg, {
+        sessionId: extra?.sessionId || currentSessionId || undefined,
+        guidedSubject: extra?.subject || sess?.guidedSubject || guidedSubject,
+        currentArticle: extra?.article ?? sess?.currentArticle ?? currentArticle,
+        trilhaDay: extra?.day ?? sess?.trilhaDay,
+        trilhaMaterialIndex: extra?.part ?? sess?.trilhaMaterialIndex
+      })
+    );
+  };
+
   const awardXP = async (amount: number) => {
     if (!user) return;
     const newTotalXP = (gamification.totalXP || 0) + amount;
@@ -2867,6 +2943,8 @@ export default function App() {
   const deleteReview = async (reviewId: string, sessionId?: string) => {
     if (!user) return;
     try {
+      setCompressedReviews(deleteCompressedReview(user.uid, reviewId));
+
       let targetSessionId = sessionId;
       
       // Fallback for older reviews missing sessionId
@@ -3242,6 +3320,13 @@ export default function App() {
         trilhaMaterialIndex: dayNum !== undefined ? (activeSession?.trilhaMaterialIndex ?? 0) : undefined
       };
 
+      persistBlock6(botMessage, {
+        sessionId: targetSessionId || currentSessionId,
+        day: dayNum,
+        part: botMessage.trilhaMaterialIndex,
+        subject: activeSubject,
+        article: activeArticle
+      });
       setMessages(prev => [...prev, botMessage]);
 
       if (dayNum !== undefined) {
@@ -3454,6 +3539,11 @@ ${matList}
             sourceType: 'offline_pareto',
             modelName: 'Material Local Pareto 80/20'
           };
+          persistBlock6(botMessage, {
+            sessionId: targetSessionId || currentSessionId,
+            subject: activeSubject,
+            article: activeArticle
+          });
           setMessages(prev => [...prev, botMessage]);
 
           const activeId = (targetSessionId || currentSessionId);
@@ -3744,6 +3834,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         model,
         timestamp: Date.now()
       });
+      if (user) {
+        persistBlock6(
+          { role: 'model', content: text, subject: nextMat.nome, article: dayNum, trilhaMaterialIndex: nextMatIdx },
+          { day: dayNum, part: nextMatIdx, subject: nextMat.nome, article: dayNum }
+        );
+      }
       console.log(`[ATHENA Pre-fetch] Parte ${nextMatIdx + 1} (Dia ${dayNum}) salva em cache local com sucesso!`);
     } catch (err) {
       console.warn(`[ATHENA Pre-fetch] Não foi possível pré-carregar Parte ${nextMatIdx + 1}:`, err);
@@ -3831,6 +3927,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           trilhaMaterialIndex: 0
         };
 
+        persistBlock6(botMessage, {
+          sessionId: id,
+          day: dayNum,
+          part: 0,
+          subject: guidedSubjectName,
+          article: 1
+        });
+
         const cachedSession: ChatSession = {
           ...newSession,
           messages: [{ role: 'user', content: initialMsg }, botMessage]
@@ -3874,6 +3978,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           modelName: `${cached.model} (Cache Instantâneo)`,
           trilhaMaterialIndex: 0
         };
+
+        persistBlock6(botMessage, {
+          sessionId: id,
+          day: dayNum,
+          part: 0,
+          subject: guidedSubjectName,
+          article: 1
+        });
 
         const cachedSession: ChatSession = {
           ...newSession,
@@ -3933,6 +4045,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const isLastBlock = (msg.currentBlockIndex ?? 0) >= msg.blocks.length - 1;
     
     if (isLastBlock) {
+      await saveReview(msgIdx);
       const session = sessions.find(s => s.id === currentSessionId);
       if (session && session.trilhaDay) {
         const dayNum = session.trilhaDay;
@@ -4008,6 +4121,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   modelName: 'Oficial Homologado pelo CEO',
                   trilhaMaterialIndex: nextMatIdx
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
                 setIsLoading(false);
@@ -4062,6 +4182,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   modelName: `${cached.model} (Cache Instantâneo)`,
                   trilhaMaterialIndex: nextMatIdx
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
                 setIsLoading(false);
@@ -4117,6 +4244,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   modelName: usedModel,
                   trilhaMaterialIndex: nextMatIdx
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
@@ -4329,6 +4463,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       };
       await saveHomologatedLesson(lesson);
       setHomologatedLessonState(lesson);
+      if (user) {
+        const reviewText = extractReviewBlock(sanitizedContent, sanitizedBlocks);
+        if (reviewText) {
+          setCompressedReviews(upsertCompressedReview(user.uid, buildCompressedReview({
+            content: reviewText,
+            subject: partSubject,
+            article: day,
+            sessionId: currentSessionId || undefined,
+            day,
+            part
+          })));
+        }
+      }
 
       // Também sincroniza a mensagem da sessão com a versão limpa e universal
       const updatedMessages = (messages || []).map((m, i) => {
@@ -4390,6 +4537,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         modelName: `${model} (Regerado pelo CEO)`,
         trilhaMaterialIndex: part
       };
+      persistBlock6(botMessage, {
+        sessionId: currentSessionId,
+        day,
+        part,
+        subject: dayItem.materias[part].nome,
+        article: 1
+      });
       const userMsg: Message = { role: 'user', content: msg };
       setMessages([userMsg, botMessage]);
       await saveSession({
@@ -4520,6 +4674,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 modelName: 'Oficial Homologado pelo CEO',
                 trilhaMaterialIndex: nextMatIdx
               };
+              persistBlock6(botMessage, {
+                sessionId: currentSessionId,
+                day: dayNum,
+                part: nextMatIdx,
+                subject: nextMat.nome,
+                article: 1
+              });
               const finalMessages = [...updatedMessages, botMessage];
               setMessages(finalMessages);
               setIsLoading(false);
@@ -4558,6 +4719,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               modelName: usedModel,
               trilhaMaterialIndex: nextMatIdx
             };
+            persistBlock6(botMessage, {
+              sessionId: currentSessionId,
+              day: dayNum,
+              part: nextMatIdx,
+              subject: nextMat.nome,
+              article: 1
+            });
             
             const finalMessages = [...updatedMessages, botMessage];
             setMessages(finalMessages);
@@ -4695,51 +4863,28 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const saveReview = async (msgIdx: number) => {
     const msg = messages[msgIdx];
-    const targetSubject = msg.subject || guidedSubject || 'Estudo Geral';
-    const targetArticle = msg.article || currentArticle || 0;
-    
-    if (!msg.blocks || !currentSessionId) return;
-    
-    // Try to find the review block
-    let reviewText = msg.blocks[msg.blocks.length - 1];
-    
-    if (msg.blocks.length >= 6) {
-      reviewText = msg.blocks[5];
-    } else {
-      const likelyReview = msg.blocks.find(b => 
-        b.toLowerCase().includes('revisão') || 
-        (b.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('•')).length >= 5)
-      );
-      if (likelyReview) reviewText = likelyReview;
-    }
-    
-    if (!reviewText || reviewText.length < 20) return;
-
     const session = sessions.find(s => s.id === currentSessionId);
-    if (!session) return;
-    
-    const currentReviews = session.reviews || [];
-    
-    // Check if duplicate in this session
-    const isDuplicate = currentReviews.some(r => 
-      r.subject === targetSubject && 
-      r.article === targetArticle && 
-      r.content === reviewText
-    );
-    
-    if (isDuplicate) return;
+    const targetSubject = msg.subject || guidedSubject || session?.guidedSubject || 'Estudo Geral';
+    const targetArticle = msg.article || currentArticle || session?.trilhaDay || 0;
+    const reviewText = extractReviewBlock(msg.content, msg.blocks);
+    if (!reviewText || !user) return;
 
-    const newReview: Review = {
-      id: crypto.randomUUID(),
-      sessionId: currentSessionId,
+    const newReview = buildCompressedReview({
+      content: reviewText,
       subject: targetSubject,
       article: targetArticle,
-      content: reviewText,
-      timestamp: Date.now()
-    };
+      sessionId: currentSessionId || undefined,
+      day: session?.trilhaDay,
+      part: msg.trilhaMaterialIndex ?? session?.trilhaMaterialIndex
+    });
+    setCompressedReviews(upsertCompressedReview(user.uid, newReview));
 
-    await saveSession({ reviews: [...currentReviews, newReview] });
-    // Save to local IndexedDB cache
+    if (session) {
+      const currentReviews = session.reviews || [];
+      if (!currentReviews.some((r) => r.id === newReview.id)) {
+        await saveSession({ reviews: [...currentReviews, newReview] });
+      }
+    }
     cacheArticle(targetSubject, targetArticle, reviewText);
   };
 
@@ -5150,7 +5295,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   )}
                 >
                   <item.icon size={18} className={cn(activeTab === item.id ? "text-brand-gold" : "text-slate-500 group-hover:text-brand-gold/70")} />
-                  {item.label}
+                  <span className="flex-1 text-left">{item.label}</span>
+                  {item.id === 'reviews' && reviews.length > 0 && (
+                    <span className="text-[10px] font-black text-brand-gold bg-brand-gold/10 px-2 py-0.5 rounded-full">
+                      {reviews.length}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -5861,8 +6011,9 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   <ReviewList 
                     reviews={reviews} 
                     onSelect={(rev) => {
+                      const exists = sessions.some((s) => s.id === rev.sessionId);
+                      if (!exists) return;
                       switchSession(rev.sessionId);
-                      // Force a scroll to the specific section after a small delay for DOM updates
                       setTimeout(() => {
                         const id = `review-${rev.subject.replace(/\s+/g, '-').toLowerCase()}-${rev.article}`;
                         const element = document.getElementById(id);

@@ -179,3 +179,41 @@ export function getLocalHomologatedList(): Record<string, HomologatedLesson> {
   }
   return result;
 }
+
+let lastCloudFetchAt = 0;
+let lastCloudFetch: HomologatedLesson[] | null = null;
+
+/**
+ * Baixa todas as lições homologadas da nuvem e replica no cache local.
+ */
+export async function fetchAllHomologatedLessons(): Promise<HomologatedLesson[]> {
+  const local = Object.values(getLocalHomologatedList());
+  if (isQuotaExhausted() || typeof window === 'undefined') {
+    return local;
+  }
+  if (lastCloudFetch && Date.now() - lastCloudFetchAt < 30000) {
+    return lastCloudFetch;
+  }
+
+  try {
+    const snap = await getDocs(collection(db, 'homologated_lessons'));
+    const cloud: HomologatedLesson[] = [];
+    snap.forEach((docSnap) => {
+      const data = { id: docSnap.id, ...(docSnap.data() as HomologatedLesson) };
+      if (!data.content && !data.blocks?.length) return;
+      if (data.status && data.status !== 'approved') return;
+      setLocalHomologatedLesson(data);
+      cloud.push(data);
+    });
+    const byId = new Map<string, HomologatedLesson>();
+    [...local, ...cloud].forEach((lesson) => {
+      if (lesson?.id) byId.set(lesson.id, lesson);
+    });
+    lastCloudFetch = Array.from(byId.values());
+    lastCloudFetchAt = Date.now();
+    return lastCloudFetch;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'homologated_lessons');
+    return local;
+  }
+}

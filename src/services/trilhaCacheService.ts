@@ -55,6 +55,11 @@ export function setCachedTrilhaPart(
       return;
     }
     localStorage.setItem(key, JSON.stringify(entry));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('athena-trilha-cached', {
+        detail: { day: dayNum, part: partIndex, style, text: entry.text, timestamp: entry.timestamp }
+      }));
+    }
     console.log(`[TrilhaCache] Parte ${partIndex + 1} do Dia ${dayNum} (${style}) armazenada em cache com sucesso.`);
   } catch (err) {
     console.warn('[TrilhaCache] Falha ao persistir no cache local:', err);
@@ -70,6 +75,38 @@ export function hasCachedTrilhaPart(
   style: string = 'teorico'
 ): boolean {
   return getCachedTrilhaPart(dayNum, partIndex, style) !== null;
+}
+
+export function listCachedTrilhaParts(): Array<{ day: number; part: number; style: string; text: string; timestamp: number }> {
+  const result: Array<{ day: number; part: number; style: string; text: string; timestamp: number }> = [];
+  try {
+    const re = new RegExp(`^${CACHE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}d(\\d+)_p(\\d+)_(.+)$`);
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(CACHE_PREFIX)) continue;
+      const match = key.match(re);
+      if (!match) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as TrilhaPartCache;
+        if (parsed?.text) {
+          result.push({
+            day: Number(match[1]),
+            part: Number(match[2]),
+            style: match[3],
+            text: parsed.text,
+            timestamp: parsed.timestamp || Date.now()
+          });
+        }
+      } catch {
+        /* ignore broken cache entries */
+      }
+    }
+  } catch (err) {
+    console.warn('[TrilhaCache] Erro ao listar cache:', err);
+  }
+  return result;
 }
 
 /**
