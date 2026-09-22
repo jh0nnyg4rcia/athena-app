@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useEffect, useMemo, Suspense, lazy } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Scale, 
@@ -110,9 +110,45 @@ import { IncidenceChart } from './components/IncidenceChart';
 import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
+import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, keepObjectiveChallengeQuestions, sanitizeAthenaVoice } from './lib/athenaVoice';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+const ATHENA_CEO_EMAIL = 'jhonny.spider@gmail.com';
+
+type AthenaTab = 'chat' | 'stats' | 'reviews' | 'mentees' | 'schedules' | 'trilha';
+
+function isCeoAccount(account: { email?: string | null } | null | undefined): boolean {
+  return (account?.email || '').toLowerCase().trim() === ATHENA_CEO_EMAIL;
+}
+
+type ResumeState = { tab: AthenaTab; sessionId: string | null };
+
+function resumeKey(uid: string) {
+  return `athena_ui_resume_${uid}`;
+}
+
+function loadResume(uid: string): ResumeState | null {
+  try {
+    const raw = localStorage.getItem(resumeKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ResumeState;
+    const tabs: AthenaTab[] = ['chat', 'stats', 'reviews', 'mentees', 'schedules', 'trilha'];
+    if (!tabs.includes(parsed.tab)) return { tab: 'chat', sessionId: parsed.sessionId || null };
+    return { tab: parsed.tab, sessionId: parsed.sessionId || null };
+  } catch {
+    return null;
+  }
+}
+
+function saveResume(uid: string, state: ResumeState) {
+  try {
+    localStorage.setItem(resumeKey(uid), JSON.stringify(state));
+  } catch {
+    /* storage indisponível */
+  }
 }
 
 interface Message {
@@ -1786,16 +1822,7 @@ export default function App() {
   };
 
   const handleLoginAsCEO = () => {
-    const ceoUser = {
-      uid: 'jhonny-spider-ceo',
-      displayName: 'Jhonny (CEO)',
-      email: 'jhonny.spider@gmail.com',
-      photoURL: '',
-      emailVerified: true
-    };
-    localStorage.setItem('athena_local_user', JSON.stringify(ceoUser));
-    setUser(ceoUser as any);
-    setAuthError(null);
+    setAuthError("O acesso de CEO exige login com Google. Não há PIN no aplicativo.");
   };
 
   const handleUnifiedLogin = async (e?: React.FormEvent) => {
@@ -1819,9 +1846,9 @@ export default function App() {
       localStorage.setItem('athena_saved_login_email', identifier);
     } catch {}
 
-    // 1. Verificação Unificada do CEO Mestre
-    if (identifier === CEO_EMAIL.toLowerCase() && code === '7777') {
-      handleLoginAsCEO();
+    // 1. CEO: somente Google Sign-In
+    if (identifier === ATHENA_CEO_EMAIL) {
+      setAuthError("Para acesso administrativo, use Entrar com Google.");
       return;
     }
 
@@ -1943,13 +1970,13 @@ export default function App() {
       console.warn("Erro ao fazer login com Google:", err);
       const msg = err?.message || String(err);
       if (err?.code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
-        setAuthError("Domínio não autorizado no Firebase. Para testar imediatamente, clique em 'Entrar como Aluno'.");
+        setAuthError("Este domínio ainda não está autorizado no Firebase Authentication. Inclua projetoathena.app.br, athena-mentoria.web.app e localhost.");
       } else if (err?.code === 'auth/popup-closed-by-user' || msg.includes('16') || msg.toLowerCase().includes('cancel')) {
         setAuthError("A seleção da Conta Google foi cancelada.");
       } else if (msg.includes('network') || msg.includes('NETWORK')) {
         setAuthError("Falha de conexão com os servidores do Google. Verifique sua conexão com a internet.");
       } else {
-        setAuthError(err?.message || "Não foi possível conectar com a Conta Google no momento. Utilize o acesso de Aluno abaixo.");
+        setAuthError(err?.message || "Não foi possível conectar com a Conta Google.");
       }
     }
   };
@@ -2011,15 +2038,13 @@ export default function App() {
     return () => window.removeEventListener('firestore-quota-exceeded', onQuota);
   }, []);
 
-  const CEO_EMAIL = 'jhonny.spider@gmail.com';
-
   const userProfile: UserProfile | null = useMemo(() => {
     if (!user) return null;
-    const isCeoUser = user.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+    const isCeoUser = isCeoAccount(user);
     if (isCeoUser) {
       return {
         uid: user.uid,
-        email: user.email || CEO_EMAIL,
+        email: user.email || ATHENA_CEO_EMAIL,
         displayName: user.displayName || 'Mestre CEO (Jhonny)',
         photoURL: user.photoURL || '',
         role: 'ceo',
@@ -2042,7 +2067,7 @@ export default function App() {
     };
   }, [user]);
 
-  const isCEO = userProfile?.role === 'ceo' || user?.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+  const isCEO = isCeoAccount(auth.currentUser) || (Boolean(auth.currentUser) && isCeoAccount(user));
 
   const [tokenExhaustedBanner, setTokenExhaustedBanner] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
@@ -2170,20 +2195,26 @@ export default function App() {
     scrollToTop();
   };
 
+  const resumeHydratedForUid = useRef<string | null>(null);
+  const [resumeReady, setResumeReady] = useState(false);
+  const skipResumeSaveRef = useRef(true);
+
   // Auth Observer
   useEffect(() => {
-    // 1. Tenta restaurar sessão local se existir
     const savedLocalUser = localStorage.getItem('athena_local_user');
     if (savedLocalUser) {
       try {
         const parsed = JSON.parse(savedLocalUser);
-        setUser(parsed);
-        setLoadingAuth(false);
+        if (isCeoAccount(parsed)) {
+          localStorage.removeItem('athena_local_user');
+        } else {
+          setUser(parsed);
+          setLoadingAuth(false);
+        }
       } catch (e) {
         console.warn("Erro ao restaurar usuário local:", e);
       }
     } else {
-      // Nenhum usuário local persistido: aguarda autenticação oficial via Google Sign-In
       setLoadingAuth(false);
     }
 
@@ -2192,15 +2223,15 @@ export default function App() {
     LocalPersistence.sanitizeSessionsForObjectivePhase();
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u) {
+      if (u && !u.isAnonymous) {
         setUser(u);
         localStorage.removeItem('athena_local_user');
-      } else if (!localStorage.getItem('athena_local_user')) {
+      } else if (!u && !localStorage.getItem('athena_local_user')) {
         setUser(null);
       }
       setLoadingAuth(false);
 
-      if (u && !isQuotaExhausted()) {
+      if (u && !u.isAnonymous && !isQuotaExhausted()) {
         // Save user profile to Firestore only once per session to preserve quota
         const syncKey = `lastLoginSynced_${u.uid}`;
         if (!sessionStorage.getItem(syncKey)) {
@@ -2241,13 +2272,6 @@ export default function App() {
     const localSessions = LocalPersistence.getSessions(user.uid);
     if (localSessions.length > 0) {
       setSessions(localSessions);
-      if (!currentSessionId) {
-        const last = localSessions[0];
-        setCurrentSessionId(last.id);
-        setMessages(last.messages || []);
-        setGuidedSubject(last.guidedSubject || null);
-        setCurrentArticle(last.currentArticle || 1);
-      }
     }
 
     // 2. Attach Firestore onSnapshot listener only if Firebase Auth is signed in
@@ -2266,14 +2290,6 @@ export default function App() {
       if (docs.length > 0) {
         setSessions(docs);
         docs.forEach(s => LocalPersistence.saveSession(user.uid, s));
-        
-        if (!currentSessionId) {
-          const last = docs[0];
-          setCurrentSessionId(last.id);
-          setMessages(last.messages);
-          setGuidedSubject(last.guidedSubject);
-          setCurrentArticle(last.currentArticle);
-        }
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/sessions`);
@@ -2286,6 +2302,55 @@ export default function App() {
 
     return () => unsubscribe();
   }, [user]);
+
+  useLayoutEffect(() => {
+    if (!user) {
+      resumeHydratedForUid.current = null;
+      setResumeReady(false);
+      return;
+    }
+    if (resumeHydratedForUid.current === user.uid) return;
+    skipResumeSaveRef.current = true;
+    resumeHydratedForUid.current = user.uid;
+
+    const resume = loadResume(user.uid);
+    const localSessions = LocalPersistence.getSessions(user.uid);
+    const wanted = resume?.sessionId
+      ? localSessions.find((s) => s.id === resume.sessionId)
+      : undefined;
+    const allowSession = Boolean(
+      wanted && (isCeoAccount(auth.currentUser) || wanted.trilhaDay !== undefined)
+    );
+
+    let nextTab: AthenaTab = resume?.tab || 'chat';
+    if (nextTab === 'mentees' && !isCeoAccount(auth.currentUser)) {
+      nextTab = 'chat';
+    }
+
+    if (allowSession && wanted) {
+      setCurrentSessionId(wanted.id);
+      setMessages(wanted.messages || []);
+      setGuidedSubject(wanted.guidedSubject || null);
+      setCurrentArticle(wanted.currentArticle || 1);
+      setActiveTab(nextTab);
+    } else {
+      setCurrentSessionId(null);
+      setMessages([]);
+      setGuidedSubject(null);
+      setCurrentArticle(1);
+      setActiveTab(nextTab === 'chat' ? 'chat' : nextTab);
+    }
+    setResumeReady(true);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user || !resumeReady || resumeHydratedForUid.current !== user.uid) return;
+    if (skipResumeSaveRef.current) {
+      skipResumeSaveRef.current = false;
+      return;
+    }
+    saveResume(user.uid, { tab: activeTab, sessionId: currentSessionId });
+  }, [user?.uid, activeTab, currentSessionId, resumeReady]);
 
   // Sync Statistics and Schedules
   useEffect(() => {
@@ -2728,6 +2793,7 @@ export default function App() {
 
   const startNewSession = async (title: string = "Nova Mentoria", sub: string | null = null, art: number = 1) => {
     if (!user) return;
+    if (!isCEO && !sub) return;
     
     const id = crypto.randomUUID();
     const newSession: ChatSession = {
@@ -2761,6 +2827,10 @@ export default function App() {
   const switchSession = (id: string) => {
     const session = sessions.find(s => s.id === id);
     if (session) {
+      if (!isCEO && session.trilhaDay === undefined && !session.guidedSubject) {
+        handleGoHome();
+        return;
+      }
       setCurrentSessionId(id);
       setMessages(session.messages || []);
       setGuidedSubject(session.guidedSubject);
@@ -2912,13 +2982,7 @@ export default function App() {
               ...q,
               correctIndex: q.correctIndex !== undefined ? q.correctIndex : (q.correctAnswer !== undefined ? q.correctAnswer : 0)
             }));
-
-            // Para cursos de 1ª Fase (Objetiva), retira estritamente questões discursivas e orais
-            if (mentorshipPhase === 'objetiva') {
-              challenge.questions = challenge.questions.filter(
-                (q: any) => q.correctIndex !== -1 && q.correctIndex !== -2 && q.correctIndex >= 0
-              );
-            }
+            challenge.questions = keepObjectiveChallengeQuestions(challenge.questions);
           }
 
           rawContent = parts[0] + (afterTag.substring(lastBrace + 1));
@@ -2970,10 +3034,17 @@ export default function App() {
       blocks.push(tempContent);
     }
 
-    // Capture all generated blocks, but try to stay within 6-7 logical ones
-    const finalBlocks = blocks;
+    const finalBlocks = blocks.map((b) => sanitizeAthenaVoice(b));
+    if (challenge?.questions) {
+      challenge.questions = keepObjectiveChallengeQuestions(challenge.questions).map((q) => ({
+        ...q,
+        text: sanitizeAthenaVoice(q.text || ""),
+        explanation: sanitizeAthenaVoice(q.explanation || ""),
+        options: Array.isArray(q.options) ? q.options.map((o: string) => sanitizeAthenaVoice(String(o))) : q.options,
+      }));
+    }
 
-    return { content: rawContent, blocks: finalBlocks, challenge, editalData };
+    return { content: sanitizeAthenaVoice(rawContent), blocks: finalBlocks, challenge, editalData };
   };
 
   const scrollToBottom = () => {
@@ -3087,6 +3158,19 @@ export default function App() {
     let targetSessionId = sessionId;
     const activeArticle = forcedArticle !== undefined ? forcedArticle : currentArticle;
     const activeSubject = forcedSubject !== undefined ? forcedSubject : guidedSubject;
+    const pendingSession =
+      sessions.find((s) => s.id === (targetSessionId || currentSessionId)) ||
+      (user ? LocalPersistence.getSessions(user.uid).find((s) => s.id === (targetSessionId || currentSessionId)) : undefined);
+    const inStructuredStudy = Boolean(
+      forcedTrilhaDay !== undefined ||
+      pendingSession?.trilhaDay !== undefined ||
+      activeSubject ||
+      pendingSession?.guidedSubject ||
+      activeStudyItem
+    );
+    if (!isCEO && !inStructuredStudy) {
+      return;
+    }
 
     const currentAttachedFile = attachedFile;
 
@@ -3140,7 +3224,7 @@ export default function App() {
         parts: [{ text: m.content || "" }]
       }));
 
-      const audienceName = dayNum !== undefined ? "Futuro(a) Magistrado(a)" : (user?.displayName || "Mestre");
+      const audienceName = ATHENA_AUDIENCE_TITLE;
       const { text: responseText, model: usedModel } = await askATHENA(userMessage, history, audienceName, currentAttachedFile, mentorshipStyle, resolvedPhase);
       const parsed = parseATHENAResponse(responseText);
 
@@ -3521,7 +3605,7 @@ ${matList}
     let prep = '';
     if (style === 'automatico') {
       prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (Magistratura, Ministério Público, Defensoria e Delegado) indicam que o estudo deste tema (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
+Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (${ATHENA_CAREERS_LABEL}) indicam que o estudo deste tema (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
 Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
 - Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
 - Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
@@ -3537,7 +3621,7 @@ Adote rigores condizentes com estes dados, concentrando a explanação guiada ne
 `;
     }
     
-    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e questões de provas anteriores de Magistratura/Ministério Público. Siga o fluxo de estudos em blocos!`;
+    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e em questões objetivas de ${ATHENA_CAREERS_LABEL}. Siga o fluxo de estudos em blocos!`;
   };
 
   const getTrilhaDayDiscursiveMessage = (dayNum: number, materias: { nome: string; conteudo: string }[], semana: number) => {
@@ -3574,7 +3658,7 @@ Sua conduta como Presidente da Mesa Examinadora:
     let prep = '';
     if (style === 'automatico') {
       prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (Magistratura, Ministério Público, Defensoria e Delegado) indicam que o estudo de "${currentMat.nome}" (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
+Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (${ATHENA_CAREERS_LABEL}) indicam que o estudo de "${currentMat.nome}" (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
 Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
 - Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
 - Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
@@ -3590,27 +3674,13 @@ Adote rigores condizentes com estes dados, concentrando a explanação guiada ne
 `;
     }
     
-    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
-    
-    // Eventual automatic trigger of discursive or oral challenges during the 100 days flow
-    let hybridDirective = "";
-    if (dayNum % 10 === 5 || dayNum % 5 === 0) {
-      hybridDirective = `\n\n[ALERTA DE DESAFIO ESPECIAL - QUESTÃO DISCURSIVA (2ª FASE)]
-Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de Desafio Especial Athena de 2ª Fase!
-No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas de múltipla escolha normais, elabore obrigatoriamente uma única QUESTÃO DISCURSIVA (2ª Fase) densa do tema estudado hoje para treinar o aluno, instruindo-o a redigir sua resposta fundamentada por escrito. Aguarde a submissão de sua resposta para proferir uma correção analítica rigorosa com nota final de banca.`;
-    } else if (dayNum % 10 === 3 || dayNum % 7 === 0) {
-      hybridDirective = `\n\n[ALERTA DE DESAFIO ESPECIAL - SIMULADO EXAME ORAL (3ª FASE)]
-Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de Desafio Especial Athena de Exame Oral da 3ª Fase!
-No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas normais, apresente uma única ARGUIÇÃO ORAL (Pergunta de Exame Oral) formal de banca examinadora, instruindo o aluno a utilizar gravação de áudio ou digitação por ditado de voz para responder verbalmente sob pressão à banca. Aguarde a sustentação para proferir nota oficial de oratória jurídica.`;
-    }
-
     let extraSource = `\n\n[DIRETRIZES DA BASE DE CONHECIMENTO E PERTINÊNCIA TEMÁTICA ABSOLUTA ATHENA]:
 1. BASE SOBERANA E CONFINAMENTO TEMÁTICO RESTRITO:
    - A sua base soberana de verdade é EXCLUSIVAMENTE o seguinte recorte: ${currentMat.nome} (${currentMat.conteudo}).
    - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo dos 6 blocos deve nascer e se esgotar no exame deste recorte!
 
 2. DIRETRIZES BLOCO A BLOCO (RIGOR ESTRITO):
-   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE uma saudação institucional e universal de mentoria de alto rendimento (ex: "Olá, Futuro(a) Magistrado(a)!", "Seja bem-vindo(a), Candidato(a) de Elite!"). NUNCA use nomes individuais ou apelidos pessoais nesta saudação, pois este conteúdo será homologado e compartilhado com todos os alunos da mentoria. Apresente o Raio-X e a relevância prática deste recorte exato (${currentMat.conteudo}) para concursos de ponta (Magistratura, MP, Defensoria e Delegado).
+   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE a saudação institucional "Olá, ${ATHENA_AUDIENCE_TITLE}!". NUNCA diga Futuro Magistrado, Futuro Juiz ou nome pessoal, pois o conteúdo é homologado para todas as carreiras. Apresente o Raio-X deste recorte (${currentMat.conteudo}) para ${ATHENA_CAREERS_LABEL}. Proibido citar certame nominado (TJSP, MPRS, TRF4, DPU 2024 etc.). Proibido gerar tabelas Markdown.
    
    - [BLOCK_2] (⚖️ Letra da Lei Decodificada): Decodifique, esquematize e disseque com suas próprias palavras e rigor analítico CADA UM dos artigos e princípios compreendidos no intervalo ${currentMat.conteudo}. Destaque núcleos dogmáticos, prazos, exceções legais, postulados normativos e pegadinhas clássicas de banca examinadora, evitando transcrição mecânica literal de apostilas comerciais.
    
@@ -3629,11 +3699,12 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
    - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase) estritamente circunscrita aos institutos disciplinados em ${currentMat.conteudo}. Traga divergências doutrinárias reais e exemplos práticos da atividade forense que ilustrem exatamente os artigos estudados hoje.
    
    - [BLOCK_5] (🎯 Desafio ATHENA - Questões Estritamente Temáticas):
-     * REGRA DE PERTINÊNCIA DAS QUESTÕES: 100% das questões geradas (objetivas ou discursiva/oral) DEVEM ter como objeto de cobrança EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
+     * SOMENTE questões OBJETIVAS de múltipla escolha (4 ou 5 alternativas, correctIndex 0-4). É PROIBIDO discursiva, subjetiva ou prova oral.
+     * REGRA DE PERTINÊNCIA: 100% das questões DEVEM cobrar EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
      * É TERMINANTEMENTE PROIBIDO formular questões sobre artigos ou tópicos de fora deste recorte.
      * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou o entendimento consolidado deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais, sem inventar números de processos fictícios.
    
-   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).${hybridDirective}`;
+   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).`;
 
     const grounding = getGroundingForTrilhaPart(dayNum, currentMat.nome, currentMat.conteudo);
     if (grounding.hasGrounding) {
@@ -3667,7 +3738,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     try {
       console.log(`[ATHENA Pre-fetch] Disparando em background geração da Parte ${nextMatIdx + 1} de ${dayItem.materias.length} (Dia ${dayNum} - ${nextMat.nome})...`);
-      const { text, model } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mStyle, resolvedPhase as any);
+      const { text, model } = await askATHENA(nextMsg, [], ATHENA_AUDIENCE_TITLE, undefined, mStyle, resolvedPhase as any);
       setCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase, {
         text,
         model,
@@ -4032,7 +4103,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               try {
                 // Cada parte da trilha possui comando autocontido com escopo exato.
                 // Usamos histórico limpo ([]), idêntico ao prefetch, para máxima agilidade e sem poluição de contexto.
-                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
+                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, resolvedPhase);
                 const parsed = parseATHENAResponse(responseText);
                 const botMessage: Message = {
                   role: 'model',
@@ -4201,10 +4272,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     for (const name of namesToSanitize) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), '$1, Futuro(a) Magistrado(a)');
-      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), 'Futuro(a) Magistrado(a)');
+      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), `$1, ${ATHENA_AUDIENCE_TITLE}`);
+      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), ATHENA_AUDIENCE_TITLE);
     }
-    return sanitized;
+    return sanitizeAthenaVoice(sanitized);
   };
 
   const handleCeoApproveLesson = async (targetMsgIdx?: number) => {
@@ -4305,7 +4376,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setIsLoading(true);
     const msg = getTrilhaDayPartitionMessage(day, dayItem.materias, part, dayItem.semana, mentorshipStyle);
     try {
-      const { text, model } = await askATHENA(msg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, mentorshipPhase);
+      const { text, model } = await askATHENA(msg, [], ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, mentorshipPhase);
       const parsed = parseATHENAResponse(text);
       const botMessage: Message = {
         role: 'model',
@@ -4473,7 +4544,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             } else if (session?.trilhaSessionType === 'oral') {
               resolvedPhase = 'oral';
             }
-            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
+            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, resolvedPhase);
             const parsed = parseATHENAResponse(responseText);
             const botMessage: Message = {
               role: 'model',

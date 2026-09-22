@@ -1,5 +1,16 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithCredential, signOut } from 'firebase/auth';
+import {
+  getAuth,
+  initializeAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  signInWithCredential,
+  getRedirectResult,
+  signOut,
+} from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
@@ -7,8 +18,29 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
+
+function createAuth() {
+  if (typeof window === 'undefined') {
+    return getAuth(app);
+  }
+  try {
+    return initializeAuth(app, {
+      persistence: Capacitor.isNativePlatform() ? indexedDBLocalPersistence : browserLocalPersistence,
+    });
+  } catch {
+    return getAuth(app);
+  }
+}
+
+export const auth = createAuth();
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+if (typeof window !== 'undefined') {
+  getRedirectResult(auth).catch((error) => {
+    console.warn('[Google Auth] getRedirectResult:', error);
+  });
+}
 
 async function testConnection() {
   try {
@@ -143,34 +175,41 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 export const signInWithGoogle = async () => {
   if (Capacitor.isNativePlatform()) {
-    // 1. Native Google Sign-In using Android Play Services / Credential Manager
-    const result = await FirebaseAuthentication.signInWithGoogle();
-    let idToken = result.credential?.idToken;
+    const result = await FirebaseAuthentication.signInWithGoogle({ skipNativeAuth: true });
+    const idToken = result.credential?.idToken;
+    const accessToken = result.credential?.accessToken;
     if (!idToken) {
-      const tokenResult = await FirebaseAuthentication.getIdToken();
-      idToken = tokenResult?.token;
+      throw new Error(
+        "O Google não devolveu o token de autenticação. Confirme o SHA-1 do app e o cliente OAuth Web no Firebase."
+      );
     }
-    if (idToken) {
-      const credential = GoogleAuthProvider.credential(idToken);
-      return await signInWithCredential(auth, credential);
-    }
-    return result;
-  } else {
-    // 2. Web browser popup sign-in
+    const credential = GoogleAuthProvider.credential(idToken, accessToken);
+    return await signInWithCredential(auth, credential);
+  }
+
+  try {
     return await signInWithPopup(auth, googleProvider);
+  } catch (error: any) {
+    const code = String(error?.code || "");
+    if (
+      code === "auth/popup-blocked" ||
+      code === "auth/operation-not-supported-in-this-environment" ||
+      code === "auth/cancelled-popup-request"
+    ) {
+      await signInWithRedirect(auth, googleProvider);
+      return null;
+    }
+    throw error;
   }
 };
 
 export const checkAndSyncNativeAuth = async () => {
-  if (!Capacitor.isNativePlatform()) return;
+  if (!Capacitor.isNativePlatform() || auth.currentUser) return;
   try {
-    const nativeRes = await FirebaseAuthentication.getCurrentUser();
-    if (nativeRes?.user && !auth.currentUser) {
-      const tokenResult = await FirebaseAuthentication.getIdToken();
-      if (tokenResult?.token) {
-        const credential = GoogleAuthProvider.credential(tokenResult.token);
-        await signInWithCredential(auth, credential);
-      }
+    const tokenResult = await FirebaseAuthentication.getIdToken();
+    if (tokenResult?.token) {
+      const credential = GoogleAuthProvider.credential(tokenResult.token);
+      await signInWithCredential(auth, credential);
     }
   } catch (e) {
     console.warn("[checkAndSyncNativeAuth warning]:", e);
