@@ -18,14 +18,14 @@ function bulletCount(text: string): number {
 function looksLikeReview(text?: string): boolean {
   if (!text) return false;
   const low = text.toLowerCase();
-  return bulletCount(text) >= 5 || low.includes('revisão comprimida') || low.includes('pareto');
+  return bulletCount(text) >= 5 || low.includes('revisão comprimida') || low.includes('pareto 80');
 }
 
 export function extractReviewBlock(content?: string, blocks?: string[]): string | null {
   if (content) {
-    const marker = content.indexOf('[BLOCK_6]');
+    const marker = content.search(/\[BLOCK_6\]/i);
     if (marker !== -1) {
-      let text = content.slice(marker + '[BLOCK_6]'.length);
+      let text = content.slice(marker).replace(/^\[BLOCK_6\]/i, '');
       const nextBlock = text.search(/\n\[BLOCK_\d+\]/);
       if (nextBlock !== -1) text = text.slice(0, nextBlock);
       const nextTag = text.search(/\n\[ATHENA_/);
@@ -36,11 +36,14 @@ export function extractReviewBlock(content?: string, blocks?: string[]): string 
   }
 
   if (blocks && blocks.length) {
-    if (blocks.length >= 6 && (blocks[5] || '').trim().length >= 20) {
-      return blocks[5].trim();
+    const sixth = (blocks[5] || '').trim();
+    if (blocks.length >= 6 && sixth.length >= 20 && !sixth.toLowerCase().includes('[athena_challenge]')) {
+      return sixth;
     }
-    const likely = [...blocks].reverse().find((b) => looksLikeReview(b));
+    const likely = [...blocks].reverse().find((b) => looksLikeReview(b) && !(b || '').includes('[ATHENA_CHALLENGE]'));
     if (likely && likely.trim().length >= 20) return likely.trim();
+    const last = (blocks[blocks.length - 1] || '').trim();
+    if (last.length >= 20 && bulletCount(last) >= 4) return last;
   }
 
   if (content && looksLikeReview(content) && !content.includes('[BLOCK_1]')) {
@@ -214,26 +217,19 @@ export type HarvestArticle = {
 };
 
 /**
- * Varre homologadas (nuvem + local + sementes), cache da trilha, sessões e artigos offline.
+ * Colheita síncrona (sementes, cache, sessões). Não espera Firestore.
  */
-export async function harvestCompressedReviews(
+export function harvestCompressedReviewsLocal(
   userId: string,
-  extras?: { sessions?: ChatSession[]; articles?: HarvestArticle[]; fetchCloud?: boolean }
-): Promise<Review[]> {
+  extras?: { sessions?: ChatSession[]; articles?: HarvestArticle[]; homologated?: HomologatedLesson[] }
+): Review[] {
   const found: Review[] = [];
 
-  let homologated: HomologatedLesson[] = [
+  const homologated: HomologatedLesson[] = [
     ...Object.values(seeds || {}),
-    ...Object.values(getLocalHomologatedList())
+    ...Object.values(getLocalHomologatedList()),
+    ...(extras?.homologated || [])
   ];
-  if (extras?.fetchCloud !== false) {
-    try {
-      const cloud = await fetchAllHomologatedLessons();
-      homologated = [...homologated, ...cloud];
-    } catch {
-      /* cache/sementes já cobrem o offline */
-    }
-  }
 
   const seenLesson = new Set<string>();
   for (const lesson of homologated) {
@@ -292,6 +288,27 @@ export async function harvestCompressedReviews(
   }
   saveCompressedReviews(userId, store);
   return store;
+}
+
+export async function harvestCompressedReviews(
+  userId: string,
+  extras?: { sessions?: ChatSession[]; articles?: HarvestArticle[]; fetchCloud?: boolean }
+): Promise<Review[]> {
+  const immediate = harvestCompressedReviewsLocal(userId, extras);
+  if (extras?.fetchCloud === false) return immediate;
+
+  try {
+    const cloud = await Promise.race([
+      fetchAllHomologatedLessons(),
+      new Promise<HomologatedLesson[]>((resolve) => setTimeout(() => resolve([]), 4000))
+    ]);
+    if (cloud.length) {
+      return harvestCompressedReviewsLocal(userId, { ...extras, homologated: cloud });
+    }
+  } catch {
+    /* cache/sementes já cobrem o offline */
+  }
+  return harvestCompressedReviewsLocal(userId, extras);
 }
 
 export function mergeReviewLists(...lists: Review[][]): Review[] {

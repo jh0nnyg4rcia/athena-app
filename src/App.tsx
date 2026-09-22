@@ -113,6 +113,7 @@ import { LocalPersistence } from './services/localPersistence';
 import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, keepObjectiveChallengeQuestions, sanitizeAthenaVoice } from './lib/athenaVoice';
 import {
   harvestCompressedReviews,
+  harvestCompressedReviewsLocal,
   upsertCompressedReview,
   deleteCompressedReview,
   mergeReviewLists,
@@ -120,6 +121,7 @@ import {
   buildCompressedReview,
   persistReviewFromMessage
 } from './lib/compressedReviews';
+import { inferTrilhaContext, isTrilhaLesson } from './lib/trilhaContext';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -1513,10 +1515,11 @@ const ChatMessage = memo(({
                       </button>
                     )}
 
-                    {!isError && trilhaDay !== undefined && trilhaTotalMaterials !== undefined ? (
+                    {!isError && (trilhaDay !== undefined || msg.trilhaMaterialIndex !== undefined || (trilhaTotalMaterials ?? 0) > 0) ? (
                       (() => {
                         const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? 0);
-                        const localApproved = getLocalHomologatedLesson(trilhaDay, msgPartIdx);
+                        const totalParts = (trilhaTotalMaterials && trilhaTotalMaterials > 0) ? trilhaTotalMaterials : 5;
+                        const localApproved = trilhaDay !== undefined ? getLocalHomologatedLesson(trilhaDay, msgPartIdx) : null;
                         const isThisPartApproved = Boolean(
                           (localApproved && localApproved.status === 'approved') ||
                           (homologatedLessonState && homologatedLessonState.day === trilhaDay && homologatedLessonState.part === msgPartIdx && homologatedLessonState.status === 'approved')
@@ -1534,7 +1537,7 @@ const ChatMessage = memo(({
                                   <div>
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-brand-gold">
-                                        Curadoria • Parte {msgPartIdx + 1} de {trilhaTotalMaterials}
+                                        Curadoria • Parte {msgPartIdx + 1} de {totalParts}
                                       </span>
                                       {isThisPartApproved ? (
                                         <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -1582,7 +1585,7 @@ const ChatMessage = memo(({
                             )}
 
                             {/* Botões de Avanço / Conclusão */}
-                            {msgPartIdx < trilhaTotalMaterials - 1 ? (
+                            {msgPartIdx < totalParts - 1 ? (
                               isCEO && !isThisPartApproved ? (
                                 <div className="flex flex-col items-center gap-2 w-full sm:w-auto">
                                   <button
@@ -1593,7 +1596,7 @@ const ChatMessage = memo(({
                                   >
                                     <Trophy size={18} className="group-hover:scale-110 transition-transform text-slate-950" />
                                     <span className="font-extrabold tracking-wider">
-                                      {isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & IR PARA PARTE ${msgPartIdx + 2} DE ${trilhaTotalMaterials}`}
+                                      {isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & IR PARA PARTE ${msgPartIdx + 2} DE ${totalParts}`}
                                     </span>
                                     <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                                   </button>
@@ -1623,7 +1626,7 @@ const ChatMessage = memo(({
                                   className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
                                 >
                                   <span className="font-extrabold tracking-wider">
-                                    IR PARA PARTE {msgPartIdx + 2} DE {trilhaTotalMaterials}
+                                    IR PARA PARTE {msgPartIdx + 2} DE {totalParts}
                                   </span>
                                   <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                                 </button>
@@ -2027,6 +2030,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
+    setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
     const run = async (fetchCloud: boolean) => {
       try {
         const articles = await getCachedArticles();
@@ -2037,11 +2041,12 @@ export default function App() {
         });
         if (!cancelled) setCompressedReviews(next);
       } catch {
-        /* cache local permanece */
+        if (!cancelled) setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
       }
     };
     void run(true);
     const onHomologated = () => {
+      setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
       void run(false);
     };
     window.addEventListener('athena-lesson-homologated', onHomologated);
@@ -2126,7 +2131,7 @@ export default function App() {
     };
   }, [user]);
 
-  const isCEO = isCeoAccount(auth.currentUser) || (Boolean(auth.currentUser) && isCeoAccount(user));
+  const isCEO = isCeoAccount(auth.currentUser) || isCeoAccount(user);
 
   const [tokenExhaustedBanner, setTokenExhaustedBanner] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
@@ -2345,10 +2350,22 @@ export default function App() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatSession));
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ChatSession));
       if (docs.length > 0) {
-        setSessions(docs);
-        docs.forEach(s => LocalPersistence.saveSession(user.uid, s));
+        const local = LocalPersistence.getSessions(user.uid);
+        const merged = docs.map((cloud) => {
+          const prev = local.find((s) => s.id === cloud.id);
+          return {
+            ...prev,
+            ...cloud,
+            trilhaDay: cloud.trilhaDay ?? prev?.trilhaDay,
+            trilhaMaterialIndex: cloud.trilhaMaterialIndex ?? prev?.trilhaMaterialIndex,
+            trilhaSessionType: cloud.trilhaSessionType ?? prev?.trilhaSessionType,
+            reviews: (cloud.reviews?.length ? cloud.reviews : prev?.reviews) || []
+          } as ChatSession;
+        });
+        setSessions(merged);
+        merged.forEach((s) => LocalPersistence.saveSession(user.uid, s));
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/sessions`);
@@ -3070,43 +3087,31 @@ export default function App() {
       }
     }
 
-    // Improved block splitting strategy
+    // Split by named [BLOCK_1]..[BLOCK_6] so um preâmbulo extra não desloca a revisão
     const blocks: string[] = [];
     const blockMarkers = Array.from({ length: 6 }, (_, i) => `[BLOCK_${i + 1}]`);
     let tempContent = rawContent;
-
-    // Check if markers exist
     const hasMarkers = blockMarkers.some(m => tempContent.includes(m));
 
     if (hasMarkers) {
-      // Find all markers and their positions
-      const positions: { index: number, marker: string }[] = [];
-      blockMarkers.forEach(m => {
-        const idx = tempContent.indexOf(m);
-        if (idx !== -1) positions.push({ index: idx, marker: m });
-      });
-      positions.sort((a, b) => a.index - b.index);
-
-      if (positions.length > 0) {
-        // Add preamble if exists
-        if (positions[0].index > 0) {
-          const preamble = tempContent.substring(0, positions[0].index).trim();
-          if (preamble) blocks.push(preamble);
-        }
-
-        // Add blocks
-        for (let i = 0; i < positions.length; i++) {
-          const start = positions[i].index + positions[i].marker.length;
-          const end = (i < positions.length - 1) ? positions[i + 1].index : tempContent.length;
-          const content = tempContent.substring(start, end).trim();
-          
-          if (i === 0 && blocks.length > 0) {
-            // Merge preamble into the first block instead of making it a separate block
-            blocks[0] = blocks[0] + "\n\n" + content;
-          } else {
-            blocks.push(content);
+      for (let i = 0; i < blockMarkers.length; i++) {
+        const marker = blockMarkers[i];
+        const start = tempContent.indexOf(marker);
+        if (start === -1) continue;
+        const contentStart = start + marker.length;
+        let end = tempContent.length;
+        for (let j = i + 1; j < blockMarkers.length; j++) {
+          const next = tempContent.indexOf(blockMarkers[j], contentStart);
+          if (next !== -1) {
+            end = next;
+            break;
           }
         }
+        const chunk = tempContent.substring(contentStart, end).trim();
+        if (chunk) blocks.push(chunk);
+      }
+      if (blocks.length === 0) {
+        blocks.push(tempContent);
       }
     } else {
       blocks.push(tempContent);
@@ -3368,7 +3373,9 @@ export default function App() {
           await saveSession({ 
             messages: updatedMessages,
             guidedSubject: activeSubject,
-            currentArticle: activeArticle
+            currentArticle: activeArticle,
+            trilhaDay: dayNum ?? session?.trilhaDay,
+            trilhaMaterialIndex: botMessage.trilhaMaterialIndex ?? session?.trilhaMaterialIndex
           }, targetSessionId, true);
         } catch (saveErr) {
           console.warn("Notice: Cloud sync deferred (quota/network fallback active):", saveErr);
@@ -4043,13 +4050,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     if (!msg || !msg.blocks) return;
     
     const isLastBlock = (msg.currentBlockIndex ?? 0) >= msg.blocks.length - 1;
+    const session = sessions.find(s => s.id === currentSessionId);
+    const trilha = inferTrilhaContext(session, messages, msg);
     
     if (isLastBlock) {
       await saveReview(msgIdx);
-      const session = sessions.find(s => s.id === currentSessionId);
-      if (session && session.trilhaDay) {
-        const dayNum = session.trilhaDay;
-        const currentMatIdx = (msg?.trilhaMaterialIndex !== undefined) ? msg.trilhaMaterialIndex : (session.trilhaMaterialIndex ?? 0);
+      const dayNum = trilha.day;
+      if (dayNum !== undefined) {
+        const currentMatIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : trilha.part;
         const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
         
         if (dayItem && dayItem.materias) {
@@ -4090,6 +4098,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             await saveSession({
               title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
               guidedSubject: nextMat.nome,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx,
               messages: updatedMessages
             }, currentSessionId);
@@ -4358,28 +4367,42 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           return;
         }
 
-        // Default (non-trilha) flow
+        // Default (non-trilha) flow — nunca na Trilha Jurídica
+        if (isTrilhaLesson(trilha, msg)) {
+          return;
+        }
         const nextArt = (msg.article || currentArticle) + 1;
         setCurrentArticle(nextArt);
         handleSendMessage(`Excelente. Vamos avançar para o Artigo ${nextArt} da ${guidedSubject}?`, true, nextArt);
         return;
       }
 
+      const nextBlockIndex = (msg.currentBlockIndex ?? 0) + 1;
       const updatedMessages = (messages || []).map((m, i) => {
         if (i === msgIdx) {
-          const nextIndex = (m.currentBlockIndex ?? 0) + 1;
-          
-          // If it's the last block, and we have an active study item, mark it complete
-          if (nextIndex === (m.blocks?.length ?? 0) - 1 && activeStudyItem) {
+          if (nextBlockIndex === (m.blocks?.length ?? 0) - 1 && activeStudyItem) {
             markScheduleItemComplete(activeStudyItem.scheduleId, activeStudyItem.itemIndex);
           }
 
-          return { ...m, currentBlockIndex: nextIndex };
+          return { ...m, currentBlockIndex: nextBlockIndex };
         }
         return m;
       });
       setMessages(updatedMessages);
-      saveSession({ messages: updatedMessages });
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: trilha.day ?? session?.trilhaDay,
+        trilhaMaterialIndex: msg.trilhaMaterialIndex ?? trilha.part
+      });
+      if (nextBlockIndex >= (msg.blocks.length - 1)) {
+        persistBlock6(msg, {
+          sessionId: currentSessionId,
+          day: trilha.day,
+          part: msg.trilhaMaterialIndex ?? trilha.part,
+          subject: msg.subject || guidedSubject,
+          article: msg.article
+        });
+      }
 
       // Transição suave com scroll automático para o novo bloco revelado
       const targetBlockIndex = (messages[msgIdx]?.currentBlockIndex ?? 0) + 1;
@@ -4414,8 +4437,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const handleCeoApproveLesson = async (targetMsgIdx?: number) => {
     const activeSess = sessions.find(s => s.id === currentSessionId);
-    if (!activeSess || activeSess.trilhaDay === undefined) return null;
-    const day = activeSess.trilhaDay;
 
     let targetMsg: Message | undefined;
     if (targetMsgIdx !== undefined && messages[targetMsgIdx]) {
@@ -4424,16 +4445,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
     }
 
+    const trilha = inferTrilhaContext(activeSess, messages, targetMsg);
+    if (trilha.day === undefined) return null;
+    const day = trilha.day;
     if (!targetMsg || !targetMsg.content) {
       alert("Aguarde o conteúdo da lição ser gerado antes de aprovar.");
       return null;
     }
 
-    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (activeSess.trilhaMaterialIndex ?? 0);
+    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (trilha.part ?? 0);
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
     const partSubject = (dayItem && dayItem.materias && dayItem.materias[part]) 
       ? dayItem.materias[part].nome 
-      : (targetMsg.subject || activeSess.guidedSubject || 'Direito');
+      : (targetMsg.subject || activeSess?.guidedSubject || 'Direito');
 
     setIsSavingHomologation(true);
     try {
@@ -4490,7 +4514,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         return m;
       });
       setMessages(updatedMessages);
-      saveSession({ messages: updatedMessages }, currentSessionId);
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: day,
+        trilhaMaterialIndex: part
+      }, currentSessionId);
 
       setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) homologado com sucesso! Salvo no cache central e no dispositivo.`);
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
@@ -4608,11 +4636,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const skipTrilhaLesson = async (msgIdx: number) => {
     const session = sessions.find(s => s.id === currentSessionId);
-    if (session && session.trilhaDay !== undefined) {
-      const dayNum = session.trilhaDay;
-      const currentMatIdx = (messages[msgIdx]?.trilhaMaterialIndex !== undefined) ? messages[msgIdx].trilhaMaterialIndex : (session.trilhaMaterialIndex ?? 0);
+    const trilha = inferTrilhaContext(session, messages, messages[msgIdx]);
+    if (trilha.day !== undefined) {
+      const dayNum = trilha.day;
+      const currentMatIdx = (messages[msgIdx]?.trilhaMaterialIndex !== undefined) ? messages[msgIdx].trilhaMaterialIndex : trilha.part;
       const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
-      const isEstudo = session.trilhaSessionType === 'estudo' || !session.trilhaSessionType;
+      const isEstudo = !session?.trilhaSessionType || session.trilhaSessionType === 'estudo';
       
       if (dayItem && dayItem.materias && isEstudo) {
         const nextMatIdx = currentMatIdx + 1;
@@ -6972,9 +7001,10 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                     <AnimatePresence mode="popLayout">
                       {(() => {
                         const activeSess = sessions.find(s => s.id === currentSessionId);
-                        const tDay = activeSess?.trilhaDay;
-                        const tMatIdx = activeSess?.trilhaMaterialIndex;
-                        const tTotal = tDay ? (TRILHA_JURIDICA_DATA.find(d => d.dia === tDay)?.materias?.length || 0) : 0;
+                        const inferredTrilha = inferTrilhaContext(activeSess, messages);
+                        const tDay = inferredTrilha.day;
+                        const tMatIdx = inferredTrilha.part;
+                        const tTotal = inferredTrilha.total || (tDay ? 5 : 0);
                         
                         const visibleMessages = (messages || []).filter(m => !getIsInstructionMessage(m));
                         
