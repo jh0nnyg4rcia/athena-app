@@ -72,7 +72,8 @@ import {
   saveHomologatedLesson, 
   revokeHomologatedLesson, 
   getLocalHomologatedLesson, 
-  getLessonDocId 
+  getLessonDocId,
+  fetchAllHomologatedLessons
 } from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -178,6 +179,7 @@ interface Message {
   }>;
   sourceType?: 'gemini' | 'offline_pareto';
   modelName?: string;
+  trilhaDay?: number;
   trilhaMaterialIndex?: number;
 }
 
@@ -1513,14 +1515,24 @@ const ChatMessage = memo(({
                       </button>
                     )}
 
-                    {!isError && (trilhaDay !== undefined || msg.trilhaMaterialIndex !== undefined || (trilhaTotalMaterials ?? 0) > 0) ? (
+                    {!isError && isTrilhaLesson(inferTrilhaContext(
+                      { trilhaDay, trilhaMaterialIndex, title: '' },
+                      messages,
+                      msg
+                    ), msg) ? (
                       (() => {
-                        const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? 0);
-                        const totalParts = (trilhaTotalMaterials && trilhaTotalMaterials > 0) ? trilhaTotalMaterials : 5;
-                        const localApproved = trilhaDay !== undefined ? getLocalHomologatedLesson(trilhaDay, msgPartIdx) : null;
+                        const lessonCtx = inferTrilhaContext(
+                          { trilhaDay, trilhaMaterialIndex, title: '' },
+                          messages,
+                          msg
+                        );
+                        const effectiveDay = lessonCtx.day;
+                        const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? lessonCtx.part);
+                        const totalParts = (trilhaTotalMaterials && trilhaTotalMaterials > 0) ? trilhaTotalMaterials : (lessonCtx.total || 5);
+                        const localApproved = effectiveDay !== undefined ? getLocalHomologatedLesson(effectiveDay, msgPartIdx) : null;
                         const isThisPartApproved = Boolean(
                           (localApproved && localApproved.status === 'approved') ||
-                          (homologatedLessonState && homologatedLessonState.day === trilhaDay && homologatedLessonState.part === msgPartIdx && homologatedLessonState.status === 'approved')
+                          (homologatedLessonState && homologatedLessonState.day === effectiveDay && homologatedLessonState.part === msgPartIdx && homologatedLessonState.status === 'approved')
                         );
 
                         return (
@@ -1674,7 +1686,7 @@ const ChatMessage = memo(({
                                   className="w-full sm:w-auto min-w-[280px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-brand-gold via-amber-400 to-emerald-400 hover:from-yellow-400 hover:to-emerald-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.4)] active:scale-98 transition-all cursor-pointer group"
                                 >
                                   <Trophy size={18} className="group-hover:scale-110 transition-transform" />
-                                  <span>{isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & CONCLUIR DIA ${trilhaDay}`}</span>
+                                  <span>{isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & CONCLUIR DIA ${effectiveDay}`}</span>
                                 </button>
                               ) : (
                                 <button
@@ -1682,7 +1694,7 @@ const ChatMessage = memo(({
                                   onClick={() => advanceStage(msgIdx)}
                                   className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
                                 >
-                                  <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
+                                  <span>CONCLUIR DIA {effectiveDay} DA TRILHA</span>
                                   <Trophy size={18} className="group-hover:scale-110 transition-transform" />
                                 </button>
                               );
@@ -2017,10 +2029,15 @@ export default function App() {
     };
     window.addEventListener('athena-lesson-homologated', onHomologated);
     window.addEventListener('athena-trilha-cached', onHomologated);
+    window.addEventListener('athena-lessons-restored', onHomologated);
+    window.addEventListener('athena-vault-ready', onHomologated);
+    void fetchAllHomologatedLessons();
     return () => {
       cancelled = true;
       window.removeEventListener('athena-lesson-homologated', onHomologated);
       window.removeEventListener('athena-trilha-cached', onHomologated);
+      window.removeEventListener('athena-lessons-restored', onHomologated);
+      window.removeEventListener('athena-vault-ready', onHomologated);
     };
   }, [user?.uid, sessions.length, activeTab]);
 
@@ -2130,6 +2147,11 @@ export default function App() {
       if (res) setHomologatedLessonState(res);
     });
 
+    const refreshApproved = () => {
+      const next = getLocalHomologatedLesson(day, part);
+      if (next) setHomologatedLessonState(next);
+    };
+
     const onHomologated = (e: any) => {
       const detail = e.detail as HomologatedLesson;
       if (detail && detail.day === day && detail.part === part) {
@@ -2144,9 +2166,13 @@ export default function App() {
     };
     window.addEventListener('athena-lesson-homologated', onHomologated);
     window.addEventListener('athena-lesson-revoked', onRevoked);
+    window.addEventListener('athena-vault-ready', refreshApproved);
+    window.addEventListener('athena-lessons-restored', refreshApproved);
     return () => {
       window.removeEventListener('athena-lesson-homologated', onHomologated);
       window.removeEventListener('athena-lesson-revoked', onRevoked);
+      window.removeEventListener('athena-vault-ready', refreshApproved);
+      window.removeEventListener('athena-lessons-restored', refreshApproved);
     };
   }, [currentSessionId, sessions]);
 
@@ -2309,9 +2335,25 @@ export default function App() {
         const local = LocalPersistence.getSessions(user.uid);
         const merged = docs.map((cloud) => {
           const prev = local.find((s) => s.id === cloud.id);
+          const cloudMsgs = cloud.messages || [];
+          const prevMsgs = prev?.messages || [];
+          const mergedMessages = cloudMsgs.map((c, i) => {
+            const p = prevMsgs[i];
+            if (!p) return c;
+            return {
+              ...p,
+              ...c,
+              trilhaDay: c.trilhaDay ?? p.trilhaDay,
+              trilhaMaterialIndex: c.trilhaMaterialIndex ?? p.trilhaMaterialIndex
+            };
+          });
+          const messages = prevMsgs.length > mergedMessages.length
+            ? [...mergedMessages, ...prevMsgs.slice(mergedMessages.length)]
+            : mergedMessages;
           return {
             ...prev,
             ...cloud,
+            messages,
             trilhaDay: cloud.trilhaDay ?? prev?.trilhaDay,
             trilhaMaterialIndex: cloud.trilhaMaterialIndex ?? prev?.trilhaMaterialIndex,
             trilhaSessionType: cloud.trilhaSessionType ?? prev?.trilhaSessionType,
@@ -3276,6 +3318,7 @@ export default function App() {
         article: activeArticle,
         sourceType: 'gemini',
         modelName: usedModel,
+        trilhaDay: dayNum !== undefined ? dayNum : undefined,
         trilhaMaterialIndex: dayNum !== undefined ? (activeSession?.trilhaMaterialIndex ?? 0) : undefined
       };
 
@@ -3496,14 +3539,18 @@ ${matList}
             blocks: parsed.blocks,
             currentBlockIndex: 0,
             subject: activeSubject,
-            article: activeArticle,
+            article: dayNum ?? activeArticle,
             sourceType: 'offline_pareto',
-            modelName: 'Material Local Pareto 80/20'
+            modelName: 'Material Local Pareto 80/20',
+            trilhaDay: dayNum,
+            trilhaMaterialIndex: dayNum !== undefined ? (activeSession?.trilhaMaterialIndex ?? 0) : undefined
           };
           persistBlock6(botMessage, {
             sessionId: targetSessionId || currentSessionId,
+            day: dayNum,
+            part: botMessage.trilhaMaterialIndex,
             subject: activeSubject,
-            article: activeArticle
+            article: dayNum ?? activeArticle
           });
           setMessages(prev => [...prev, botMessage]);
 
@@ -3521,7 +3568,9 @@ ${matList}
             saveSession({
               messages: updatedMessages,
               guidedSubject: activeSubject,
-              currentArticle: activeArticle
+              currentArticle: activeArticle,
+              trilhaDay: dayNum ?? session?.trilhaDay,
+              trilhaMaterialIndex: botMessage.trilhaMaterialIndex ?? session?.trilhaMaterialIndex
             }, activeId, true);
           }
           return;
@@ -3797,7 +3846,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       });
       if (user) {
         persistBlock6(
-          { role: 'model', content: text, subject: nextMat.nome, article: dayNum, trilhaMaterialIndex: nextMatIdx },
+          { role: 'model', content: text, subject: nextMat.nome, article: dayNum, trilhaDay: dayNum, trilhaMaterialIndex: nextMatIdx },
           { day: dayNum, part: nextMatIdx, subject: nextMat.nome, article: dayNum }
         );
       }
@@ -3882,9 +3931,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           blocks: parsed.blocks,
           currentBlockIndex: 0,
           subject: guidedSubjectName,
-          article: 1,
+          article: dayNum,
           sourceType: 'gemini',
           modelName: 'Oficial Homologado pelo CEO',
+          trilhaDay: dayNum,
           trilhaMaterialIndex: 0
         };
 
@@ -3934,9 +3984,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           blocks: parsed.blocks,
           currentBlockIndex: 0,
           subject: guidedSubjectName,
-          article: 1,
+          article: dayNum,
           sourceType: 'gemini',
           modelName: `${cached.model} (Cache Instantâneo)`,
+          trilhaDay: dayNum,
           trilhaMaterialIndex: 0
         };
 
@@ -4079,9 +4130,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: 'Oficial Homologado pelo CEO',
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
                 persistBlock6(botMessage, {
@@ -4140,9 +4192,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: `${cached.model} (Cache Instantâneo)`,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
                 persistBlock6(botMessage, {
@@ -4202,9 +4255,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: usedModel,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
                 persistBlock6(botMessage, {
@@ -4280,7 +4334,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
                 const finalMessages = [...updatedMessages, botErrorMessage];
@@ -4514,9 +4569,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         blocks: parsed.blocks,
         currentBlockIndex: 0,
         subject: dayItem.materias[part].nome,
-        article: 1,
+        article: day,
         sourceType: 'gemini',
         modelName: `${model} (Regerado pelo CEO)`,
+        trilhaDay: day,
         trilhaMaterialIndex: part
       };
       persistBlock6(botMessage, {
@@ -4524,12 +4580,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         day,
         part,
         subject: dayItem.materias[part].nome,
-        article: 1
+        article: day
       });
       const userMsg: Message = { role: 'user', content: msg };
       setMessages([userMsg, botMessage]);
       await saveSession({
         messages: [userMsg, botMessage],
+        trilhaDay: day,
         trilhaMaterialIndex: part
       }, currentSessionId);
       setHomologatedLessonState(prev => prev ? { ...prev, status: 'draft' } : null);
@@ -4652,9 +4709,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 blocks: parsed.blocks,
                 currentBlockIndex: 0,
                 subject: nextMat.nome,
-                article: 1,
+                article: dayNum,
                 sourceType: 'gemini',
                 modelName: 'Oficial Homologado pelo CEO',
+                trilhaDay: dayNum,
                 trilhaMaterialIndex: nextMatIdx
               };
               persistBlock6(botMessage, {
@@ -4697,9 +4755,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               blocks: parsed.blocks,
               currentBlockIndex: 0,
               subject: nextMat.nome,
-              article: 1,
+              article: dayNum,
               sourceType: 'gemini',
               modelName: usedModel,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx
             };
             persistBlock6(botMessage, {
@@ -4742,7 +4801,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
               currentBlockIndex: 0,
               subject: nextMat.nome,
-              article: 1,
+              article: dayNum,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx
             };
             const finalMessages = [...updatedMessages, botErrorMessage];

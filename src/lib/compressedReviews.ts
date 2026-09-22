@@ -166,7 +166,7 @@ function collectFromLesson(
 
 export function persistReviewFromMessage(
   userId: string,
-  msg: Pick<Message, 'content' | 'blocks' | 'subject' | 'article' | 'trilhaMaterialIndex'>,
+  msg: Pick<Message, 'content' | 'blocks' | 'subject' | 'article' | 'trilhaDay' | 'trilhaMaterialIndex'>,
   meta?: {
     sessionId?: string;
     guidedSubject?: string | null;
@@ -178,7 +178,7 @@ export function persistReviewFromMessage(
   const review = collectFromLesson(msg.content, msg.blocks, {
     subject: msg.subject || meta?.guidedSubject || 'Estudo Geral',
     article: msg.article || meta?.currentArticle,
-    day: meta?.trilhaDay,
+    day: msg.trilhaDay ?? meta?.trilhaDay,
     part: msg.trilhaMaterialIndex ?? meta?.trilhaMaterialIndex,
     sessionId: meta?.sessionId
   });
@@ -197,7 +197,7 @@ function collectFromSessions(sessions: ChatSession[]): Review[] {
       const review = collectFromLesson(msg.content, msg.blocks, {
         subject: msg.subject || session.guidedSubject || 'Estudo Geral',
         article: msg.article || session.currentArticle,
-        day: session.trilhaDay,
+        day: msg.trilhaDay ?? session.trilhaDay,
         part: msg.trilhaMaterialIndex ?? session.trilhaMaterialIndex,
         timestamp: session.lastUpdatedAt,
         sessionId: session.id

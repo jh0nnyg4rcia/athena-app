@@ -1,6 +1,16 @@
 import { TrilhaPartCache } from '../types';
+import {
+  getRememberedTrilhaPart,
+  hydrateLessonVault,
+  persistLocalStorageSafe,
+  putVaultTrilhaPart,
+  listRememberedTrilhaParts,
+  trilhaVaultId
+} from './lessonVault';
 
 const CACHE_PREFIX = 'athena_trilha_cache_';
+
+void hydrateLessonVault();
 
 /**
  * Retorna o conteúdo em cache de uma parte específica da Trilha Jurídica se já foi gerado.
@@ -10,8 +20,13 @@ export function getCachedTrilhaPart(
   partIndex: number,
   style: string = 'teorico'
 ): TrilhaPartCache | null {
+  const id = trilhaVaultId(dayNum, partIndex, style);
+  const mem = getRememberedTrilhaPart(id);
+  if (mem?.text?.trim()) {
+    return { text: mem.text, model: mem.model, timestamp: mem.timestamp };
+  }
   try {
-    const key = `${CACHE_PREFIX}d${dayNum}_p${partIndex}_${style}`;
+    const key = `${CACHE_PREFIX}${id}`;
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as TrilhaPartCache;
@@ -54,7 +69,14 @@ export function setCachedTrilhaPart(
     } else {
       return;
     }
-    localStorage.setItem(key, JSON.stringify(entry));
+    persistLocalStorageSafe(key, JSON.stringify(entry));
+    void putVaultTrilhaPart({
+      id: trilhaVaultId(dayNum, partIndex, style),
+      day: dayNum,
+      part: partIndex,
+      style,
+      ...entry
+    });
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('athena-trilha-cached', {
         detail: { day: dayNum, part: partIndex, style, text: entry.text, timestamp: entry.timestamp }
@@ -78,7 +100,7 @@ export function hasCachedTrilhaPart(
 }
 
 export function listCachedTrilhaParts(): Array<{ day: number; part: number; style: string; text: string; timestamp: number }> {
-  const result: Array<{ day: number; part: number; style: string; text: string; timestamp: number }> = [];
+  const byId = new Map<string, { day: number; part: number; style: string; text: string; timestamp: number }>();
   try {
     const re = new RegExp(`^${CACHE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}d(\\d+)_p(\\d+)_(.+)$`);
     for (let i = 0; i < localStorage.length; i++) {
@@ -91,7 +113,7 @@ export function listCachedTrilhaParts(): Array<{ day: number; part: number; styl
       try {
         const parsed = JSON.parse(raw) as TrilhaPartCache;
         if (parsed?.text) {
-          result.push({
+          byId.set(key, {
             day: Number(match[1]),
             part: Number(match[2]),
             style: match[3],
@@ -106,7 +128,17 @@ export function listCachedTrilhaParts(): Array<{ day: number; part: number; styl
   } catch (err) {
     console.warn('[TrilhaCache] Erro ao listar cache:', err);
   }
-  return result;
+  for (const part of listRememberedTrilhaParts()) {
+    if (!part?.text) continue;
+    byId.set(part.id, {
+      day: part.day,
+      part: part.part,
+      style: part.style,
+      text: part.text,
+      timestamp: part.timestamp || Date.now()
+    });
+  }
+  return Array.from(byId.values());
 }
 
 /**
@@ -130,13 +162,10 @@ export function clearTrilhaCache(): void {
 
 /**
  * Sanitiza o cache local para cursos de 1ª Fase (Objetiva):
- * 1. Remove qualquer cache derivado de fases subjetiva/oral gerado pelo antigo módulo híbrido.
- * 2. Purga questões discursivas (correctIndex: -1) e orais (correctIndex: -2) de lições salvas.
- * 3. Se uma lição salva continha apenas questões discursivas/orais, invalida o cache para permitir geração 100% nova com 10 questões objetivas.
+ * remove apenas caches de subjetiva/oral. Nunca apaga partes teóricas já geradas.
  */
 export function sanitizeTrilhaCacheForObjectivePhase(): void {
   try {
-    const challengeKey = "[ATHENA_CHALLENGE]";
     const keysToProcess: string[] = [];
 
     for (let i = 0; i < localStorage.length; i++) {
@@ -146,65 +175,17 @@ export function sanitizeTrilhaCacheForObjectivePhase(): void {
       }
     }
 
-    let sanitizedCount = 0;
     let purgedCount = 0;
 
     for (const key of keysToProcess) {
-      // Se for cache de subjetiva ou oral na trilha, purga diretamente
       if (key.endsWith('_subjetiva') || key.endsWith('_oral')) {
         localStorage.removeItem(key);
         purgedCount++;
-        continue;
-      }
-
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-
-      try {
-        const parsed = JSON.parse(raw) as TrilhaPartCache;
-        if (!parsed || !parsed.text || !parsed.text.includes(challengeKey)) continue;
-
-        const parts = parsed.text.split(challengeKey);
-        const afterTag = parts[1].trim();
-        const firstBrace = afterTag.indexOf("{");
-        const lastBrace = afterTag.lastIndexOf("}");
-
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          const jsonStr = afterTag.substring(firstBrace, lastBrace + 1);
-          const challenge = JSON.parse(jsonStr);
-
-          if (challenge && Array.isArray(challenge.questions)) {
-            const hasSubjetivaOrOral = challenge.questions.some(
-              (q: any) => q.correctIndex === -1 || q.correctIndex === -2 || q.correctIndex < 0
-            );
-
-            if (hasSubjetivaOrOral) {
-              const objectiveQuestions = challenge.questions.filter(
-                (q: any) => q.correctIndex !== -1 && q.correctIndex !== -2 && q.correctIndex >= 0
-              );
-
-              if (objectiveQuestions.length === 0) {
-                // Lição continha apenas discursiva/oral: remove cache para regeneração limpa de 1ª fase
-                localStorage.removeItem(key);
-                purgedCount++;
-              } else {
-                challenge.questions = objectiveQuestions;
-                const newJsonStr = JSON.stringify(challenge, null, 2);
-                const remainder = afterTag.substring(lastBrace + 1);
-                parsed.text = `${parts[0]}${challengeKey}\n${newJsonStr}${remainder}`;
-                localStorage.setItem(key, JSON.stringify(parsed));
-                sanitizedCount++;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn(`[TrilhaCache] Erro ao sanitizar chave ${key}:`, e);
       }
     }
 
-    if (purgedCount > 0 || sanitizedCount > 0) {
-      console.log(`[TrilhaCache] Sanitização 1ª Fase concluída: ${purgedCount} caches purgados, ${sanitizedCount} lições sanitizadas.`);
+    if (purgedCount > 0) {
+      console.log(`[TrilhaCache] Sanitização 1ª Fase: ${purgedCount} caches subjetiva/oral removidos. Cache teórico preservado.`);
     }
   } catch (err) {
     console.warn('[TrilhaCache] Erro geral ao sanitizar cache para 1ª fase:', err);

@@ -1,28 +1,77 @@
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, cleanData, isQuotaExhausted } from '../lib/firebase';
 import { HomologatedLesson } from '../types';
 import homologatedSeedsData from '../data/homologatedSeeds.json';
+import {
+  deleteVaultLesson,
+  getRememberedLesson,
+  hydrateLessonVault,
+  listRememberedLessons,
+  persistLocalStorageSafe,
+  putVaultLesson,
+  rememberLesson
+} from './lessonVault';
 
 const staticSeeds: Record<string, HomologatedLesson> = (homologatedSeedsData || {}) as Record<string, HomologatedLesson>;
 
 const LOCAL_STORAGE_PREFIX = 'athena_homologated_';
+const FIRESTORE_SAFE_CHARS = 900_000;
+
+void hydrateLessonVault().then(() => {
+  try {
+    for (const lesson of Object.values(readLocalStorageLessons())) {
+      rememberLesson(lesson);
+    }
+  } catch {
+    /* ignore */
+  }
+});
 
 export function getLessonDocId(day: number, part: number): string {
   return `day_${day}_part_${part}`;
 }
 
+function isUsableLesson(lesson?: HomologatedLesson | null): lesson is HomologatedLesson {
+  return Boolean(lesson && lesson.status === 'approved' && (lesson.content || lesson.blocks?.length));
+}
+
+function readLocalStorageLessons(): Record<string, HomologatedLesson> {
+  const result: Record<string, HomologatedLesson> = {};
+  if (typeof window === 'undefined') return result;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(LOCAL_STORAGE_PREFIX)) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as HomologatedLesson;
+        if (parsed?.id) result[parsed.id] = parsed;
+      } catch {
+        /* ignore broken */
+      }
+    }
+  } catch (e) {
+    console.warn('[CuratedLessonService] Erro ao listar lições locais:', e);
+  }
+  return result;
+}
+
 /**
- * Busca rápida síncrona no armazenamento local persistente ou no banco de sementes embutido.
- * Garante disponibilidade imediata (0ms) mesmo após reinstalação ou sem internet.
+ * Busca rápida síncrona: memória (IndexedDB hidratado), localStorage ou sementes.
  */
 export function getLocalHomologatedLesson(day: number, part: number): HomologatedLesson | null {
   const docId = getLessonDocId(day, part);
+  const mem = getRememberedLesson(docId);
+  if (isUsableLesson(mem)) return mem;
+
   try {
     const key = `${LOCAL_STORAGE_PREFIX}${docId}`;
     const raw = localStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw) as HomologatedLesson;
-      if (parsed && parsed.status === 'approved' && parsed.content) {
+      if (isUsableLesson(parsed)) {
+        rememberLesson(parsed);
         return parsed;
       }
     }
@@ -30,8 +79,7 @@ export function getLocalHomologatedLesson(day: number, part: number): Homologate
     console.warn('[CuratedLessonService] Erro ao ler lição do cache local:', e);
   }
 
-  // Fallback 1: Sementes estáticas embutidas no código/APK (0s, ultra persistente)
-  if (staticSeeds && staticSeeds[docId] && staticSeeds[docId].status === 'approved' && staticSeeds[docId].content) {
+  if (staticSeeds && isUsableLesson(staticSeeds[docId])) {
     return staticSeeds[docId];
   }
 
@@ -39,54 +87,43 @@ export function getLocalHomologatedLesson(day: number, part: number): Homologate
 }
 
 /**
- * Salva lição homologada no armazenamento local para acesso instantâneo (0s).
+ * Salva lição homologada na memória, IndexedDB e localStorage.
  */
 export function setLocalHomologatedLesson(lesson: HomologatedLesson): void {
-  try {
-    const key = `${LOCAL_STORAGE_PREFIX}${lesson.id}`;
-    localStorage.setItem(key, JSON.stringify(lesson));
-  } catch (e) {
-    console.warn('[CuratedLessonService] Falha ao gravar lição no cache local:', e);
-  }
+  rememberLesson(lesson);
+  const key = `${LOCAL_STORAGE_PREFIX}${lesson.id}`;
+  persistLocalStorageSafe(key, JSON.stringify(lesson));
+  void putVaultLesson(lesson);
 }
 
 /**
  * Remove lição do armazenamento local.
  */
 export function removeLocalHomologatedLesson(day: number, part: number): void {
+  const docId = getLessonDocId(day, part);
   try {
-    const key = `${LOCAL_STORAGE_PREFIX}${getLessonDocId(day, part)}`;
-    localStorage.removeItem(key);
+    localStorage.removeItem(`${LOCAL_STORAGE_PREFIX}${docId}`);
   } catch (e) {
     console.warn('[CuratedLessonService] Falha ao remover lição do cache local:', e);
   }
+  void deleteVaultLesson(docId);
 }
 
-/**
- * Busca lição homologada: primeiro no cache local (0s) e, em seguida ou caso ausente,
- * consulta a coleção centralizada no Cloud Firestore.
- */
 export async function getHomologatedLesson(day: number, part: number): Promise<HomologatedLesson | null> {
   const local = getLocalHomologatedLesson(day, part);
-  if (local) {
-    // Retorna imediatamente o local para performance instantânea
-    return local;
-  }
+  if (local) return local;
 
-  // Se cota estourada ou offline, não tenta a rede
-  if (isQuotaExhausted()) {
-    return null;
-  }
+  if (isQuotaExhausted()) return null;
 
   const docId = getLessonDocId(day, part);
   try {
     const docRef = doc(db, 'homologated_lessons', docId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      const data = snap.data() as HomologatedLesson;
-      if (data && data.status === 'approved') {
-        setLocalHomologatedLesson(data);
-        return data;
+      const data = { id: docId, ...(snap.data() as HomologatedLesson) };
+      if (data && (data.content || data.blocks?.length)) {
+        setLocalHomologatedLesson({ ...data, status: data.status || 'approved' });
+        return getLocalHomologatedLesson(day, part);
       }
     }
   } catch (error) {
@@ -96,47 +133,58 @@ export async function getHomologatedLesson(day: number, part: number): Promise<H
   return null;
 }
 
-/**
- * Homologa e publica uma lição na nuvem (Firestore) e no cache local.
- * Exclusivo para curadoria do CEO.
- * Possui timeout de proteção de 6 segundos para NUNCA travar a interface do usuário.
- */
-export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<void> {
-  // 1. Salva no cache local imediatamente (0ms)
-  setLocalHomologatedLesson(lesson);
+function compactForFirestore(lesson: HomologatedLesson): HomologatedLesson {
+  const payload: HomologatedLesson = { ...lesson };
+  let encoded = JSON.stringify(cleanData(payload));
+  if (encoded.length <= FIRESTORE_SAFE_CHARS) return payload;
 
-  // 2. Dispara evento para atualização instantânea na UI
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: lesson }));
+  if (payload.blocks?.length) {
+    payload.content = payload.blocks.join('\n\n');
+    encoded = JSON.stringify(cleanData(payload));
   }
+  if (encoded.length > FIRESTORE_SAFE_CHARS && payload.challenge) {
+    const { challenge: _drop, ...rest } = payload;
+    return rest as HomologatedLesson;
+  }
+  return payload;
+}
 
+async function writeFirestoreWithRetry(lesson: HomologatedLesson): Promise<void> {
   if (isQuotaExhausted()) {
-    console.warn('[CuratedLessonService] Firestore com cota excedida. Lição salva localmente com sucesso!');
+    console.warn('[CuratedLessonService] Firestore com cota excedida. Lição preservada no cofre local.');
     return;
   }
 
   const docId = lesson.id;
-  try {
-    const docRef = doc(db, 'homologated_lessons', docId);
-    const cleaned = cleanData(lesson);
-
-    // Timeout estrito de 6 segundos via Promise.race
-    const writePromise = setDoc(docRef, cleaned, { merge: true });
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Firestore write timeout: rede demorou mais de 6 segundos')), 6000)
-    );
-
-    await Promise.race([writePromise, timeoutPromise]);
-    console.log(`[CuratedLessonService] Lição ${docId} homologada e gravada com sucesso no Firestore!`);
-  } catch (error: any) {
-    console.warn(`[CuratedLessonService] Aviso na sincronização do Firestore para ${docId} (conteúdo seguro no cache local):`, error?.message || error);
-    // Não lança exceção fatal para não bloquear a UI do CEO se o cache local já salvou com sucesso!
+  const docRef = doc(db, 'homologated_lessons', docId);
+  const cleaned = cleanData(compactForFirestore(lesson));
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await setDoc(docRef, cleaned, { merge: true });
+      console.log(`[CuratedLessonService] Lição ${docId} gravada no Firestore (tentativa ${attempt + 1}).`);
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
   }
+  handleFirestoreError(lastError, OperationType.WRITE, `homologated_lessons/${docId}`);
 }
 
 /**
- * Revoga / despublica uma lição homologada.
+ * Homologa na memória + IndexedDB de imediato e sincroniza o Firestore em segundo plano.
  */
+export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<void> {
+  setLocalHomologatedLesson(lesson);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: lesson }));
+  }
+
+  void writeFirestoreWithRetry(lesson);
+}
+
 export async function revokeHomologatedLesson(day: number, part: number): Promise<void> {
   const docId = getLessonDocId(day, part);
   removeLocalHomologatedLesson(day, part);
@@ -156,26 +204,10 @@ export async function revokeHomologatedLesson(day: number, part: number): Promis
   }
 }
 
-/**
- * Lista todas as lições homologadas conhecidas no cache local.
- */
 export function getLocalHomologatedList(): Record<string, HomologatedLesson> {
-  const result: Record<string, HomologatedLesson> = {};
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(LOCAL_STORAGE_PREFIX)) {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          const parsed = JSON.parse(raw) as HomologatedLesson;
-          if (parsed && parsed.id) {
-            result[parsed.id] = parsed;
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[CuratedLessonService] Erro ao listar lições locais:', e);
+  const result: Record<string, HomologatedLesson> = { ...readLocalStorageLessons() };
+  for (const lesson of listRememberedLessons()) {
+    if (lesson?.id) result[lesson.id] = lesson;
   }
   return result;
 }
@@ -183,10 +215,8 @@ export function getLocalHomologatedList(): Record<string, HomologatedLesson> {
 let lastCloudFetchAt = 0;
 let lastCloudFetch: HomologatedLesson[] | null = null;
 
-/**
- * Baixa todas as lições homologadas da nuvem e replica no cache local.
- */
 export async function fetchAllHomologatedLessons(): Promise<HomologatedLesson[]> {
+  await hydrateLessonVault();
   const local = Object.values(getLocalHomologatedList());
   if (isQuotaExhausted() || typeof window === 'undefined') {
     return local;
@@ -211,6 +241,9 @@ export async function fetchAllHomologatedLessons(): Promise<HomologatedLesson[]>
     });
     lastCloudFetch = Array.from(byId.values());
     lastCloudFetchAt = Date.now();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('athena-lessons-restored', { detail: { count: lastCloudFetch.length } }));
+    }
     return lastCloudFetch;
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'homologated_lessons');

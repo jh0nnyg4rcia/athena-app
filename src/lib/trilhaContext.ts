@@ -22,14 +22,14 @@ function parseDay(text?: string): number | undefined {
 export function inferTrilhaContext(
   session?: Pick<ChatSession, 'trilhaDay' | 'trilhaMaterialIndex' | 'title'> | null,
   messages?: Message[],
-  msg?: Pick<Message, 'trilhaMaterialIndex' | 'content'> | null
+  msg?: Pick<Message, 'trilhaDay' | 'trilhaMaterialIndex' | 'content'> | null
 ): TrilhaContext {
-  let day = session?.trilhaDay;
+  let day = msg?.trilhaDay ?? session?.trilhaDay;
   if (day === undefined) day = parseDay(session?.title);
   if (day === undefined) day = parseDay(msg?.content);
   if (day === undefined) {
     for (const item of messages || []) {
-      day = parseDay(item.content);
+      day = item.trilhaDay ?? parseDay(item.content);
       if (day !== undefined) break;
     }
   }
@@ -47,6 +47,6 @@ export function inferTrilhaContext(
   return { day, part, total };
 }
 
-export function isTrilhaLesson(ctx: TrilhaContext, msg?: Pick<Message, 'trilhaMaterialIndex'> | null): boolean {
-  return ctx.day !== undefined || msg?.trilhaMaterialIndex !== undefined || ctx.total > 0;
+export function isTrilhaLesson(ctx: TrilhaContext, msg?: Pick<Message, 'trilhaDay' | 'trilhaMaterialIndex'> | null): boolean {
+  return ctx.day !== undefined || msg?.trilhaDay !== undefined || msg?.trilhaMaterialIndex !== undefined || ctx.total > 0;
 }
