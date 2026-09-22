@@ -54,16 +54,32 @@ const getApiUrl = (endpoint: string): string => {
   return `${base}${endpoint}`;
 };
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+async function getProxyIdToken(): Promise<string | undefined> {
   try {
     const { auth } = await import("../lib/firebase");
-    const token = await auth.currentUser?.getIdToken();
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
+    const jsToken = await auth.currentUser?.getIdToken();
+    if (jsToken) return jsToken;
   } catch {
-    /* sessão anônima / local */
+    /* SDK web indisponível */
+  }
+
+  if (!isNativeMobile()) return undefined;
+
+  try {
+    const { FirebaseAuthentication } = await import("@capacitor-firebase/authentication");
+    const native = await FirebaseAuthentication.getIdToken();
+    if (native?.token) return native.token;
+  } catch {
+    /* login local / sem Google no nativo */
+  }
+  return undefined;
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = await getProxyIdToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
