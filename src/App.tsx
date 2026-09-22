@@ -110,6 +110,7 @@ import { IncidenceChart } from './components/IncidenceChart';
 import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
+import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, keepObjectiveChallengeQuestions, sanitizeAthenaVoice } from './lib/athenaVoice';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -2981,13 +2982,7 @@ export default function App() {
               ...q,
               correctIndex: q.correctIndex !== undefined ? q.correctIndex : (q.correctAnswer !== undefined ? q.correctAnswer : 0)
             }));
-
-            // Para cursos de 1ª Fase (Objetiva), retira estritamente questões discursivas e orais
-            if (mentorshipPhase === 'objetiva') {
-              challenge.questions = challenge.questions.filter(
-                (q: any) => q.correctIndex !== -1 && q.correctIndex !== -2 && q.correctIndex >= 0
-              );
-            }
+            challenge.questions = keepObjectiveChallengeQuestions(challenge.questions);
           }
 
           rawContent = parts[0] + (afterTag.substring(lastBrace + 1));
@@ -3039,10 +3034,17 @@ export default function App() {
       blocks.push(tempContent);
     }
 
-    // Capture all generated blocks, but try to stay within 6-7 logical ones
-    const finalBlocks = blocks;
+    const finalBlocks = blocks.map((b) => sanitizeAthenaVoice(b));
+    if (challenge?.questions) {
+      challenge.questions = keepObjectiveChallengeQuestions(challenge.questions).map((q) => ({
+        ...q,
+        text: sanitizeAthenaVoice(q.text || ""),
+        explanation: sanitizeAthenaVoice(q.explanation || ""),
+        options: Array.isArray(q.options) ? q.options.map((o: string) => sanitizeAthenaVoice(String(o))) : q.options,
+      }));
+    }
 
-    return { content: rawContent, blocks: finalBlocks, challenge, editalData };
+    return { content: sanitizeAthenaVoice(rawContent), blocks: finalBlocks, challenge, editalData };
   };
 
   const scrollToBottom = () => {
@@ -3222,7 +3224,7 @@ export default function App() {
         parts: [{ text: m.content || "" }]
       }));
 
-      const audienceName = dayNum !== undefined ? "Futuro(a) Magistrado(a)" : (user?.displayName || "Mestre");
+      const audienceName = ATHENA_AUDIENCE_TITLE;
       const { text: responseText, model: usedModel } = await askATHENA(userMessage, history, audienceName, currentAttachedFile, mentorshipStyle, resolvedPhase);
       const parsed = parseATHENAResponse(responseText);
 
@@ -3603,7 +3605,7 @@ ${matList}
     let prep = '';
     if (style === 'automatico') {
       prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (Magistratura, Ministério Público, Defensoria e Delegado) indicam que o estudo deste tema (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
+Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (${ATHENA_CAREERS_LABEL}) indicam que o estudo deste tema (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
 Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
 - Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
 - Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
@@ -3619,7 +3621,7 @@ Adote rigores condizentes com estes dados, concentrando a explanação guiada ne
 `;
     }
     
-    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e questões de provas anteriores de Magistratura/Ministério Público. Siga o fluxo de estudos em blocos!`;
+    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e em questões objetivas de ${ATHENA_CAREERS_LABEL}. Siga o fluxo de estudos em blocos!`;
   };
 
   const getTrilhaDayDiscursiveMessage = (dayNum: number, materias: { nome: string; conteudo: string }[], semana: number) => {
@@ -3656,7 +3658,7 @@ Sua conduta como Presidente da Mesa Examinadora:
     let prep = '';
     if (style === 'automatico') {
       prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (Magistratura, Ministério Público, Defensoria e Delegado) indicam que o estudo de "${currentMat.nome}" (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
+Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (${ATHENA_CAREERS_LABEL}) indicam que o estudo de "${currentMat.nome}" (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
 Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
 - Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
 - Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
@@ -3672,27 +3674,13 @@ Adote rigores condizentes com estes dados, concentrando a explanação guiada ne
 `;
     }
     
-    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
-    
-    // Eventual automatic trigger of discursive or oral challenges during the 100 days flow
-    let hybridDirective = "";
-    if (dayNum % 10 === 5 || dayNum % 5 === 0) {
-      hybridDirective = `\n\n[ALERTA DE DESAFIO ESPECIAL - QUESTÃO DISCURSIVA (2ª FASE)]
-Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de Desafio Especial Athena de 2ª Fase!
-No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas de múltipla escolha normais, elabore obrigatoriamente uma única QUESTÃO DISCURSIVA (2ª Fase) densa do tema estudado hoje para treinar o aluno, instruindo-o a redigir sua resposta fundamentada por escrito. Aguarde a submissão de sua resposta para proferir uma correção analítica rigorosa com nota final de banca.`;
-    } else if (dayNum % 10 === 3 || dayNum % 7 === 0) {
-      hybridDirective = `\n\n[ALERTA DE DESAFIO ESPECIAL - SIMULADO EXAME ORAL (3ª FASE)]
-Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de Desafio Especial Athena de Exame Oral da 3ª Fase!
-No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas normais, apresente uma única ARGUIÇÃO ORAL (Pergunta de Exame Oral) formal de banca examinadora, instruindo o aluno a utilizar gravação de áudio ou digitação por ditado de voz para responder verbalmente sob pressão à banca. Aguarde a sustentação para proferir nota oficial de oratória jurídica.`;
-    }
-
     let extraSource = `\n\n[DIRETRIZES DA BASE DE CONHECIMENTO E PERTINÊNCIA TEMÁTICA ABSOLUTA ATHENA]:
 1. BASE SOBERANA E CONFINAMENTO TEMÁTICO RESTRITO:
    - A sua base soberana de verdade é EXCLUSIVAMENTE o seguinte recorte: ${currentMat.nome} (${currentMat.conteudo}).
    - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo dos 6 blocos deve nascer e se esgotar no exame deste recorte!
 
 2. DIRETRIZES BLOCO A BLOCO (RIGOR ESTRITO):
-   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE uma saudação institucional e universal de mentoria de alto rendimento (ex: "Olá, Futuro(a) Magistrado(a)!", "Seja bem-vindo(a), Candidato(a) de Elite!"). NUNCA use nomes individuais ou apelidos pessoais nesta saudação, pois este conteúdo será homologado e compartilhado com todos os alunos da mentoria. Apresente o Raio-X e a relevância prática deste recorte exato (${currentMat.conteudo}) para concursos de ponta (Magistratura, MP, Defensoria e Delegado).
+   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE a saudação institucional "Olá, ${ATHENA_AUDIENCE_TITLE}!". NUNCA diga Futuro Magistrado, Futuro Juiz ou nome pessoal, pois o conteúdo é homologado para todas as carreiras. Apresente o Raio-X deste recorte (${currentMat.conteudo}) para ${ATHENA_CAREERS_LABEL}. Proibido citar certame nominado (TJSP, MPRS, TRF4, DPU 2024 etc.). Proibido gerar tabelas Markdown.
    
    - [BLOCK_2] (⚖️ Letra da Lei Decodificada): Decodifique, esquematize e disseque com suas próprias palavras e rigor analítico CADA UM dos artigos e princípios compreendidos no intervalo ${currentMat.conteudo}. Destaque núcleos dogmáticos, prazos, exceções legais, postulados normativos e pegadinhas clássicas de banca examinadora, evitando transcrição mecânica literal de apostilas comerciais.
    
@@ -3711,11 +3699,12 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
    - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase) estritamente circunscrita aos institutos disciplinados em ${currentMat.conteudo}. Traga divergências doutrinárias reais e exemplos práticos da atividade forense que ilustrem exatamente os artigos estudados hoje.
    
    - [BLOCK_5] (🎯 Desafio ATHENA - Questões Estritamente Temáticas):
-     * REGRA DE PERTINÊNCIA DAS QUESTÕES: 100% das questões geradas (objetivas ou discursiva/oral) DEVEM ter como objeto de cobrança EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
+     * SOMENTE questões OBJETIVAS de múltipla escolha (4 ou 5 alternativas, correctIndex 0-4). É PROIBIDO discursiva, subjetiva ou prova oral.
+     * REGRA DE PERTINÊNCIA: 100% das questões DEVEM cobrar EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
      * É TERMINANTEMENTE PROIBIDO formular questões sobre artigos ou tópicos de fora deste recorte.
      * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou o entendimento consolidado deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais, sem inventar números de processos fictícios.
    
-   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).${hybridDirective}`;
+   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).`;
 
     const grounding = getGroundingForTrilhaPart(dayNum, currentMat.nome, currentMat.conteudo);
     if (grounding.hasGrounding) {
@@ -3749,7 +3738,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     try {
       console.log(`[ATHENA Pre-fetch] Disparando em background geração da Parte ${nextMatIdx + 1} de ${dayItem.materias.length} (Dia ${dayNum} - ${nextMat.nome})...`);
-      const { text, model } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mStyle, resolvedPhase as any);
+      const { text, model } = await askATHENA(nextMsg, [], ATHENA_AUDIENCE_TITLE, undefined, mStyle, resolvedPhase as any);
       setCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase, {
         text,
         model,
@@ -4114,7 +4103,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               try {
                 // Cada parte da trilha possui comando autocontido com escopo exato.
                 // Usamos histórico limpo ([]), idêntico ao prefetch, para máxima agilidade e sem poluição de contexto.
-                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
+                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, resolvedPhase);
                 const parsed = parseATHENAResponse(responseText);
                 const botMessage: Message = {
                   role: 'model',
@@ -4283,10 +4272,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     for (const name of namesToSanitize) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), '$1, Futuro(a) Magistrado(a)');
-      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), 'Futuro(a) Magistrado(a)');
+      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), `$1, ${ATHENA_AUDIENCE_TITLE}`);
+      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), ATHENA_AUDIENCE_TITLE);
     }
-    return sanitized;
+    return sanitizeAthenaVoice(sanitized);
   };
 
   const handleCeoApproveLesson = async (targetMsgIdx?: number) => {
@@ -4387,7 +4376,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setIsLoading(true);
     const msg = getTrilhaDayPartitionMessage(day, dayItem.materias, part, dayItem.semana, mentorshipStyle);
     try {
-      const { text, model } = await askATHENA(msg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, mentorshipPhase);
+      const { text, model } = await askATHENA(msg, [], ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, mentorshipPhase);
       const parsed = parseATHENAResponse(text);
       const botMessage: Message = {
         role: 'model',
@@ -4555,7 +4544,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             } else if (session?.trilhaSessionType === 'oral') {
               resolvedPhase = 'oral';
             }
-            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
+            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, resolvedPhase);
             const parsed = parseATHENAResponse(responseText);
             const botMessage: Message = {
               role: 'model',
