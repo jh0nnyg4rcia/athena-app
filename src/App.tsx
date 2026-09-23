@@ -1773,7 +1773,7 @@ export default function App() {
   const [registerName, setRegisterName] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
-  const [registeredSuccess, setRegisteredSuccess] = useState<{ fullName: string; email: string; emailSent: boolean; chosePassword: boolean } | null>(null);
+  const [registeredSuccess, setRegisteredSuccess] = useState<{ fullName: string; email: string; emailSent: boolean; chosePassword: boolean; delivery: 'password' | 'link' | 'none' } | null>(null);
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotInput, setForgotInput] = useState('');
   const [forgotSent, setForgotSent] = useState(false);
@@ -1795,6 +1795,7 @@ export default function App() {
         fullName: registerName.trim(),
         email: registerEmail.trim().toLowerCase(),
         emailSent: result.emailSent,
+        delivery: result.delivery,
         chosePassword: registerPassword.trim().length > 0
       });
       setRegisterPassword('');
@@ -5635,7 +5636,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                       <form onSubmit={handleRegisterStudent} className="space-y-4">
                         <div className="text-left space-y-1">
                           <h3 className="text-xs font-serif font-bold text-slate-200">Novo Cadastro</h3>
-                          <p className="text-[10px] text-slate-400">Nome, e-mail e, se quiser, uma senha. Se deixar a senha em branco, enviamos uma senha temporária para o e-mail cadastrado.</p>
+                          <p className="text-[10px] text-slate-400">Nome, e-mail e, se quiser, uma senha. Se deixar a senha em branco, enviamos um e-mail para você criar a senha de acesso.</p>
                         </div>
 
                         <div className="space-y-3">
@@ -5757,9 +5758,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                           Olá, <strong>{registeredSuccess.fullName}</strong>. A conta de {registeredSuccess.email} foi criada.
                         </p>
                         <p className="text-[11px] text-slate-400 leading-relaxed">
-                          {registeredSuccess.emailSent
-                            ? 'Enviamos a senha para esse e-mail. Use o que chegou na mensagem para entrar. A senha não aparece aqui.'
-                            : 'Entre com a senha que você escolheu. O e-mail de confirmação não foi enviado.'}
+                          {registeredSuccess.delivery === 'link'
+                            ? 'Enviamos um e-mail para você criar a senha. Abra a mensagem e defina a senha antes de entrar.'
+                            : registeredSuccess.delivery === 'password'
+                              ? 'Enviamos a senha para esse e-mail. Use o que chegou na mensagem para entrar.'
+                              : 'Entre com a senha que você escolheu. O e-mail de confirmação não foi enviado.'}
                         </p>
                       </div>
 

@@ -158,7 +158,7 @@ export async function registerEmailAccount(input: {
   name: unknown;
   email: unknown;
   password?: unknown;
-}): Promise<{ emailSent: boolean }> {
+}): Promise<{ emailSent: boolean; delivery: 'password' | 'link' | 'none' }> {
   const email = normalizeEmail(input.email);
   const name = sanitizeDisplayName(input.name);
   if (!email || !name) throw new AuthFlowError('Dados de cadastro inválidos.');
@@ -172,21 +172,22 @@ export async function registerEmailAccount(input: {
   const created = await createAccount(email, password, name);
 
   try {
-    await storePasswordHash(created.uid, email, password);
-    if (!canSendAuthMail()) {
-      if (!provided) {
-        await deleteAccount(created.uid, created.idToken);
-        throw new AuthFlowError('Não foi possível enviar a senha por e-mail. Tente de novo mais tarde.');
-      }
-      return { emailSent: false };
+    if (canSendAuthMail()) {
+      await storePasswordHash(created.uid, email, password);
+      await sendAccessEmail({ kind: 'welcome', name, email, password });
+      return { emailSent: true, delivery: 'password' };
     }
-    await sendAccessEmail({ kind: 'welcome', name, email, password });
-    return { emailSent: true };
+    if (!provided) {
+      await identityPost('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email });
+      return { emailSent: true, delivery: 'link' };
+    }
+    await storePasswordHash(created.uid, email, password);
+    return { emailSent: false, delivery: 'none' };
   } catch (error) {
-    if (error instanceof AuthFlowError) throw error;
     if (!provided) await deleteAccount(created.uid, created.idToken);
+    if (error instanceof AuthFlowError && provided) throw error;
     if (!provided) throw new AuthFlowError('Não foi possível enviar a senha por e-mail. Tente de novo mais tarde.');
-    return { emailSent: false };
+    return { emailSent: false, delivery: 'none' };
   }
 }
 

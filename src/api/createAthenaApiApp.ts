@@ -168,7 +168,7 @@ export function createAthenaApiApp(): express.Express {
         email: req.body?.email,
         password: req.body?.password
       });
-      res.json({ ok: true, emailSent: result.emailSent });
+      res.json({ ok: true, emailSent: result.emailSent, delivery: result.delivery });
     } catch (error) {
       res.status(400).json({ error: publicAuthMessage(error) });
     }

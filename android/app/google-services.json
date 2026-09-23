@@ -1,0 +1,71 @@
+{
+  "project_info": {
+    "project_number": "217533514119",
+    "project_id": "gen-lang-client-0822763072",
+    "storage_bucket": "gen-lang-client-0822763072.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:217533514119:android:24a2d0a85b0cf2f25c9322",
+        "android_client_info": {
+          "package_name": "com.athena.mentoria"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "217533514119-8dllaq0cf6qgqmnojl5ca0pqon8gpal0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.athena.mentoria",
+            "certificate_hash": "00268378147a422217329f99f9599dbd64437043"
+          }
+        },
+        {
+          "client_id": "217533514119-8pqval4hlr1onrcudlts2iudb3mrd5el.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.athena.mentoria",
+            "certificate_hash": "c6afc1c08866dfca09365f669764f75670b3e1af"
+          }
+        },
+        {
+          "client_id": "217533514119-dqegnhd70ms48fqq4fe8lqi0h04nopo1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.athena.mentoria",
+            "certificate_hash": "19122eff92a93f3bf161ef885d9df89fc6276cda"
+          }
+        },
+        {
+          "client_id": "217533514119-v60efsege211h0k13mr8f2s70qjsqg81.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.athena.mentoria",
+            "certificate_hash": "1bdd4840d9c16f3549f7c509b168ceea6d128c5c"
+          }
+        },
+        {
+          "client_id": "217533514119-cdmtnut1gu615caesencub1rk08cl0nk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCIUXXpMaUbTn4o1f3T0Mu-QTTz8bpBMe8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "217533514119-6o2hsqc8s14nj7sn4kc7hf00qu1iefcc.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

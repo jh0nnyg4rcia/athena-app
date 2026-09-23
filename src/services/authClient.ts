@@ -87,7 +87,7 @@ async function confirmServerSession(user: User, name?: string): Promise<void> {
   await syncProfile(user, name);
 }
 
-export async function registerAccount(input: { name: string; email: string; password?: string }): Promise<{ emailSent: boolean }> {
+export async function registerAccount(input: { name: string; email: string; password?: string }): Promise<{ emailSent: boolean; delivery: 'password' | 'link' | 'none' }> {
   const email = normalizeEmail(input.email);
   const name = sanitizeDisplayName(input.name);
   if (!email || !name) throw new Error('Dados de cadastro inválidos.');
@@ -95,11 +95,13 @@ export async function registerAccount(input: { name: string; email: string; pass
     const problem = validatePassword(input.password, email);
     if (problem) throw new Error(problem);
   }
-  return postAuth('/api/auth/register', {
+  const result = await postAuth<{ emailSent?: boolean; delivery?: 'password' | 'link' | 'none' }>('/api/auth/register', {
     name,
     email,
     password: input.password || ''
   });
+  const delivery = result.delivery === 'password' || result.delivery === 'link' ? result.delivery : 'none';
+  return { emailSent: Boolean(result.emailSent), delivery };
 }
 
 export async function loginWithEmail(emailRaw: string, password: string): Promise<User> {

@@ -41,7 +41,6 @@ android/captures/
 docs/download/*.apk
 
 # Firebase / Google client files (inject via CI or local copy)
-**/google-services.json
 **/GoogleService-Info.plist
 
 # Firebase Cloud Functions build output
