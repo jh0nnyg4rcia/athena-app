@@ -61,7 +61,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer, isNativeMobile, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
+import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
@@ -74,7 +74,8 @@ import {
   getLocalHomologatedLesson, 
   getLessonDocId,
   syncOfficialCatalog,
-  isOfficialPart
+  isOfficialPart,
+  ensureObjectiveChallenge
 } from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -110,7 +111,7 @@ import { IncidenceChart } from './components/IncidenceChart';
 import { cacheArticle, cacheQuestion, getCachedArticles } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
-import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, keepObjectiveChallengeQuestions, sanitizeAthenaVoice } from './lib/athenaVoice';
+import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, sanitizeAthenaVoice } from './lib/athenaVoice';
 import {
   harvestCompressedReviews,
   harvestCompressedReviewsLocal,
@@ -122,6 +123,14 @@ import {
   persistReviewFromMessage
 } from './lib/compressedReviews';
 import { inferTrilhaContext, isTrilhaLesson } from './lib/trilhaContext';
+import {
+  embedChallengeInContent,
+  extractChallengeFromText,
+  findChallengeBlockIndex,
+  normalizeObjectiveChallenge,
+  parseChallengeModelOutput,
+  resolveDisplayedChallenge
+} from './lib/objectiveChallenge';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -1202,6 +1211,26 @@ const ChatMessage = memo(({
   
   const isInstruction = getIsInstructionMessage(msg);
 
+  const officialDay = msg.trilhaDay ?? trilhaDay;
+  const officialPart = msg.trilhaMaterialIndex ?? trilhaMaterialIndex;
+  const officialLesson =
+    homologatedLessonState &&
+    officialDay !== undefined &&
+    officialPart !== undefined &&
+    homologatedLessonState.day === officialDay &&
+    homologatedLessonState.part === officialPart
+      ? homologatedLessonState
+      : (officialDay !== undefined && officialPart !== undefined
+        ? getLocalHomologatedLesson(officialDay, officialPart)
+        : null);
+  const displayedChallenge = resolveDisplayedChallenge({
+    messageChallenge: msg.challenge,
+    messageContent: msg.content,
+    officialChallenge: officialLesson?.challenge,
+    officialContent: officialLesson?.content
+  });
+  const challengeBlockIdx = findChallengeBlockIndex(msg.blocks);
+
   if (isInstruction) return null;
   
   return (
@@ -1303,9 +1332,9 @@ const ChatMessage = memo(({
                     </div>
                   )}
                   
-                  {blockIdx === 4 && msg.challenge && (
+                  {blockIdx === challengeBlockIdx && displayedChallenge && (
                     <div className="mt-8">
-                      {msg.challenge.questions.map((q, qIdx) => (
+                      {displayedChallenge.questions.map((q, qIdx) => (
                         <QuizQuestion 
                           key={qIdx} 
                           question={q} 
@@ -1368,6 +1397,11 @@ const ChatMessage = memo(({
                         />
                       ))}
                     </div>
+                  )}
+                  {blockIdx === challengeBlockIdx && isCEO && !displayedChallenge && (
+                    <p className="mt-4 text-xs text-amber-200/90">
+                      Esta parte está no catálogo sem questões objetivas. Use “Regerar questões” para refazer só este bloco.
+                    </p>
                   )}
                 </motion.div>
               ))}
@@ -2145,6 +2179,7 @@ export default function App() {
   // Estados de Curadoria e Homologação do CEO
   const [homologatedLessonState, setHomologatedLessonState] = useState<HomologatedLesson | null>(null);
   const [isSavingHomologation, setIsSavingHomologation] = useState(false);
+  const [isRegeneratingQuestions, setIsRegeneratingQuestions] = useState(false);
   const [isEditingLesson, setIsEditingLesson] = useState(false);
   const [editingLessonContent, setEditingLessonContent] = useState('');
   const [editingLessonIndex, setEditingLessonIndex] = useState<number | undefined>(undefined);
@@ -3078,32 +3113,13 @@ export default function App() {
       }
     }
 
-    // Extract Challenge JSON
-    if (rawContent.includes(challengeKey)) {
-      const parts = rawContent.split(challengeKey);
-      const afterTag = parts[1].trim();
-      
-      try {
-        const firstBrace = afterTag.indexOf("{");
-        const lastBrace = afterTag.lastIndexOf("}");
-        
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          const challengeJson = afterTag.substring(firstBrace, lastBrace + 1);
-          challenge = JSON.parse(challengeJson);
-          
-          if (challenge && Array.isArray(challenge.questions)) {
-            challenge.questions = challenge.questions.map((q: any) => ({
-              ...q,
-              correctIndex: q.correctIndex !== undefined ? q.correctIndex : (q.correctAnswer !== undefined ? q.correctAnswer : 0)
-            }));
-            challenge.questions = keepObjectiveChallengeQuestions(challenge.questions);
-          }
-
-          rawContent = parts[0] + (afterTag.substring(lastBrace + 1));
-        }
-      } catch (e) {
-        console.error("Failed to parse challenge JSON:", e);
-      }
+    // Extract Challenge JSON sem engolir o [BLOCK_6] que vem depois
+    const extractedChallenge = extractChallengeFromText(rawContent);
+    if (extractedChallenge.challenge) {
+      challenge = extractedChallenge.challenge;
+      rawContent = extractedChallenge.content;
+    } else if (rawContent.includes(challengeKey)) {
+      console.error("Failed to parse challenge JSON.");
     }
 
     // Split by named [BLOCK_1]..[BLOCK_6] so um preâmbulo extra não desloca a revisão
@@ -3138,12 +3154,14 @@ export default function App() {
 
     const finalBlocks = blocks.map((b) => sanitizeAthenaVoice(b));
     if (challenge?.questions) {
-      challenge.questions = keepObjectiveChallengeQuestions(challenge.questions).map((q) => ({
-        ...q,
-        text: sanitizeAthenaVoice(q.text || ""),
-        explanation: sanitizeAthenaVoice(q.explanation || ""),
-        options: Array.isArray(q.options) ? q.options.map((o: string) => sanitizeAthenaVoice(String(o))) : q.options,
-      }));
+      challenge = normalizeObjectiveChallenge({
+        questions: challenge.questions.map((q) => ({
+          ...q,
+          text: sanitizeAthenaVoice(q.text || ""),
+          explanation: sanitizeAthenaVoice(q.explanation || ""),
+          options: Array.isArray(q.options) ? q.options.map((o: string) => sanitizeAthenaVoice(String(o))) : q.options,
+        }))
+      }) || challenge;
     }
 
     return { content: sanitizeAthenaVoice(rawContent), blocks: finalBlocks, challenge, editalData };
@@ -3946,7 +3964,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       if (homologated && homologated.content) {
         console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte 1! Carregamento imediato.`);
         const parsed = parseATHENAResponse(homologated.content);
-        const resolvedChallenge = homologated.challenge || parsed.challenge;
+        const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
         const botMessage: Message = {
           role: 'model',
           content: parsed.content,
@@ -4145,7 +4163,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               if (homologated && homologated.content) {
                 console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte ${nextMatIdx + 1}! Carregamento imediato.`);
                 const parsed = parseATHENAResponse(homologated.content);
-                const resolvedChallenge = homologated.challenge || parsed.challenge;
+                const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
                 const botMessage: Message = {
                   role: 'model',
                   content: parsed.content,
@@ -4496,13 +4514,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       let sanitizedContent = sanitizeHomologatedContent(targetMsg.content, user?.displayName);
       const sanitizedBlocks = targetMsg.blocks?.map(b => sanitizeHomologatedContent(b, user?.displayName));
 
-      // Preservação essencial das questões e do bloco de desafio para que nunca sumam
-      const lessonChallenge = targetMsg.challenge || null;
-      if (lessonChallenge && !sanitizedContent.includes('[ATHENA_CHALLENGE]')) {
-        sanitizedContent = sanitizedContent.trim() + '\n\n[ATHENA_CHALLENGE]\n' + JSON.stringify(lessonChallenge, null, 2);
+      const lessonChallenge = normalizeObjectiveChallenge(targetMsg.challenge)
+        || extractChallengeFromText(sanitizedContent).challenge
+        || null;
+      if (lessonChallenge) {
+        sanitizedContent = embedChallengeInContent(sanitizedContent, lessonChallenge);
       }
 
-      const lesson: HomologatedLesson = {
+      const lesson = ensureObjectiveChallenge({
         id: getLessonDocId(day, part),
         day,
         part,
@@ -4517,7 +4536,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         modelUsed: targetMsg.modelName || 'gemini-3.8-flash',
         version: 1,
         review: extractReviewBlock(sanitizedContent, sanitizedBlocks) || undefined
-      };
+      });
+      const republished = parseATHENAResponse(lesson.content);
       const saved = await saveHomologatedLesson(lesson);
       setHomologatedLessonState(lesson);
       if (user) {
@@ -4534,14 +4554,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         }
       }
 
-      // Também sincroniza a mensagem da sessão com a versão limpa e universal
       const updatedMessages = (messages || []).map((m, i) => {
         if ((targetMsgIdx !== undefined && i === targetMsgIdx) || (targetMsgIdx === undefined && m === targetMsg)) {
           return {
             ...m,
-            content: sanitizedContent,
-            blocks: sanitizedBlocks,
-            challenge: lessonChallenge || m.challenge
+            content: republished.content,
+            blocks: republished.blocks,
+            challenge: lesson.challenge || republished.challenge || m.challenge
           };
         }
         return m;
@@ -4553,9 +4572,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         trilhaMaterialIndex: part
       }, currentSessionId);
 
+      const quizCount = lesson.challenge?.questions?.length || 0;
       setHomologationSuccessBanner(
         saved.cloud
-          ? `Dia ${day} · Parte ${part + 1} publicado no catálogo oficial. Essa parte não se perde na atualização e vale para todos os alunos.`
+          ? (quizCount
+            ? `Dia ${day} · Parte ${part + 1} publicado no catálogo oficial com ${quizCount} questões objetivas. Essa parte vale para todos os alunos.`
+            : `Dia ${day} · Parte ${part + 1} publicado sem questões objetivas. Use Regerar questões para refazer só esse bloco.`)
           : `Dia ${day} · Parte ${part + 1} ficou só neste aparelho. O catálogo oficial recusou a gravação${saved.error ? `: ${saved.error}` : ''}. Toque em Aprovar e Salvar de novo.`
       );
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
@@ -4623,6 +4645,95 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       alert("Erro ao regerar: " + (err.message || String(err)));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCeoRegenerateQuestions = async () => {
+    const activeSess = sessions.find(s => s.id === currentSessionId);
+    const targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
+    const trilha = inferTrilhaContext(activeSess, messages, targetMsg);
+    if (!targetMsg || trilha.day === undefined) {
+      alert('Abra a parte da trilha antes de regerar as questões.');
+      return;
+    }
+    const day = trilha.day;
+    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (trilha.part ?? 0);
+    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
+    const subject = (dayItem?.materias && dayItem.materias[part])
+      ? dayItem.materias[part].nome
+      : (targetMsg.subject || activeSess?.guidedSubject || 'Direito');
+    const outline = (targetMsg.blocks || [])
+      .map((block, index) => {
+        if (/desafio\s+athena/i.test(block) && index >= 4) return '';
+        return `[BLOCK_${index + 1}] ${block.replace(/\s+/g, ' ').slice(0, 900)}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+    if (!confirm(`Regerar somente as questões objetivas da Parte ${part + 1} do Dia ${day}? O texto dos outros blocos permanece.`)) return;
+
+    setIsRegeneratingQuestions(true);
+    try {
+      const { text, model } = await regenerateObjectiveChallenge(
+        `Dia ${day}, parte ${part + 1}. Matéria: ${subject}.\nGere 10 questões objetivas inéditas somente sobre este recorte. Não reescreva a aula.\n\n${outline}`
+      );
+      const quiz = parseChallengeModelOutput(text);
+      if (!quiz || quiz.questions.length < 8) {
+        throw new Error('A IA não devolveu um bloco objetivo utilizável. Tente de novo.');
+      }
+      const baseContent = targetMsg.content?.includes('[BLOCK_1]')
+        ? targetMsg.content
+        : (targetMsg.blocks || []).map((block, index) => `[BLOCK_${index + 1}]\n${block}`).join('\n\n');
+      const mergedContent = embedChallengeInContent(baseContent, quiz);
+      const parsed = parseATHENAResponse(mergedContent);
+      const challengeIndex = findChallengeBlockIndex(parsed.blocks);
+      const lesson = ensureObjectiveChallenge({
+        id: getLessonDocId(day, part),
+        day,
+        part,
+        subject,
+        topic: targetMsg.subject || subject,
+        content: mergedContent,
+        blocks: parsed.blocks,
+        challenge: quiz,
+        status: 'approved',
+        approvedBy: 'jhonny.spider@gmail.com',
+        approvedAt: Date.now(),
+        modelUsed: model,
+        version: 1,
+        review: extractReviewBlock(mergedContent, parsed.blocks) || undefined
+      });
+      const saved = await saveHomologatedLesson(lesson);
+      setHomologatedLessonState(lesson);
+      const updatedMessages = (messages || []).map((m) => {
+        if (m !== targetMsg) return m;
+        return {
+          ...m,
+          content: parsed.content,
+          blocks: parsed.blocks,
+          challenge: lesson.challenge || quiz,
+          currentBlockIndex: Math.max(m.currentBlockIndex ?? 0, challengeIndex),
+          modelName: `${model} (questões regeradas)`,
+          trilhaDay: day,
+          trilhaMaterialIndex: part
+        };
+      });
+      setMessages(updatedMessages);
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: day,
+        trilhaMaterialIndex: part
+      }, currentSessionId);
+      setHomologationSuccessBanner(
+        saved.cloud
+          ? `Questões da Parte ${part + 1} do Dia ${day} atualizadas (${lesson.challenge?.questions.length || quiz.questions.length}). O restante da aula foi mantido.`
+          : `As questões novas ficaram só neste aparelho${saved.error ? `: ${saved.error}` : ''}.`
+      );
+      setTimeout(() => setHomologationSuccessBanner(null), 6000);
+    } catch (err: any) {
+      console.error('Erro ao regerar questões:', err);
+      alert(err?.message || 'Não foi possível regerar só as questões.');
+    } finally {
+      setIsRegeneratingQuestions(false);
     }
   };
 
@@ -4729,7 +4840,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
             if (homologated && homologated.content) {
               const parsed = parseATHENAResponse(homologated.content);
-              const resolvedChallenge = homologated.challenge || parsed.challenge;
+              const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
               const botMessage: Message = {
                 role: 'model',
                 content: parsed.content,
@@ -7199,10 +7310,20 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
 
                                   <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
                                     <button
-                                      onClick={handleCeoRegenerateLesson}
-                                      disabled={isLoading}
+                                      onClick={handleCeoRegenerateQuestions}
+                                      disabled={isLoading || isRegeneratingQuestions}
                                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Regerar lição do zero com a IA Gemini"
+                                      title="Regerar somente as questões objetivas e manter o resto da aula"
+                                    >
+                                      <Target size={14} className={cn(isRegeneratingQuestions && "animate-pulse")} />
+                                      {isRegeneratingQuestions ? 'Gerando questões...' : 'Regerar questões'}
+                                    </button>
+
+                                    <button
+                                      onClick={handleCeoRegenerateLesson}
+                                      disabled={isLoading || isRegeneratingQuestions}
+                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                      title="Regerar a aula inteira com a IA Gemini"
                                     >
                                       <RotateCw size={14} className={cn(isLoading && "animate-spin")} />
                                       Regerar IA

@@ -3,6 +3,11 @@ import { db, handleFirestoreError, OperationType, cleanData, isQuotaExhausted } 
 import { HomologatedLesson } from '../types';
 import homologatedSeedsData from '../data/homologatedSeeds.json';
 import {
+  embedChallengeInContent,
+  extractChallengeFromText,
+  normalizeObjectiveChallenge
+} from '../lib/objectiveChallenge';
+import {
   deleteVaultLesson,
   getRememberedLesson,
   hydrateLessonVault,
@@ -167,7 +172,7 @@ export async function getHomologatedLesson(day: number, part: number): Promise<H
   try {
     const snap = await getDoc(doc(db, 'homologated_lessons', docId));
     if (snap.exists()) {
-      const data = normalizeLesson(docId, snap.data() as HomologatedLesson);
+      const data = ensureObjectiveChallenge(normalizeLesson(docId, snap.data() as HomologatedLesson));
       if (data.content || data.blocks?.length) {
         setLocalHomologatedLesson(data);
         return data;
@@ -185,6 +190,27 @@ function normalizeLesson(docId: string, raw: HomologatedLesson): HomologatedLess
     ...raw,
     id: raw.id || docId,
     status: raw.status || 'approved'
+  };
+}
+
+function challengeOf(lesson?: HomologatedLesson | null) {
+  if (!lesson) return undefined;
+  return normalizeObjectiveChallenge(lesson.challenge) || extractChallengeFromText(lesson.content || '').challenge;
+}
+
+/**
+ * A publicação nova não pode apagar as questões objetivas já homologadas.
+ * Se o texto recém-salvo veio sem o JSON do desafio, reaproveita o desafio anterior ou a semente.
+ */
+export function ensureObjectiveChallenge(lesson: HomologatedLesson): HomologatedLesson {
+  const own = challengeOf(lesson);
+  const seed = challengeOf(staticSeeds[lesson.id]);
+  const quiz = own || seed;
+  if (!quiz) return lesson;
+  return {
+    ...lesson,
+    challenge: quiz,
+    content: embedChallengeInContent(lesson.content, quiz)
   };
 }
 
@@ -206,12 +232,12 @@ function compactForFirestore(lesson: HomologatedLesson): HomologatedLesson {
   if (lesson.challenge) payload.challenge = lesson.challenge;
 
   let encoded = JSON.stringify(cleanData(payload));
-  if (encoded.length > FIRESTORE_SAFE_CHARS && payload.challenge) {
-    delete payload.challenge;
-    encoded = JSON.stringify(cleanData(payload));
-  }
   if (encoded.length > FIRESTORE_SAFE_CHARS) {
     payload.content = payload.content.slice(0, 850000);
+    encoded = JSON.stringify(cleanData(payload));
+  }
+  if (encoded.length > FIRESTORE_SAFE_CHARS && payload.challenge) {
+    delete payload.challenge;
   }
   return payload;
 }
@@ -253,6 +279,7 @@ async function writeFirestoreWithRetry(lesson: HomologatedLesson): Promise<void>
  * sem essa gravação, a atualização do app volta só para as sementes dos dias 1 a 3.
  */
 export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<LessonSaveResult> {
+  lesson = ensureObjectiveChallenge(lesson);
   setLocalHomologatedLesson(lesson);
 
   if (typeof window !== 'undefined') {

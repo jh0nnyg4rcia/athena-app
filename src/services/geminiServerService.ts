@@ -426,6 +426,46 @@ export async function askATHENA(
   throw lastError || new Error("ATHENA não conseguiu obter resposta de nenhum modelo disponível.");
 }
 
+/**
+ * Gera só o JSON do Desafio ATHENA. Não reescreve os blocos 1–4 nem a revisão.
+ */
+export async function generateObjectiveChallenge(brief: string): Promise<{ text: string; model: string }> {
+  const clipped = (brief || '').slice(0, 12000);
+  const system = `Você elabora somente o Desafio ATHENA.
+Responda APENAS com JSON válido neste formato, sem markdown e sem texto fora do JSON:
+{"questions":[{"text":"...","options":["A","B","C","D"],"correctIndex":0,"explanation":"..."}]}
+Regras:
+- Mínimo de 10 questões objetivas de múltipla escolha.
+- 4 ou 5 alternativas em options.
+- correctIndex inteiro de 0 a 4.
+- Proibido questão discursiva, peça, caso para redação, arguição oral e correctIndex negativo.
+- As questões devem cobrar somente o recorte jurídico descrito.
+- Proibido citar certame nominado (TJSP, MPRS, TRF, DPU, CESPE, VUNESP, FGV, Cebraspe).
+- Proibido tabela markdown.`;
+
+  const models = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
+  let lastError: unknown = null;
+  for (const model of models) {
+    try {
+      const response = await getAI().models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: clipped }] }],
+        config: {
+          temperature: 0.2,
+          systemInstruction: system,
+          responseMimeType: 'application/json'
+        }
+      });
+      const text = (response?.text || '').trim();
+      if (text) return { text, model };
+    } catch (error) {
+      lastError = error;
+      console.warn(`[ATHENA] Falha ao gerar só o desafio em ${model}:`, (error as Error)?.message || error);
+    }
+  }
+  throw lastError || new Error('ATHENA não conseguiu gerar o bloco de questões.');
+}
+
 export async function evaluateAnswer(
   questionText: string,
   userAnswer: string,

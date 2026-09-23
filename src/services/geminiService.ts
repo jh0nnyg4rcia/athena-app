@@ -184,6 +184,19 @@ export async function askATHENA(
   return { text, model: data.model || getSelectedModel() };
 }
 
+export async function regenerateObjectiveChallenge(brief: string): Promise<AthenaResult> {
+  const data = await fetchAthenaApi<{ responseText?: string; model?: string }>(
+    "/api/regenerate-challenge",
+    { brief },
+    90000
+  );
+  const text = (data.responseText || "").trim();
+  if (!text) {
+    throw new Error("O proxy ATHENA retornou o bloco de questões vazio.");
+  }
+  return { text, model: data.model || getSelectedModel() };
+}
+
 export async function evaluateAnswer(
   questionText: string,
   userAnswer: string,

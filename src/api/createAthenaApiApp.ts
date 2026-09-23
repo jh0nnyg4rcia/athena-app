@@ -1,5 +1,5 @@
 import express from "express";
-import { askATHENA, evaluateAnswer, testGeminiPing } from "../services/geminiServerService";
+import { askATHENA, evaluateAnswer, generateObjectiveChallenge, testGeminiPing } from "../services/geminiServerService";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { rateLimit } from "./rateLimit";
 
@@ -165,6 +165,21 @@ export function createAthenaApiApp(): express.Express {
     } catch (error: any) {
       console.error("[Server API Error] askATHENA falhou.");
       res.status(500).json({ error: error?.message || "Erro interno ao processar ATHENA." });
+    }
+  });
+
+  app.post("/api/regenerate-challenge", rateLimit(12, 60_000), requireApiAuth, async (req, res) => {
+    try {
+      const brief = typeof req.body?.brief === "string" ? req.body.brief : "";
+      if (brief.trim().length < 40) {
+        res.status(400).json({ error: "Falta o recorte da aula para regerar só as questões." });
+        return;
+      }
+      const result = await generateObjectiveChallenge(brief);
+      res.json({ responseText: result.text, model: result.model });
+    } catch (error: any) {
+      console.error("[Server API Error] generateObjectiveChallenge falhou.");
+      res.status(500).json({ error: error?.message || "Erro interno ao regerar as questões." });
     }
   });
 
