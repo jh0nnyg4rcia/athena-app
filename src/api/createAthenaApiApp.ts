@@ -1,5 +1,12 @@
 import express from "express";
 import { askATHENA, evaluateAnswer, generateObjectiveChallenge, testGeminiPing } from "../services/geminiServerService";
+import {
+  loginEmailAccount,
+  publicAuthMessage,
+  registerEmailAccount,
+  resetEmailAccess,
+  verifyGoogleSession
+} from "../services/authServerService";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { rateLimit } from "./rateLimit";
 
@@ -115,6 +122,10 @@ export function createAthenaApiApp(): express.Express {
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Cache-Control", "no-store");
     if (req.method === "OPTIONS") {
       res.sendStatus(204);
       return;
@@ -133,6 +144,70 @@ export function createAthenaApiApp(): express.Express {
       status: "ok",
       timestamp: new Date().toISOString()
     });
+  });
+
+  function rejectCrossSiteAuth(req: express.Request, res: express.Response): boolean {
+    const origin = String(req.headers.origin || "");
+    if (origin && allowCorsOrigin(origin) !== origin && isProductionRuntime()) {
+      res.status(403).json({ error: "Não foi possível concluir a autenticação." });
+      return true;
+    }
+    const contentType = String(req.headers["content-type"] || "");
+    if (!contentType.includes("application/json")) {
+      res.status(415).json({ error: "Não foi possível concluir a autenticação." });
+      return true;
+    }
+    return false;
+  }
+
+  app.post("/api/auth/register", rateLimit(8, 15 * 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    try {
+      const result = await registerEmailAccount({
+        name: req.body?.name,
+        email: req.body?.email,
+        password: req.body?.password
+      });
+      res.json({ ok: true, emailSent: result.emailSent });
+    } catch (error) {
+      res.status(400).json({ error: publicAuthMessage(error) });
+    }
+  });
+
+  app.post("/api/auth/login", rateLimit(12, 15 * 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    try {
+      await loginEmailAccount({ email: req.body?.email, password: req.body?.password });
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(401).json({ error: publicAuthMessage(error) });
+    }
+  });
+
+  app.post("/api/auth/forgot", rateLimit(6, 15 * 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    try {
+      await resetEmailAccess({ email: req.body?.email });
+    } catch {
+      /* mesma resposta para não revelar se o e-mail existe */
+    }
+    res.json({ ok: true });
+  });
+
+  app.post("/api/auth/session", rateLimit(20, 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    const header = String(req.headers.authorization || "");
+    const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    if (!token) {
+      res.status(401).json({ error: "Não foi possível concluir a autenticação." });
+      return;
+    }
+    try {
+      const session = await verifyGoogleSession(token);
+      res.json({ ok: true, user: session });
+    } catch {
+      res.status(401).json({ error: "Não foi possível concluir a autenticação." });
+    }
   });
 
   app.post("/api/test-gemini", rateLimit(10, 60_000), requireApiAuth, async (req, res) => {

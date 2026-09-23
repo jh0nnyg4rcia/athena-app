@@ -43,7 +43,7 @@ export const isNativeMobile = (): boolean => {
 const PRODUCTION_PROXY_URL =
   "https://southamerica-east1-gen-lang-client-0822763072.cloudfunctions.net/athenaApi";
 
-const getApiUrl = (endpoint: string): string => {
+export const getApiUrl = (endpoint: string): string => {
   const configured = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
   const base = configured || (isNativeMobile() ? PRODUCTION_PROXY_URL : "");
   if (isNativeMobile() && !base) {

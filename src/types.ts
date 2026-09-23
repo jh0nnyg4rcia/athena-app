@@ -161,9 +161,6 @@ export interface HomologatedLesson {
 export interface RegisteredStudent {
   uid: string;
   fullName: string;
-  cpf: string;
   email: string;
-  accessCode: string;
   createdAt: number;
-  trialExpiresAt: number;
 }

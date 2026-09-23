@@ -56,7 +56,6 @@ import {
   RefreshCw,
   Mail,
   User as UserIcon,
-  Copy,
   Home
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -65,7 +64,8 @@ import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
-import { type UserProfile, type HomologatedLesson, type RegisteredStudent } from './types';
+import { type UserProfile, type HomologatedLesson } from './types';
+import { loginWithEmail, loginWithGoogle, publicClientAuthError, registerAccount, requestNewPassword } from './services/authClient';
 import { getCachedTrilhaPart, setCachedTrilhaPart, sanitizeTrilhaCacheForObjectivePhase } from './services/trilhaCacheService';
 import { 
   getHomologatedLesson, 
@@ -1767,252 +1767,96 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   // Estados do Novo Sistema de Autenticação ATHENA (Cadastro & Login Unificado)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [loginIdentifier, setLoginIdentifier] = useState(() => {
-    try { return localStorage.getItem('athena_saved_login_email') || ''; } catch { return ''; }
-  });
-  const [loginAccessCode, setLoginAccessCode] = useState('');
-  
-  // Estados de Cadastro de Novo Estudante
+  const [authBusy, setAuthBusy] = useState(false);
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
-  const [registerCpf, setRegisterCpf] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
-  const [registeredSuccess, setRegisteredSuccess] = useState<RegisteredStudent | null>(null);
-  const [copiedCode, setCopiedCode] = useState(false);
-
-  // Estados de Recuperação de Código (Esqueci a Senha)
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registeredSuccess, setRegisteredSuccess] = useState<{ fullName: string; email: string; emailSent: boolean; chosePassword: boolean } | null>(null);
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotInput, setForgotInput] = useState('');
-  const [forgotResult, setForgotResult] = useState<RegisteredStudent | null>(null);
+  const [forgotSent, setForgotSent] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
-
-  const formatCpf = (val: string): string => {
-    const raw = val.replace(/\D/g, '').slice(0, 11);
-    if (raw.length <= 3) return raw;
-    if (raw.length <= 6) return `${raw.slice(0, 3)}.${raw.slice(3)}`;
-    if (raw.length <= 9) return `${raw.slice(0, 3)}.${raw.slice(3, 6)}.${raw.slice(6)}`;
-    return `${raw.slice(0, 3)}.${raw.slice(3, 6)}.${raw.slice(6, 9)}-${raw.slice(9, 11)}`;
-  };
-
-  const getSavedRegisteredStudents = (): RegisteredStudent[] => {
-    try {
-      const raw = localStorage.getItem('athena_registered_students');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const saveRegisteredStudentLocally = (student: RegisteredStudent) => {
-    try {
-      const list = getSavedRegisteredStudents().filter(s => s.cpf !== student.cpf && s.email !== student.email);
-      list.push(student);
-      localStorage.setItem('athena_registered_students', JSON.stringify(list));
-    } catch (e) {
-      console.warn('Erro ao salvar estudante localmente:', e);
-    }
-  };
 
   const handleRegisterStudent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (authBusy) return;
     setAuthError(null);
-
-    const name = registerName.trim();
-    const rawCpf = registerCpf.replace(/\D/g, '');
-    const email = registerEmail.trim().toLowerCase();
-
-    if (name.length < 3) {
-      setAuthError("Por favor, informe seu nome completo.");
-      return;
-    }
-    if (rawCpf.length !== 11) {
-      setAuthError("Por favor, informe um CPF válido com 11 dígitos.");
-      return;
-    }
-    if (!email || !email.includes('@') || !email.includes('.')) {
-      setAuthError("Por favor, informe um endereço de e-mail válido.");
-      return;
-    }
-
-    // Gera um código de acesso de 6 dígitos numérico único
-    const accessCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const safeUid = `student_${rawCpf}`;
-
-    const newStudent: RegisteredStudent = {
-      uid: safeUid,
-      fullName: name,
-      cpf: registerCpf,
-      email,
-      accessCode,
-      createdAt: Date.now(),
-      trialExpiresAt: Date.now() + 100 * 24 * 60 * 60 * 1000
-    };
-
-    saveRegisteredStudentLocally(newStudent);
-    setLoginIdentifier(email);
-    setLoginAccessCode(accessCode);
-
-    // Tenta persistir de forma não-bloqueante no Firestore
+    setAuthBusy(true);
     try {
-      if (!isQuotaExhausted()) {
-        const docRef = doc(db, 'users', safeUid);
-        setDoc(docRef, cleanData(newStudent), { merge: true }).catch(() => {});
-      }
-    } catch {}
-
-    setRegisteredSuccess(newStudent);
-  };
-
-  const handleCompleteRegisterLogin = () => {
-    if (!registeredSuccess) return;
-    const studentUser = {
-      uid: registeredSuccess.uid,
-      displayName: registeredSuccess.fullName,
-      email: registeredSuccess.email,
-      photoURL: '',
-      emailVerified: true
-    };
-    try {
-      localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
-      localStorage.setItem('athena_saved_login_email', registeredSuccess.email);
-    } catch {}
-    setUser(studentUser as any);
-    setRegisteredSuccess(null);
-    setAuthError(null);
+      const result = await registerAccount({
+        name: registerName,
+        email: registerEmail,
+        password: registerPassword
+      });
+      setLoginIdentifier(registerEmail.trim().toLowerCase());
+      setRegisteredSuccess({
+        fullName: registerName.trim(),
+        email: registerEmail.trim().toLowerCase(),
+        emailSent: result.emailSent,
+        chosePassword: registerPassword.trim().length > 0
+      });
+      setRegisterPassword('');
+    } catch (error) {
+      setAuthError(publicClientAuthError(error));
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const handleUnifiedLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (authBusy) return;
     setAuthError(null);
-
-    const identifier = loginIdentifier.trim().toLowerCase();
-    const rawId = identifier.replace(/\D/g, '');
-    const code = loginAccessCode.trim();
-
-    if (!identifier) {
-      setAuthError("Informe seu E-mail ou CPF para acessar.");
-      return;
-    }
-    if (!code) {
-      setAuthError("Informe seu Código de Acesso / Senha.");
-      return;
-    }
-
+    setAuthBusy(true);
     try {
-      localStorage.setItem('athena_saved_login_email', identifier);
-    } catch {}
-
-    // 2. Busca entre estudantes cadastrados no dispositivo (CEO incluso por e-mail + código)
-    const localStudents = getSavedRegisteredStudents();
-    const found = localStudents.find(s => 
-      s.email.toLowerCase() === identifier || 
-      (rawId.length >= 9 && s.cpf.replace(/\D/g, '') === rawId)
-    );
-
-    if (found) {
-      if (found.accessCode === code) {
-        const studentUser = {
-          uid: found.uid,
-          displayName: found.fullName,
-          email: found.email,
-          photoURL: '',
-          emailVerified: true
-        };
-        try {
-          localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
-        } catch {}
-        setUser(studentUser as any);
-        setAuthError(null);
-        return;
-      } else {
-        setAuthError("Código de acesso incorreto. Clique em 'Esqueci meu código de acesso' abaixo para recuperar.");
-        return;
-      }
+      await loginWithEmail(loginIdentifier, loginPassword);
+      setLoginPassword('');
+    } catch (error) {
+      setAuthError(publicClientAuthError(error));
+    } finally {
+      setAuthBusy(false);
     }
+  };
 
-    // 3. Fallback: Se for novo aparelho e online, consulta nuvem
-    if (!isQuotaExhausted() && rawId.length === 11) {
-      try {
-        const snap = await getDoc(doc(db, 'users', `student_${rawId}`));
-        if (snap.exists()) {
-          const remoteStudent = snap.data() as RegisteredStudent;
-          if (remoteStudent && remoteStudent.accessCode === code) {
-            saveRegisteredStudentLocally(remoteStudent);
-            const studentUser = {
-              uid: remoteStudent.uid,
-              displayName: remoteStudent.fullName,
-              email: remoteStudent.email,
-              photoURL: '',
-              emailVerified: true
-            };
-            try {
-              localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
-            } catch {}
-            setUser(studentUser as any);
-            return;
-          }
-        }
-      } catch {}
+  const handleGoogleLogin = async () => {
+    if (authBusy) return;
+    setAuthError(null);
+    setAuthBusy(true);
+    try {
+      await loginWithGoogle();
+    } catch (error) {
+      setAuthError(publicClientAuthError(error));
+    } finally {
+      setAuthBusy(false);
     }
-
-    // Se nenhum cadastro for encontrado
-    setAuthError("E-mail/CPF ou código de acesso não encontrado. Caso ainda não possua cadastro, clique na aba 'Cadastre-se' acima.");
   };
 
   const handleForgotCode = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (authBusy) return;
     setForgotError(null);
-    setForgotResult(null);
-
-    const term = forgotInput.trim().toLowerCase();
-    const rawTerm = term.replace(/\D/g, '');
-
-    if (!term) {
-      setForgotError("Informe seu E-mail ou CPF cadastrado.");
-      return;
-    }
-
-    const localStudents = getSavedRegisteredStudents();
-    let match = localStudents.find(s => 
-      s.email.toLowerCase() === term || 
-      (rawTerm.length >= 9 && s.cpf.replace(/\D/g, '') === rawTerm)
-    );
-
-    if (!match && !isQuotaExhausted() && rawTerm.length === 11) {
-      try {
-        const snap = await getDoc(doc(db, 'users', `student_${rawTerm}`));
-        if (snap.exists()) {
-          match = snap.data() as RegisteredStudent;
-        }
-      } catch {}
-    }
-
-    if (match) {
-      setForgotResult(match);
-    } else {
-      setForgotError("Nenhum cadastro encontrado com este dado. Acesse a aba 'Cadastre-se' para criar sua conta.");
-    }
-  };
-
-  const handleLoginAsGuest = () => {
-    const guestUser = {
-      uid: `aluno-${Date.now()}`,
-      displayName: 'Aluno(a) ATHENA',
-      email: 'aluno@athena.app',
-      photoURL: '',
-      emailVerified: false
-    };
+    setForgotSent(false);
+    setAuthBusy(true);
     try {
-      localStorage.setItem('athena_local_user', JSON.stringify(guestUser));
-    } catch {}
-    setUser(guestUser as any);
-    setAuthError(null);
+      await requestNewPassword(forgotInput);
+      setForgotSent(true);
+    } catch (error) {
+      setForgotError(publicClientAuthError(error));
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const handleLogout = async () => {
-    localStorage.removeItem('athena_local_user');
+    try {
+      localStorage.removeItem('athena_local_user');
+      localStorage.removeItem('athena_registered_students');
+    } catch {}
     try {
       await logOut();
-    } catch (e) {}
+    } catch {}
     setUser(null);
   };
 
@@ -2313,44 +2157,20 @@ export default function App() {
   const [resumeReady, setResumeReady] = useState(false);
   const skipResumeSaveRef = useRef(true);
 
-  // Auth Observer
+  // Auth Observer: a sessão válida é a do Firebase Auth, nunca um JSON local.
   useEffect(() => {
-    const savedLocalUser = localStorage.getItem('athena_local_user');
-    if (savedLocalUser) {
-      try {
-        const parsed = JSON.parse(savedLocalUser);
-        if (parsed?.uid) {
-          setUser(parsed);
-          setLoadingAuth(false);
-        }
-      } catch (e) {
-        console.warn("Erro ao restaurar usuário local:", e);
-      }
-    } else {
-      setLoadingAuth(false);
-    }
-
+    try {
+      localStorage.removeItem('athena_local_user');
+    } catch {}
     sanitizeTrilhaCacheForObjectivePhase();
     LocalPersistence.sanitizeSessionsForObjectivePhase();
 
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u && !u.isAnonymous) {
-        try {
-          await logOut();
-        } catch {}
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      if (u && !u.isAnonymous && u.email) {
+        setUser(u);
+      } else {
+        setUser(null);
       }
-      const saved = localStorage.getItem('athena_local_user');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed?.uid) {
-            setUser(parsed);
-            setLoadingAuth(false);
-            return;
-          }
-        } catch {}
-      }
-      setUser(null);
       setLoadingAuth(false);
     });
     return () => unsubscribe();
@@ -5739,56 +5559,64 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                   <div className="p-6 space-y-5">
                     {authMode === 'login' ? (
-                      /* FORMULÁRIO DE LOGIN UNIFICADO (ALUNOS + CEO) */
                       <form onSubmit={handleUnifiedLogin} className="space-y-4">
                         <div className="text-left space-y-1">
                           <h3 className="text-xs font-serif font-bold text-slate-200">Acesso à Plataforma</h3>
-                          <p className="text-[10px] text-slate-400">Insira seu e-mail (ou CPF) e seu Código de Acesso para continuar.</p>
+                          <p className="text-[10px] text-slate-400">Entre com o e-mail e a senha da sua conta.</p>
                         </div>
 
                         <div className="space-y-3">
                           <div className="space-y-1 text-left">
-                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                              E-mail ou CPF:
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="login-email">
+                              E-mail
                             </label>
                             <div className="relative">
                               <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
                               <input
-                                type="text"
+                                id="login-email"
+                                type="email"
+                                autoComplete="email"
+                                required
+                                disabled={authBusy}
                                 value={loginIdentifier}
                                 onChange={(e) => setLoginIdentifier(e.target.value)}
-                                placeholder="Ex: seuemail@gmail.com ou CPF"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
+                                placeholder="seuemail@gmail.com"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
                               />
                             </div>
                           </div>
 
                           <div className="space-y-1 text-left">
                             <div className="flex justify-between items-center">
-                              <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                                Código de Acesso / Senha:
+                              <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="login-password">
+                                Senha
                               </label>
                               <button
                                 type="button"
+                                disabled={authBusy}
                                 onClick={() => {
                                   setShowForgotModal(true);
                                   setForgotError(null);
-                                  setForgotResult(null);
+                                  setForgotSent(false);
                                   setForgotInput(loginIdentifier);
                                 }}
-                                className="text-[10px] text-brand-gold/80 hover:text-brand-gold underline underline-offset-2 transition-colors cursor-pointer"
+                                className="text-[10px] text-brand-gold/80 hover:text-brand-gold underline underline-offset-2 transition-colors cursor-pointer disabled:opacity-60"
                               >
-                                Esqueci meu código
+                                Esqueci minha senha
                               </button>
                             </div>
                             <div className="relative">
                               <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
                               <input
+                                id="login-password"
                                 type="password"
-                                value={loginAccessCode}
-                                onChange={(e) => setLoginAccessCode(e.target.value)}
-                                placeholder="Digite seu código (ex: 6 dígitos ou PIN)"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono tracking-widest"
+                                autoComplete="current-password"
+                                required
+                                disabled={authBusy}
+                                value={loginPassword}
+                                onChange={(e) => setLoginPassword(e.target.value)}
+                                placeholder="Sua senha"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
                               />
                             </div>
                           </div>
@@ -5796,66 +5624,79 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                         <button
                           type="submit"
-                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer"
+                          disabled={authBusy}
+                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer disabled:opacity-60"
                         >
                           <Sparkles size={15} />
-                          <span>Entrar no ATHENA</span>
+                          <span>{authBusy ? 'Entrando...' : 'Entrar no ATHENA'}</span>
                         </button>
                       </form>
                     ) : (
-                      /* FORMULÁRIO DE CADASTRO COM GERAÇÃO DE CÓDIGO */
                       <form onSubmit={handleRegisterStudent} className="space-y-4">
                         <div className="text-left space-y-1">
-                          <h3 className="text-xs font-serif font-bold text-slate-200">Novo Cadastro de Estudante</h3>
-                          <p className="text-[10px] text-slate-400">Preencha seus dados para gerar seu Código de Acesso exclusivo.</p>
+                          <h3 className="text-xs font-serif font-bold text-slate-200">Novo Cadastro</h3>
+                          <p className="text-[10px] text-slate-400">Nome, e-mail e, se quiser, uma senha. Se deixar a senha em branco, enviamos uma senha temporária para o e-mail cadastrado.</p>
                         </div>
 
                         <div className="space-y-3">
                           <div className="space-y-1 text-left">
-                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                              Nome Completo:
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="register-name">
+                              Nome
                             </label>
                             <div className="relative">
                               <UserIcon size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
                               <input
+                                id="register-name"
                                 type="text"
+                                autoComplete="name"
+                                required
+                                minLength={3}
+                                maxLength={80}
+                                disabled={authBusy}
                                 value={registerName}
                                 onChange={(e) => setRegisterName(e.target.value)}
-                                placeholder="Ex: Dr(a). Lucas Silva"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors"
+                                placeholder="Seu nome"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
                               />
                             </div>
                           </div>
 
                           <div className="space-y-1 text-left">
-                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                              CPF (Apenas números):
-                            </label>
-                            <div className="relative">
-                              <ShieldCheck size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
-                              <input
-                                type="text"
-                                maxLength={14}
-                                value={registerCpf}
-                                onChange={(e) => setRegisterCpf(formatCpf(e.target.value))}
-                                placeholder="000.000.000-00"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1 text-left">
-                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                              Seu Melhor E-mail:
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="register-email">
+                              E-mail
                             </label>
                             <div className="relative">
                               <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
                               <input
+                                id="register-email"
                                 type="email"
+                                autoComplete="email"
+                                required
+                                disabled={authBusy}
                                 value={registerEmail}
                                 onChange={(e) => setRegisterEmail(e.target.value)}
-                                placeholder="Ex: seuemail@gmail.com"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
+                                placeholder="seuemail@gmail.com"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 text-left">
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="register-password">
+                              Senha (opcional)
+                            </label>
+                            <div className="relative">
+                              <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
+                              <input
+                                id="register-password"
+                                type="password"
+                                autoComplete="new-password"
+                                maxLength={72}
+                                disabled={authBusy}
+                                value={registerPassword}
+                                onChange={(e) => setRegisterPassword(e.target.value)}
+                                placeholder="Letras e números, no mínimo 10 caracteres"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
                               />
                             </div>
                           </div>
@@ -5863,30 +5704,30 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                         <button
                           type="submit"
-                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer"
+                          disabled={authBusy}
+                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer disabled:opacity-60"
                         >
                           <Zap size={15} />
-                          <span>Cadastrar & Gerar Código de Acesso</span>
+                          <span>{authBusy ? 'Cadastrando...' : 'Criar conta'}</span>
                         </button>
                       </form>
                     )}
 
                     <div className="w-full flex items-center gap-3 pt-1">
                       <div className="flex-1 h-px bg-white/10" />
-                      <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">ou outras opções</span>
+                      <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">ou</span>
                       <div className="flex-1 h-px bg-white/10" />
                     </div>
 
-                    <div className="w-full space-y-2.5">
-                      <button 
-                        type="button"
-                        onClick={handleLoginAsGuest}
-                        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 hover:border-white/20 font-semibold uppercase tracking-wider text-[10px] rounded-xl transition-all active:scale-95 cursor-pointer"
-                      >
-                        <UserIcon size={13} className="text-slate-400" />
-                        <span>Acesso Rápido Visitante (Degustação)</span>
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      disabled={authBusy}
+                      onClick={handleGoogleLogin}
+                      className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-950 hover:bg-slate-800 text-slate-100 border border-white/10 hover:border-brand-gold/40 font-semibold uppercase tracking-wider text-[10px] rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-60"
+                    >
+                      <ShieldCheck size={13} className="text-brand-gold" />
+                      <span>{authBusy ? 'Aguardando o Google...' : 'Entrar com Google'}</span>
+                    </button>
 
                     {/* Link da Política de Privacidade e LGPD */}
                     <div className="pt-2 text-center">
@@ -5903,81 +5744,52 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   </div>
                 </div>
 
-                {/* MODAL 1: SUCESSO DO CADASTRO COM CÓDIGO GERADO */}
                 {registeredSuccess && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
                     <div className="w-full max-w-sm bg-slate-900 border-2 border-brand-gold/50 rounded-3xl p-6 shadow-2xl space-y-5 text-center">
-                      <div className="w-16 h-16 rounded-full bg-brand-gold/10 border border-brand-gold/30 text-brand-gold mx-auto flex items-center justify-center animate-bounce">
+                      <div className="w-16 h-16 rounded-full bg-brand-gold/10 border border-brand-gold/30 text-brand-gold mx-auto flex items-center justify-center">
                         <Trophy size={32} />
                       </div>
 
-                      <div className="space-y-1">
-                        <h3 className="font-serif font-bold text-lg text-slate-100">🎉 Cadastro Concluído!</h3>
+                      <div className="space-y-2">
+                        <h3 className="font-serif font-bold text-lg text-slate-100">Cadastro concluído</h3>
                         <p className="text-xs text-slate-300">
-                          Olá, <strong>{registeredSuccess.fullName}</strong>. Sua conta foi criada com sucesso na plataforma ATHENA.
+                          Olá, <strong>{registeredSuccess.fullName}</strong>. A conta de {registeredSuccess.email} foi criada.
+                        </p>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          {registeredSuccess.emailSent
+                            ? 'Enviamos a senha para esse e-mail. Use o que chegou na mensagem para entrar. A senha não aparece aqui.'
+                            : 'Entre com a senha que você escolheu. O e-mail de confirmação não foi enviado.'}
                         </p>
                       </div>
-
-                      <div className="p-4 bg-slate-950 rounded-2xl border border-brand-gold/30 space-y-2">
-                        <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">
-                          Seu Código de Acesso (Senha):
-                        </p>
-                        <div className="text-3xl font-mono font-black text-brand-gold tracking-widest py-1 select-all">
-                          {registeredSuccess.accessCode}
-                        </div>
-                        <div className="flex items-center justify-center gap-3 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              try {
-                                navigator.clipboard.writeText(registeredSuccess.accessCode);
-                                setCopiedCode(true);
-                                setTimeout(() => setCopiedCode(false), 3000);
-                              } catch {}
-                            }}
-                            className="text-[11px] text-brand-gold hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Copy size={13} />
-                            <span>{copiedCode ? 'Código Copiado!' : 'Copiar Código'}</span>
-                          </button>
-
-                          <span className="text-slate-600 text-xs">•</span>
-
-                          <a
-                            href={`mailto:${registeredSuccess.email}?subject=Meu%20C%C3%B3digo%20de%20Acesso%20ATHENA&body=Ol%C3%A1%20${encodeURIComponent(registeredSuccess.fullName)}!%0A%0ASeu%20C%C3%B3digo%20de%20Acesso%20exclusivo%20para%20o%20app%20ATHENA%20%C3%A9:%20${registeredSuccess.accessCode}%0A%0AEmail%20de%20Login:%20${registeredSuccess.email}%0A%0ABons%20estudos!`}
-                            className="text-[11px] text-slate-300 hover:text-white hover:underline font-medium inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Mail size={13} className="text-brand-gold" />
-                            <span>Salvar no E-mail</span>
-                          </a>
-                        </div>
-                      </div>
-
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Guarde este código com carinho. Você o utilizará junto ao seu e-mail para fazer login no celular ou computador.
-                      </p>
 
                       <button
                         type="button"
-                        onClick={handleCompleteRegisterLogin}
+                        onClick={() => {
+                          setRegisteredSuccess(null);
+                          setAuthMode('login');
+                          setRegisterName('');
+                          setRegisterEmail('');
+                          setRegisterPassword('');
+                        }}
                         className="w-full py-3.5 bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold text-slate-950 font-black uppercase text-xs tracking-wider rounded-xl hover:brightness-110 shadow-lg shadow-brand-gold/25 transition-all cursor-pointer"
                       >
-                        Entrar Agora no ATHENA
+                        Ir para o login
                       </button>
                     </div>
                   </div>
                 )}
 
-                {/* MODAL 2: ESQUECI MEU CÓDIGO DE ACESSO */}
                 {showForgotModal && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
                     <div className="w-full max-w-sm bg-slate-900 border border-brand-gold/40 rounded-3xl p-6 shadow-2xl space-y-4 text-left">
                       <div className="flex items-center justify-between pb-3 border-b border-white/10">
                         <div className="flex items-center gap-2 text-brand-gold">
                           <Lock size={18} />
-                          <h3 className="font-serif font-bold text-sm text-slate-100">Recuperar Código de Acesso</h3>
+                          <h3 className="font-serif font-bold text-sm text-slate-100">Nova senha</h3>
                         </div>
-                        <button 
+                        <button
+                          type="button"
                           onClick={() => setShowForgotModal(false)}
                           className="text-slate-400 hover:text-white p-1 rounded-lg"
                         >
@@ -5985,20 +5797,36 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                         </button>
                       </div>
 
-                      {!forgotResult ? (
+                      {forgotSent ? (
+                        <div className="space-y-4">
+                          <p className="text-xs text-slate-300 leading-relaxed">
+                            Se este e-mail tiver cadastro, enviamos as instruções de acesso.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setShowForgotModal(false)}
+                            className="w-full py-3 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
+                          >
+                            Fechar
+                          </button>
+                        </div>
+                      ) : (
                         <form onSubmit={handleForgotCode} className="space-y-4">
                           <p className="text-xs text-slate-400 leading-relaxed">
-                            Insira seu E-mail ou CPF cadastrado para recuperar seu código de acesso:
+                            Informe o e-mail da conta. A nova senha, se houver cadastro, chega só por e-mail.
                           </p>
 
                           <div>
                             <input
-                              type="text"
+                              type="email"
+                              autoComplete="email"
                               value={forgotInput}
                               onChange={(e) => setForgotInput(e.target.value)}
-                              placeholder="Seu E-mail ou CPF"
+                              placeholder="seuemail@gmail.com"
                               autoFocus
-                              className="w-full px-4 py-3 bg-slate-950 border border-slate-700 focus:border-brand-gold rounded-xl text-xs text-slate-100 outline-none transition-colors font-mono"
+                              required
+                              disabled={authBusy}
+                              className="w-full px-4 py-3 bg-slate-950 border border-slate-700 focus:border-brand-gold rounded-xl text-xs text-slate-100 outline-none transition-colors disabled:opacity-60"
                             />
                             {forgotError && (
                               <p className="text-[11px] text-rose-400 mt-2 font-medium">{forgotError}</p>
@@ -6015,36 +5843,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                             </button>
                             <button
                               type="submit"
-                              className="flex-1 py-2.5 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
+                              disabled={authBusy}
+                              className="flex-1 py-2.5 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all disabled:opacity-60"
                             >
-                              Buscar Código
+                              {authBusy ? 'Enviando...' : 'Enviar'}
                             </button>
                           </div>
                         </form>
-                      ) : (
-                        <div className="space-y-4 text-center">
-                          <div className="p-4 bg-slate-950 rounded-2xl border border-brand-gold/40 space-y-2">
-                            <p className="text-xs text-slate-300 font-bold">{forgotResult.fullName}</p>
-                            <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">Seu Código de Acesso é:</p>
-                            <div className="text-3xl font-mono font-black text-brand-gold tracking-widest py-1">
-                              {forgotResult.accessCode}
-                            </div>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setLoginIdentifier(forgotResult.email);
-                                setLoginAccessCode(forgotResult.accessCode);
-                                setShowForgotModal(false);
-                              }}
-                              className="flex-1 py-3 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
-                            >
-                              Preencher e Entrar
-                            </button>
-                          </div>
-                        </div>
                       )}
                     </div>
                   </div>

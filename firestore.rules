@@ -36,7 +36,8 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.get('displayName', '') is string && data.get('displayName', '').size() <= 200
-        && data.get('email', '') is string && data.get('email', '').size() <= 200;
+        && data.get('email', '') is string && data.get('email', '').size() <= 200
+        && !data.keys().hasAny(['password', 'passwordHash']);
     }
 
     function isValidSession(data) {
@@ -78,6 +79,10 @@ service cloud.firestore {
     function isValidTrilhaProgress(data) {
       return data.get('completedDays', []) is list
         && data.get('completedDays', []).size() <= 200;
+    }
+
+    match /auth_secrets/{userId} {
+      allow read, write: if false;
     }
 
     match /users/{userId} {
