@@ -43,7 +43,7 @@ export const isNativeMobile = (): boolean => {
 const PRODUCTION_PROXY_URL =
   "https://southamerica-east1-gen-lang-client-0822763072.cloudfunctions.net/athenaApi";
 
-const getApiUrl = (endpoint: string): string => {
+export const getApiUrl = (endpoint: string): string => {
   const configured = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
   const base = configured || (isNativeMobile() ? PRODUCTION_PROXY_URL : "");
   if (isNativeMobile() && !base) {
@@ -54,16 +54,32 @@ const getApiUrl = (endpoint: string): string => {
   return `${base}${endpoint}`;
 };
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+async function getProxyIdToken(): Promise<string | undefined> {
   try {
     const { auth } = await import("../lib/firebase");
-    const token = await auth.currentUser?.getIdToken();
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
+    const jsToken = await auth.currentUser?.getIdToken();
+    if (jsToken) return jsToken;
   } catch {
-    /* sessão anônima / local */
+    /* SDK web indisponível */
+  }
+
+  if (!isNativeMobile()) return undefined;
+
+  try {
+    const { FirebaseAuthentication } = await import("@capacitor-firebase/authentication");
+    const native = await FirebaseAuthentication.getIdToken();
+    if (native?.token) return native.token;
+  } catch {
+    /* login local / sem Google no nativo */
+  }
+  return undefined;
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = await getProxyIdToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
@@ -164,6 +180,19 @@ export async function askATHENA(
   const text = (data.responseText || "").trim();
   if (!text) {
     throw new Error("O proxy ATHENA retornou uma resposta vazia.");
+  }
+  return { text, model: data.model || getSelectedModel() };
+}
+
+export async function regenerateObjectiveChallenge(brief: string): Promise<AthenaResult> {
+  const data = await fetchAthenaApi<{ responseText?: string; model?: string }>(
+    "/api/regenerate-challenge",
+    { brief },
+    90000
+  );
+  const text = (data.responseText || "").trim();
+  if (!text) {
+    throw new Error("O proxy ATHENA retornou o bloco de questões vazio.");
   }
   return { text, model: data.model || getSelectedModel() };
 }

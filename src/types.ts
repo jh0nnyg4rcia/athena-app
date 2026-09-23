@@ -52,6 +52,8 @@ export interface Review {
   article: number;
   content: string;
   timestamp: number;
+  day?: number;
+  part?: number;
 }
 
 export interface UserStat {
@@ -104,6 +106,7 @@ export interface Message {
   }>;
   sourceType?: 'gemini' | 'offline_pareto';
   modelName?: string;
+  trilhaDay?: number;
   trilhaMaterialIndex?: number;
 }
 
@@ -152,14 +155,12 @@ export interface HomologatedLesson {
   approvedAt: number;
   modelUsed?: string;
   version?: number;
+  review?: string;
 }
 
 export interface RegisteredStudent {
   uid: string;
   fullName: string;
-  cpf: string;
   email: string;
-  accessCode: string;
   createdAt: number;
-  trialExpiresAt: number;
 }
