@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useEffect, useMemo, Suspense, lazy } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Scale, 
@@ -61,7 +61,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer, isNativeMobile, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
+import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
@@ -72,7 +72,10 @@ import {
   saveHomologatedLesson, 
   revokeHomologatedLesson, 
   getLocalHomologatedLesson, 
-  getLessonDocId 
+  getLessonDocId,
+  syncOfficialCatalog,
+  isOfficialPart,
+  ensureObjectiveChallenge
 } from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -95,9 +98,7 @@ import {
 import { 
   db, 
   auth, 
-  signInWithGoogle, 
   logOut, 
-  checkAndSyncNativeAuth,
   handleFirestoreError, 
   OperationType, 
   cleanData,
@@ -107,12 +108,67 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { IncidenceChart } from './components/IncidenceChart';
-import { cacheArticle, cacheQuestion } from './services/localCache';
+import { cacheArticle, cacheQuestion, getCachedArticles } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
+import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, sanitizeAthenaVoice } from './lib/athenaVoice';
+import {
+  harvestCompressedReviews,
+  harvestCompressedReviewsLocal,
+  upsertCompressedReview,
+  deleteCompressedReview,
+  mergeReviewLists,
+  extractReviewBlock,
+  buildCompressedReview,
+  persistReviewFromMessage
+} from './lib/compressedReviews';
+import { inferTrilhaContext, isTrilhaLesson } from './lib/trilhaContext';
+import {
+  embedChallengeInContent,
+  extractChallengeFromText,
+  findChallengeBlockIndex,
+  normalizeObjectiveChallenge,
+  parseChallengeModelOutput,
+  resolveDisplayedChallenge
+} from './lib/objectiveChallenge';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+const ATHENA_CEO_EMAIL = 'jhonny.spider@gmail.com';
+
+type AthenaTab = 'chat' | 'stats' | 'reviews' | 'mentees' | 'schedules' | 'trilha';
+
+function isCeoAccount(account: { email?: string | null } | null | undefined): boolean {
+  return (account?.email || '').toLowerCase().trim() === ATHENA_CEO_EMAIL;
+}
+
+type ResumeState = { tab: AthenaTab; sessionId: string | null };
+
+function resumeKey(uid: string) {
+  return `athena_ui_resume_${uid}`;
+}
+
+function loadResume(uid: string): ResumeState | null {
+  try {
+    const raw = localStorage.getItem(resumeKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ResumeState;
+    const tabs: AthenaTab[] = ['chat', 'stats', 'reviews', 'mentees', 'schedules', 'trilha'];
+    if (!tabs.includes(parsed.tab)) return { tab: 'chat', sessionId: parsed.sessionId || null };
+    return { tab: parsed.tab, sessionId: parsed.sessionId || null };
+  } catch {
+    return null;
+  }
+}
+
+function saveResume(uid: string, state: ResumeState) {
+  try {
+    localStorage.setItem(resumeKey(uid), JSON.stringify(state));
+  } catch {
+    /* storage indisponível */
+  }
 }
 
 interface Message {
@@ -133,6 +189,7 @@ interface Message {
   }>;
   sourceType?: 'gemini' | 'offline_pareto';
   modelName?: string;
+  trilhaDay?: number;
   trilhaMaterialIndex?: number;
 }
 
@@ -203,6 +260,8 @@ interface Review {
   article: number;
   content: string;
   timestamp: number;
+  day?: number;
+  part?: number;
 }
 
 interface UserStat {
@@ -1152,6 +1211,26 @@ const ChatMessage = memo(({
   
   const isInstruction = getIsInstructionMessage(msg);
 
+  const officialDay = msg.trilhaDay ?? trilhaDay;
+  const officialPart = msg.trilhaMaterialIndex ?? trilhaMaterialIndex;
+  const officialLesson =
+    homologatedLessonState &&
+    officialDay !== undefined &&
+    officialPart !== undefined &&
+    homologatedLessonState.day === officialDay &&
+    homologatedLessonState.part === officialPart
+      ? homologatedLessonState
+      : (officialDay !== undefined && officialPart !== undefined
+        ? getLocalHomologatedLesson(officialDay, officialPart)
+        : null);
+  const displayedChallenge = resolveDisplayedChallenge({
+    messageChallenge: msg.challenge,
+    messageContent: msg.content,
+    officialChallenge: officialLesson?.challenge,
+    officialContent: officialLesson?.content
+  });
+  const challengeBlockIdx = findChallengeBlockIndex(msg.blocks);
+
   if (isInstruction) return null;
   
   return (
@@ -1253,9 +1332,9 @@ const ChatMessage = memo(({
                     </div>
                   )}
                   
-                  {blockIdx === 4 && msg.challenge && (
+                  {blockIdx === challengeBlockIdx && displayedChallenge && (
                     <div className="mt-8">
-                      {msg.challenge.questions.map((q, qIdx) => (
+                      {displayedChallenge.questions.map((q, qIdx) => (
                         <QuizQuestion 
                           key={qIdx} 
                           question={q} 
@@ -1318,6 +1397,11 @@ const ChatMessage = memo(({
                         />
                       ))}
                     </div>
+                  )}
+                  {blockIdx === challengeBlockIdx && isCEO && !displayedChallenge && (
+                    <p className="mt-4 text-xs text-amber-200/90">
+                      Esta parte está no catálogo sem questões objetivas. Use “Regerar questões” para refazer só este bloco.
+                    </p>
                   )}
                 </motion.div>
               ))}
@@ -1468,13 +1552,24 @@ const ChatMessage = memo(({
                       </button>
                     )}
 
-                    {!isError && trilhaDay !== undefined && trilhaTotalMaterials !== undefined ? (
+                    {!isError && isTrilhaLesson(inferTrilhaContext(
+                      { trilhaDay, trilhaMaterialIndex, title: '' },
+                      messages,
+                      msg
+                    ), msg) ? (
                       (() => {
-                        const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? 0);
-                        const localApproved = getLocalHomologatedLesson(trilhaDay, msgPartIdx);
+                        const lessonCtx = inferTrilhaContext(
+                          { trilhaDay, trilhaMaterialIndex, title: '' },
+                          messages,
+                          msg
+                        );
+                        const effectiveDay = lessonCtx.day;
+                        const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? lessonCtx.part);
+                        const totalParts = (trilhaTotalMaterials && trilhaTotalMaterials > 0) ? trilhaTotalMaterials : (lessonCtx.total || 5);
+                        const localApproved = effectiveDay !== undefined ? getLocalHomologatedLesson(effectiveDay, msgPartIdx) : null;
                         const isThisPartApproved = Boolean(
                           (localApproved && localApproved.status === 'approved') ||
-                          (homologatedLessonState && homologatedLessonState.day === trilhaDay && homologatedLessonState.part === msgPartIdx && homologatedLessonState.status === 'approved')
+                          (homologatedLessonState && homologatedLessonState.day === effectiveDay && homologatedLessonState.part === msgPartIdx && homologatedLessonState.status === 'approved')
                         );
 
                         return (
@@ -1489,7 +1584,7 @@ const ChatMessage = memo(({
                                   <div>
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-brand-gold">
-                                        Curadoria • Parte {msgPartIdx + 1} de {trilhaTotalMaterials}
+                                        Curadoria • Parte {msgPartIdx + 1} de {totalParts}
                                       </span>
                                       {isThisPartApproved ? (
                                         <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -1537,7 +1632,7 @@ const ChatMessage = memo(({
                             )}
 
                             {/* Botões de Avanço / Conclusão */}
-                            {msgPartIdx < trilhaTotalMaterials - 1 ? (
+                            {msgPartIdx < totalParts - 1 ? (
                               isCEO && !isThisPartApproved ? (
                                 <div className="flex flex-col items-center gap-2 w-full sm:w-auto">
                                   <button
@@ -1548,7 +1643,7 @@ const ChatMessage = memo(({
                                   >
                                     <Trophy size={18} className="group-hover:scale-110 transition-transform text-slate-950" />
                                     <span className="font-extrabold tracking-wider">
-                                      {isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & IR PARA PARTE ${msgPartIdx + 2} DE ${trilhaTotalMaterials}`}
+                                      {isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & IR PARA PARTE ${msgPartIdx + 2} DE ${totalParts}`}
                                     </span>
                                     <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                                   </button>
@@ -1578,7 +1673,7 @@ const ChatMessage = memo(({
                                   className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
                                 >
                                   <span className="font-extrabold tracking-wider">
-                                    IR PARA PARTE {msgPartIdx + 2} DE {trilhaTotalMaterials}
+                                    IR PARA PARTE {msgPartIdx + 2} DE {totalParts}
                                   </span>
                                   <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                                 </button>
@@ -1628,7 +1723,7 @@ const ChatMessage = memo(({
                                   className="w-full sm:w-auto min-w-[280px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-brand-gold via-amber-400 to-emerald-400 hover:from-yellow-400 hover:to-emerald-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.4)] active:scale-98 transition-all cursor-pointer group"
                                 >
                                   <Trophy size={18} className="group-hover:scale-110 transition-transform" />
-                                  <span>{isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & CONCLUIR DIA ${trilhaDay}`}</span>
+                                  <span>{isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & CONCLUIR DIA ${effectiveDay}`}</span>
                                 </button>
                               ) : (
                                 <button
@@ -1636,7 +1731,7 @@ const ChatMessage = memo(({
                                   onClick={() => advanceStage(msgIdx)}
                                   className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
                                 >
-                                  <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
+                                  <span>CONCLUIR DIA {effectiveDay} DA TRILHA</span>
                                   <Trophy size={18} className="group-hover:scale-110 transition-transform" />
                                 </button>
                               );
@@ -1785,19 +1880,6 @@ export default function App() {
     setAuthError(null);
   };
 
-  const handleLoginAsCEO = () => {
-    const ceoUser = {
-      uid: 'jhonny-spider-ceo',
-      displayName: 'Jhonny (CEO)',
-      email: 'jhonny.spider@gmail.com',
-      photoURL: '',
-      emailVerified: true
-    };
-    localStorage.setItem('athena_local_user', JSON.stringify(ceoUser));
-    setUser(ceoUser as any);
-    setAuthError(null);
-  };
-
   const handleUnifiedLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError(null);
@@ -1819,13 +1901,7 @@ export default function App() {
       localStorage.setItem('athena_saved_login_email', identifier);
     } catch {}
 
-    // 1. Verificação Unificada do CEO Mestre
-    if (identifier === CEO_EMAIL.toLowerCase() && code === '7777') {
-      handleLoginAsCEO();
-      return;
-    }
-
-    // 2. Busca entre estudantes cadastrados no dispositivo
+    // 2. Busca entre estudantes cadastrados no dispositivo (CEO incluso por e-mail + código)
     const localStudents = getSavedRegisteredStudents();
     const found = localStudents.find(s => 
       s.email.toLowerCase() === identifier || 
@@ -1932,28 +2008,6 @@ export default function App() {
     setAuthError(null);
   };
 
-  const handleGoogleLogin = async () => {
-    setAuthError(null);
-    try {
-      const cred = await signInWithGoogle();
-      if (cred && 'user' in cred && cred.user) {
-        setUser(cred.user);
-      }
-    } catch (err: any) {
-      console.warn("Erro ao fazer login com Google:", err);
-      const msg = err?.message || String(err);
-      if (err?.code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
-        setAuthError("Domínio não autorizado no Firebase. Para testar imediatamente, clique em 'Entrar como Aluno'.");
-      } else if (err?.code === 'auth/popup-closed-by-user' || msg.includes('16') || msg.toLowerCase().includes('cancel')) {
-        setAuthError("A seleção da Conta Google foi cancelada.");
-      } else if (msg.includes('network') || msg.includes('NETWORK')) {
-        setAuthError("Falha de conexão com os servidores do Google. Verifique sua conexão com a internet.");
-      } else {
-        setAuthError(err?.message || "Não foi possível conectar com a Conta Google no momento. Utilize o acesso de Aluno abaixo.");
-      }
-    }
-  };
-
   const handleLogout = async () => {
     localStorage.removeItem('athena_local_user');
     try {
@@ -1976,13 +2030,90 @@ export default function App() {
   const [trilhaCompletedDays, setTrilhaCompletedDays] = useState<number[]>([]);
   const [selectedTrilhaWeek, setSelectedTrilhaWeek] = useState<number>(1);
   const [dashboardDay, setDashboardDay] = useState<number | null>(null);
+  const [compressedReviews, setCompressedReviews] = useState<Review[]>([]);
   const reviews = useMemo(() => {
-    const all: Review[] = [];
+    const fromSessions: Review[] = [];
     sessions.forEach(s => {
-      if (s.reviews) all.push(...s.reviews);
+      if (s.reviews) fromSessions.push(...s.reviews);
     });
-    return all.sort((a, b) => b.timestamp - a.timestamp);
-  }, [sessions]);
+    return mergeReviewLists(compressedReviews, fromSessions);
+  }, [sessions, compressedReviews]);
+
+  useEffect(() => {
+    if (!user) {
+      setCompressedReviews([]);
+      return;
+    }
+    let cancelled = false;
+    setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
+    const run = async (fetchCloud: boolean) => {
+      try {
+        const articles = await getCachedArticles();
+        const next = await harvestCompressedReviews(user.uid, {
+          sessions,
+          articles,
+          fetchCloud
+        });
+        if (!cancelled) setCompressedReviews(next);
+      } catch {
+        if (!cancelled) setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
+      }
+    };
+    void run(true);
+    const onHomologated = () => {
+      setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
+      void run(false);
+    };
+    window.addEventListener('athena-lesson-homologated', onHomologated);
+    window.addEventListener('athena-trilha-cached', onHomologated);
+    window.addEventListener('athena-lessons-restored', onHomologated);
+    window.addEventListener('athena-vault-ready', onHomologated);
+    window.addEventListener('athena-catalog-synced', onHomologated);
+    void syncOfficialCatalog().then((parts) => {
+      if (cancelled || !parts.length) return;
+      setCompressedReviews(harvestCompressedReviewsLocal(user.uid, {
+        sessions,
+        homologated: parts
+          .filter((part) => (part.review || '').trim().length >= 20)
+          .map((part) => ({
+            id: part.id,
+            day: part.day,
+            part: part.part,
+            subject: part.subject,
+            content: '',
+            review: part.review,
+            status: 'approved' as const,
+            approvedBy: 'jhonny.spider@gmail.com',
+            approvedAt: part.approvedAt || Date.now()
+          }))
+      }));
+    });
+    return () => {
+      cancelled = true;
+      window.removeEventListener('athena-lesson-homologated', onHomologated);
+      window.removeEventListener('athena-trilha-cached', onHomologated);
+      window.removeEventListener('athena-lessons-restored', onHomologated);
+      window.removeEventListener('athena-vault-ready', onHomologated);
+      window.removeEventListener('athena-catalog-synced', onHomologated);
+    };
+  }, [user?.uid, sessions.length, activeTab]);
+
+  useEffect(() => {
+    if (!user) return;
+    const sess = sessions.find((s) => s.id === currentSessionId);
+    let next: Review[] | null = null;
+    for (const m of messages) {
+      if (m.role !== 'model') continue;
+      next = persistReviewFromMessage(user.uid, m, {
+        sessionId: currentSessionId || undefined,
+        guidedSubject: sess?.guidedSubject || guidedSubject,
+        currentArticle: sess?.currentArticle || currentArticle,
+        trilhaDay: sess?.trilhaDay,
+        trilhaMaterialIndex: sess?.trilhaMaterialIndex
+      });
+    }
+    if (next) setCompressedReviews(next);
+  }, [user?.uid, messages, currentSessionId]);
   const [userStats, setUserStats] = useState<UserStat[]>([]);
   const [gamification, setGamification] = useState<GamificationData>({
     totalXP: 0,
@@ -2011,15 +2142,13 @@ export default function App() {
     return () => window.removeEventListener('firestore-quota-exceeded', onQuota);
   }, []);
 
-  const CEO_EMAIL = 'jhonny.spider@gmail.com';
-
   const userProfile: UserProfile | null = useMemo(() => {
     if (!user) return null;
-    const isCeoUser = user.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+    const isCeoUser = isCeoAccount(user);
     if (isCeoUser) {
       return {
         uid: user.uid,
-        email: user.email || CEO_EMAIL,
+        email: user.email || ATHENA_CEO_EMAIL,
         displayName: user.displayName || 'Mestre CEO (Jhonny)',
         photoURL: user.photoURL || '',
         role: 'ceo',
@@ -2042,7 +2171,7 @@ export default function App() {
     };
   }, [user]);
 
-  const isCEO = userProfile?.role === 'ceo' || user?.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+  const isCEO = isCeoAccount(user);
 
   const [tokenExhaustedBanner, setTokenExhaustedBanner] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
@@ -2050,6 +2179,7 @@ export default function App() {
   // Estados de Curadoria e Homologação do CEO
   const [homologatedLessonState, setHomologatedLessonState] = useState<HomologatedLesson | null>(null);
   const [isSavingHomologation, setIsSavingHomologation] = useState(false);
+  const [isRegeneratingQuestions, setIsRegeneratingQuestions] = useState(false);
   const [isEditingLesson, setIsEditingLesson] = useState(false);
   const [editingLessonContent, setEditingLessonContent] = useState('');
   const [editingLessonIndex, setEditingLessonIndex] = useState<number | undefined>(undefined);
@@ -2075,6 +2205,11 @@ export default function App() {
       if (res) setHomologatedLessonState(res);
     });
 
+    const refreshApproved = () => {
+      const next = getLocalHomologatedLesson(day, part);
+      if (next) setHomologatedLessonState(next);
+    };
+
     const onHomologated = (e: any) => {
       const detail = e.detail as HomologatedLesson;
       if (detail && detail.day === day && detail.part === part) {
@@ -2089,9 +2224,13 @@ export default function App() {
     };
     window.addEventListener('athena-lesson-homologated', onHomologated);
     window.addEventListener('athena-lesson-revoked', onRevoked);
+    window.addEventListener('athena-vault-ready', refreshApproved);
+    window.addEventListener('athena-lessons-restored', refreshApproved);
     return () => {
       window.removeEventListener('athena-lesson-homologated', onHomologated);
       window.removeEventListener('athena-lesson-revoked', onRevoked);
+      window.removeEventListener('athena-vault-ready', refreshApproved);
+      window.removeEventListener('athena-lessons-restored', refreshApproved);
     };
   }, [currentSessionId, sessions]);
 
@@ -2170,55 +2309,49 @@ export default function App() {
     scrollToTop();
   };
 
+  const resumeHydratedForUid = useRef<string | null>(null);
+  const [resumeReady, setResumeReady] = useState(false);
+  const skipResumeSaveRef = useRef(true);
+
   // Auth Observer
   useEffect(() => {
-    // 1. Tenta restaurar sessão local se existir
     const savedLocalUser = localStorage.getItem('athena_local_user');
     if (savedLocalUser) {
       try {
         const parsed = JSON.parse(savedLocalUser);
-        setUser(parsed);
-        setLoadingAuth(false);
+        if (parsed?.uid) {
+          setUser(parsed);
+          setLoadingAuth(false);
+        }
       } catch (e) {
         console.warn("Erro ao restaurar usuário local:", e);
       }
     } else {
-      // Nenhum usuário local persistido: aguarda autenticação oficial via Google Sign-In
       setLoadingAuth(false);
     }
 
-    checkAndSyncNativeAuth();
     sanitizeTrilhaCacheForObjectivePhase();
     LocalPersistence.sanitizeSessionsForObjectivePhase();
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        setUser(u);
-        localStorage.removeItem('athena_local_user');
-      } else if (!localStorage.getItem('athena_local_user')) {
-        setUser(null);
+      if (u && !u.isAnonymous) {
+        try {
+          await logOut();
+        } catch {}
       }
-      setLoadingAuth(false);
-
-      if (u && !isQuotaExhausted()) {
-        // Save user profile to Firestore only once per session to preserve quota
-        const syncKey = `lastLoginSynced_${u.uid}`;
-        if (!sessionStorage.getItem(syncKey)) {
-          sessionStorage.setItem(syncKey, 'true');
-          const userRef = doc(db, 'users', u.uid);
-          try {
-            const cleaned = cleanData({
-              displayName: u.displayName || 'Usuário',
-              email: u.email || '',
-              photoURL: u.photoURL || '',
-              lastLogin: Date.now()
-            });
-            await setDoc(userRef, cleaned, { merge: true });
-          } catch (error) {
-            console.warn("Notice: User profile sync postponed (resilient local mode active):", error);
+      const saved = localStorage.getItem('athena_local_user');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed?.uid) {
+            setUser(parsed);
+            setLoadingAuth(false);
+            return;
           }
-        }
+        } catch {}
       }
+      setUser(null);
+      setLoadingAuth(false);
     });
     return () => unsubscribe();
   }, []);
@@ -2241,13 +2374,6 @@ export default function App() {
     const localSessions = LocalPersistence.getSessions(user.uid);
     if (localSessions.length > 0) {
       setSessions(localSessions);
-      if (!currentSessionId) {
-        const last = localSessions[0];
-        setCurrentSessionId(last.id);
-        setMessages(last.messages || []);
-        setGuidedSubject(last.guidedSubject || null);
-        setCurrentArticle(last.currentArticle || 1);
-      }
     }
 
     // 2. Attach Firestore onSnapshot listener only if Firebase Auth is signed in
@@ -2262,18 +2388,38 @@ export default function App() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatSession));
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ChatSession));
       if (docs.length > 0) {
-        setSessions(docs);
-        docs.forEach(s => LocalPersistence.saveSession(user.uid, s));
-        
-        if (!currentSessionId) {
-          const last = docs[0];
-          setCurrentSessionId(last.id);
-          setMessages(last.messages);
-          setGuidedSubject(last.guidedSubject);
-          setCurrentArticle(last.currentArticle);
-        }
+        const local = LocalPersistence.getSessions(user.uid);
+        const merged = docs.map((cloud) => {
+          const prev = local.find((s) => s.id === cloud.id);
+          const cloudMsgs = cloud.messages || [];
+          const prevMsgs = prev?.messages || [];
+          const mergedMessages = cloudMsgs.map((c, i) => {
+            const p = prevMsgs[i];
+            if (!p) return c;
+            return {
+              ...p,
+              ...c,
+              trilhaDay: c.trilhaDay ?? p.trilhaDay,
+              trilhaMaterialIndex: c.trilhaMaterialIndex ?? p.trilhaMaterialIndex
+            };
+          });
+          const messages = prevMsgs.length > mergedMessages.length
+            ? [...mergedMessages, ...prevMsgs.slice(mergedMessages.length)]
+            : mergedMessages;
+          return {
+            ...prev,
+            ...cloud,
+            messages,
+            trilhaDay: cloud.trilhaDay ?? prev?.trilhaDay,
+            trilhaMaterialIndex: cloud.trilhaMaterialIndex ?? prev?.trilhaMaterialIndex,
+            trilhaSessionType: cloud.trilhaSessionType ?? prev?.trilhaSessionType,
+            reviews: (cloud.reviews?.length ? cloud.reviews : prev?.reviews) || []
+          } as ChatSession;
+        });
+        setSessions(merged);
+        merged.forEach((s) => LocalPersistence.saveSession(user.uid, s));
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/sessions`);
@@ -2286,6 +2432,55 @@ export default function App() {
 
     return () => unsubscribe();
   }, [user]);
+
+  useLayoutEffect(() => {
+    if (!user) {
+      resumeHydratedForUid.current = null;
+      setResumeReady(false);
+      return;
+    }
+    if (resumeHydratedForUid.current === user.uid) return;
+    skipResumeSaveRef.current = true;
+    resumeHydratedForUid.current = user.uid;
+
+    const resume = loadResume(user.uid);
+    const localSessions = LocalPersistence.getSessions(user.uid);
+    const wanted = resume?.sessionId
+      ? localSessions.find((s) => s.id === resume.sessionId)
+      : undefined;
+    const allowSession = Boolean(
+      wanted && (isCeoAccount(user) || wanted.trilhaDay !== undefined)
+    );
+
+    let nextTab: AthenaTab = resume?.tab || 'chat';
+    if (nextTab === 'mentees' && !isCeoAccount(user)) {
+      nextTab = 'chat';
+    }
+
+    if (allowSession && wanted) {
+      setCurrentSessionId(wanted.id);
+      setMessages(wanted.messages || []);
+      setGuidedSubject(wanted.guidedSubject || null);
+      setCurrentArticle(wanted.currentArticle || 1);
+      setActiveTab(nextTab);
+    } else {
+      setCurrentSessionId(null);
+      setMessages([]);
+      setGuidedSubject(null);
+      setCurrentArticle(1);
+      setActiveTab(nextTab === 'chat' ? 'chat' : nextTab);
+    }
+    setResumeReady(true);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user || !resumeReady || resumeHydratedForUid.current !== user.uid) return;
+    if (skipResumeSaveRef.current) {
+      skipResumeSaveRef.current = false;
+      return;
+    }
+    saveResume(user.uid, { tab: activeTab, sessionId: currentSessionId });
+  }, [user?.uid, activeTab, currentSessionId, resumeReady]);
 
   // Sync Statistics and Schedules
   useEffect(() => {
@@ -2469,6 +2664,23 @@ export default function App() {
         performCloudSave();
       }, 2500);
     }
+  };
+
+  const persistBlock6 = (
+    msg: Message,
+    extra?: { sessionId?: string | null; day?: number; part?: number; subject?: string | null; article?: number }
+  ) => {
+    if (!user || msg.role !== 'model') return;
+    const sess = sessions.find((s) => s.id === (extra?.sessionId || currentSessionId));
+    setCompressedReviews(
+      persistReviewFromMessage(user.uid, msg, {
+        sessionId: extra?.sessionId || currentSessionId || undefined,
+        guidedSubject: extra?.subject || sess?.guidedSubject || guidedSubject,
+        currentArticle: extra?.article ?? sess?.currentArticle ?? currentArticle,
+        trilhaDay: extra?.day ?? sess?.trilhaDay,
+        trilhaMaterialIndex: extra?.part ?? sess?.trilhaMaterialIndex
+      })
+    );
   };
 
   const awardXP = async (amount: number) => {
@@ -2728,6 +2940,7 @@ export default function App() {
 
   const startNewSession = async (title: string = "Nova Mentoria", sub: string | null = null, art: number = 1) => {
     if (!user) return;
+    if (!isCEO && !sub) return;
     
     const id = crypto.randomUUID();
     const newSession: ChatSession = {
@@ -2761,6 +2974,10 @@ export default function App() {
   const switchSession = (id: string) => {
     const session = sessions.find(s => s.id === id);
     if (session) {
+      if (!isCEO && session.trilhaDay === undefined && !session.guidedSubject) {
+        handleGoHome();
+        return;
+      }
       setCurrentSessionId(id);
       setMessages(session.messages || []);
       setGuidedSubject(session.guidedSubject);
@@ -2797,6 +3014,8 @@ export default function App() {
   const deleteReview = async (reviewId: string, sessionId?: string) => {
     if (!user) return;
     try {
+      setCompressedReviews(deleteCompressedReview(user.uid, reviewId));
+
       let targetSessionId = sessionId;
       
       // Fallback for older reviews missing sessionId
@@ -2894,86 +3113,58 @@ export default function App() {
       }
     }
 
-    // Extract Challenge JSON
-    if (rawContent.includes(challengeKey)) {
-      const parts = rawContent.split(challengeKey);
-      const afterTag = parts[1].trim();
-      
-      try {
-        const firstBrace = afterTag.indexOf("{");
-        const lastBrace = afterTag.lastIndexOf("}");
-        
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          const challengeJson = afterTag.substring(firstBrace, lastBrace + 1);
-          challenge = JSON.parse(challengeJson);
-          
-          if (challenge && Array.isArray(challenge.questions)) {
-            challenge.questions = challenge.questions.map((q: any) => ({
-              ...q,
-              correctIndex: q.correctIndex !== undefined ? q.correctIndex : (q.correctAnswer !== undefined ? q.correctAnswer : 0)
-            }));
-
-            // Para cursos de 1ª Fase (Objetiva), retira estritamente questões discursivas e orais
-            if (mentorshipPhase === 'objetiva') {
-              challenge.questions = challenge.questions.filter(
-                (q: any) => q.correctIndex !== -1 && q.correctIndex !== -2 && q.correctIndex >= 0
-              );
-            }
-          }
-
-          rawContent = parts[0] + (afterTag.substring(lastBrace + 1));
-        }
-      } catch (e) {
-        console.error("Failed to parse challenge JSON:", e);
-      }
+    // Extract Challenge JSON sem engolir o [BLOCK_6] que vem depois
+    const extractedChallenge = extractChallengeFromText(rawContent);
+    if (extractedChallenge.challenge) {
+      challenge = extractedChallenge.challenge;
+      rawContent = extractedChallenge.content;
+    } else if (rawContent.includes(challengeKey)) {
+      console.error("Failed to parse challenge JSON.");
     }
 
-    // Improved block splitting strategy
+    // Split by named [BLOCK_1]..[BLOCK_6] so um preâmbulo extra não desloca a revisão
     const blocks: string[] = [];
     const blockMarkers = Array.from({ length: 6 }, (_, i) => `[BLOCK_${i + 1}]`);
     let tempContent = rawContent;
-
-    // Check if markers exist
     const hasMarkers = blockMarkers.some(m => tempContent.includes(m));
 
     if (hasMarkers) {
-      // Find all markers and their positions
-      const positions: { index: number, marker: string }[] = [];
-      blockMarkers.forEach(m => {
-        const idx = tempContent.indexOf(m);
-        if (idx !== -1) positions.push({ index: idx, marker: m });
-      });
-      positions.sort((a, b) => a.index - b.index);
-
-      if (positions.length > 0) {
-        // Add preamble if exists
-        if (positions[0].index > 0) {
-          const preamble = tempContent.substring(0, positions[0].index).trim();
-          if (preamble) blocks.push(preamble);
-        }
-
-        // Add blocks
-        for (let i = 0; i < positions.length; i++) {
-          const start = positions[i].index + positions[i].marker.length;
-          const end = (i < positions.length - 1) ? positions[i + 1].index : tempContent.length;
-          const content = tempContent.substring(start, end).trim();
-          
-          if (i === 0 && blocks.length > 0) {
-            // Merge preamble into the first block instead of making it a separate block
-            blocks[0] = blocks[0] + "\n\n" + content;
-          } else {
-            blocks.push(content);
+      for (let i = 0; i < blockMarkers.length; i++) {
+        const marker = blockMarkers[i];
+        const start = tempContent.indexOf(marker);
+        if (start === -1) continue;
+        const contentStart = start + marker.length;
+        let end = tempContent.length;
+        for (let j = i + 1; j < blockMarkers.length; j++) {
+          const next = tempContent.indexOf(blockMarkers[j], contentStart);
+          if (next !== -1) {
+            end = next;
+            break;
           }
         }
+        const chunk = tempContent.substring(contentStart, end).trim();
+        if (chunk) blocks.push(chunk);
+      }
+      if (blocks.length === 0) {
+        blocks.push(tempContent);
       }
     } else {
       blocks.push(tempContent);
     }
 
-    // Capture all generated blocks, but try to stay within 6-7 logical ones
-    const finalBlocks = blocks;
+    const finalBlocks = blocks.map((b) => sanitizeAthenaVoice(b));
+    if (challenge?.questions) {
+      challenge = normalizeObjectiveChallenge({
+        questions: challenge.questions.map((q) => ({
+          ...q,
+          text: sanitizeAthenaVoice(q.text || ""),
+          explanation: sanitizeAthenaVoice(q.explanation || ""),
+          options: Array.isArray(q.options) ? q.options.map((o: string) => sanitizeAthenaVoice(String(o))) : q.options,
+        }))
+      }) || challenge;
+    }
 
-    return { content: rawContent, blocks: finalBlocks, challenge, editalData };
+    return { content: sanitizeAthenaVoice(rawContent), blocks: finalBlocks, challenge, editalData };
   };
 
   const scrollToBottom = () => {
@@ -3087,6 +3278,19 @@ export default function App() {
     let targetSessionId = sessionId;
     const activeArticle = forcedArticle !== undefined ? forcedArticle : currentArticle;
     const activeSubject = forcedSubject !== undefined ? forcedSubject : guidedSubject;
+    const pendingSession =
+      sessions.find((s) => s.id === (targetSessionId || currentSessionId)) ||
+      (user ? LocalPersistence.getSessions(user.uid).find((s) => s.id === (targetSessionId || currentSessionId)) : undefined);
+    const inStructuredStudy = Boolean(
+      forcedTrilhaDay !== undefined ||
+      pendingSession?.trilhaDay !== undefined ||
+      activeSubject ||
+      pendingSession?.guidedSubject ||
+      activeStudyItem
+    );
+    if (!isCEO && !inStructuredStudy) {
+      return;
+    }
 
     const currentAttachedFile = attachedFile;
 
@@ -3140,7 +3344,7 @@ export default function App() {
         parts: [{ text: m.content || "" }]
       }));
 
-      const audienceName = dayNum !== undefined ? "Futuro(a) Magistrado(a)" : (user?.displayName || "Mestre");
+      const audienceName = ATHENA_AUDIENCE_TITLE;
       const { text: responseText, model: usedModel } = await askATHENA(userMessage, history, audienceName, currentAttachedFile, mentorshipStyle, resolvedPhase);
       const parsed = parseATHENAResponse(responseText);
 
@@ -3155,9 +3359,17 @@ export default function App() {
         article: activeArticle,
         sourceType: 'gemini',
         modelName: usedModel,
+        trilhaDay: dayNum !== undefined ? dayNum : undefined,
         trilhaMaterialIndex: dayNum !== undefined ? (activeSession?.trilhaMaterialIndex ?? 0) : undefined
       };
 
+      persistBlock6(botMessage, {
+        sessionId: targetSessionId || currentSessionId,
+        day: dayNum,
+        part: botMessage.trilhaMaterialIndex,
+        subject: activeSubject,
+        article: activeArticle
+      });
       setMessages(prev => [...prev, botMessage]);
 
       if (dayNum !== undefined) {
@@ -3199,7 +3411,9 @@ export default function App() {
           await saveSession({ 
             messages: updatedMessages,
             guidedSubject: activeSubject,
-            currentArticle: activeArticle
+            currentArticle: activeArticle,
+            trilhaDay: dayNum ?? session?.trilhaDay,
+            trilhaMaterialIndex: botMessage.trilhaMaterialIndex ?? session?.trilhaMaterialIndex
           }, targetSessionId, true);
         } catch (saveErr) {
           console.warn("Notice: Cloud sync deferred (quota/network fallback active):", saveErr);
@@ -3366,10 +3580,19 @@ ${matList}
             blocks: parsed.blocks,
             currentBlockIndex: 0,
             subject: activeSubject,
-            article: activeArticle,
+            article: dayNum ?? activeArticle,
             sourceType: 'offline_pareto',
-            modelName: 'Material Local Pareto 80/20'
+            modelName: 'Material Local Pareto 80/20',
+            trilhaDay: dayNum,
+            trilhaMaterialIndex: dayNum !== undefined ? (activeSession?.trilhaMaterialIndex ?? 0) : undefined
           };
+          persistBlock6(botMessage, {
+            sessionId: targetSessionId || currentSessionId,
+            day: dayNum,
+            part: botMessage.trilhaMaterialIndex,
+            subject: activeSubject,
+            article: dayNum ?? activeArticle
+          });
           setMessages(prev => [...prev, botMessage]);
 
           const activeId = (targetSessionId || currentSessionId);
@@ -3386,7 +3609,9 @@ ${matList}
             saveSession({
               messages: updatedMessages,
               guidedSubject: activeSubject,
-              currentArticle: activeArticle
+              currentArticle: activeArticle,
+              trilhaDay: dayNum ?? session?.trilhaDay,
+              trilhaMaterialIndex: botMessage.trilhaMaterialIndex ?? session?.trilhaMaterialIndex
             }, activeId, true);
           }
           return;
@@ -3521,7 +3746,7 @@ ${matList}
     let prep = '';
     if (style === 'automatico') {
       prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (Magistratura, Ministério Público, Defensoria e Delegado) indicam que o estudo deste tema (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
+Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (${ATHENA_CAREERS_LABEL}) indicam que o estudo deste tema (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
 Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
 - Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
 - Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
@@ -3537,7 +3762,7 @@ Adote rigores condizentes com estes dados, concentrando a explanação guiada ne
 `;
     }
     
-    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e questões de provas anteriores de Magistratura/Ministério Público. Siga o fluxo de estudos em blocos!`;
+    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e em questões objetivas de ${ATHENA_CAREERS_LABEL}. Siga o fluxo de estudos em blocos!`;
   };
 
   const getTrilhaDayDiscursiveMessage = (dayNum: number, materias: { nome: string; conteudo: string }[], semana: number) => {
@@ -3574,7 +3799,7 @@ Sua conduta como Presidente da Mesa Examinadora:
     let prep = '';
     if (style === 'automatico') {
       prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (Magistratura, Ministério Público, Defensoria e Delegado) indicam que o estudo de "${currentMat.nome}" (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
+Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (${ATHENA_CAREERS_LABEL}) indicam que o estudo de "${currentMat.nome}" (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
 Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
 - Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
 - Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
@@ -3590,27 +3815,13 @@ Adote rigores condizentes com estes dados, concentrando a explanação guiada ne
 `;
     }
     
-    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
-    
-    // Eventual automatic trigger of discursive or oral challenges during the 100 days flow
-    let hybridDirective = "";
-    if (dayNum % 10 === 5 || dayNum % 5 === 0) {
-      hybridDirective = `\n\n[ALERTA DE DESAFIO ESPECIAL - QUESTÃO DISCURSIVA (2ª FASE)]
-Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de Desafio Especial Athena de 2ª Fase!
-No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas de múltipla escolha normais, elabore obrigatoriamente uma única QUESTÃO DISCURSIVA (2ª Fase) densa do tema estudado hoje para treinar o aluno, instruindo-o a redigir sua resposta fundamentada por escrito. Aguarde a submissão de sua resposta para proferir uma correção analítica rigorosa com nota final de banca.`;
-    } else if (dayNum % 10 === 3 || dayNum % 7 === 0) {
-      hybridDirective = `\n\n[ALERTA DE DESAFIO ESPECIAL - SIMULADO EXAME ORAL (3ª FASE)]
-Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de Desafio Especial Athena de Exame Oral da 3ª Fase!
-No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas normais, apresente uma única ARGUIÇÃO ORAL (Pergunta de Exame Oral) formal de banca examinadora, instruindo o aluno a utilizar gravação de áudio ou digitação por ditado de voz para responder verbalmente sob pressão à banca. Aguarde a sustentação para proferir nota oficial de oratória jurídica.`;
-    }
-
     let extraSource = `\n\n[DIRETRIZES DA BASE DE CONHECIMENTO E PERTINÊNCIA TEMÁTICA ABSOLUTA ATHENA]:
 1. BASE SOBERANA E CONFINAMENTO TEMÁTICO RESTRITO:
    - A sua base soberana de verdade é EXCLUSIVAMENTE o seguinte recorte: ${currentMat.nome} (${currentMat.conteudo}).
    - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo dos 6 blocos deve nascer e se esgotar no exame deste recorte!
 
 2. DIRETRIZES BLOCO A BLOCO (RIGOR ESTRITO):
-   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE uma saudação institucional e universal de mentoria de alto rendimento (ex: "Olá, Futuro(a) Magistrado(a)!", "Seja bem-vindo(a), Candidato(a) de Elite!"). NUNCA use nomes individuais ou apelidos pessoais nesta saudação, pois este conteúdo será homologado e compartilhado com todos os alunos da mentoria. Apresente o Raio-X e a relevância prática deste recorte exato (${currentMat.conteudo}) para concursos de ponta (Magistratura, MP, Defensoria e Delegado).
+   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE a saudação institucional "Olá, ${ATHENA_AUDIENCE_TITLE}!". NUNCA diga Futuro Magistrado, Futuro Juiz ou nome pessoal, pois o conteúdo é homologado para todas as carreiras. Apresente o Raio-X deste recorte (${currentMat.conteudo}) para ${ATHENA_CAREERS_LABEL}. Proibido citar certame nominado (TJSP, MPRS, TRF4, DPU 2024 etc.). Proibido gerar tabelas Markdown.
    
    - [BLOCK_2] (⚖️ Letra da Lei Decodificada): Decodifique, esquematize e disseque com suas próprias palavras e rigor analítico CADA UM dos artigos e princípios compreendidos no intervalo ${currentMat.conteudo}. Destaque núcleos dogmáticos, prazos, exceções legais, postulados normativos e pegadinhas clássicas de banca examinadora, evitando transcrição mecânica literal de apostilas comerciais.
    
@@ -3629,11 +3840,12 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
    - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase) estritamente circunscrita aos institutos disciplinados em ${currentMat.conteudo}. Traga divergências doutrinárias reais e exemplos práticos da atividade forense que ilustrem exatamente os artigos estudados hoje.
    
    - [BLOCK_5] (🎯 Desafio ATHENA - Questões Estritamente Temáticas):
-     * REGRA DE PERTINÊNCIA DAS QUESTÕES: 100% das questões geradas (objetivas ou discursiva/oral) DEVEM ter como objeto de cobrança EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
+     * SOMENTE questões OBJETIVAS de múltipla escolha (4 ou 5 alternativas, correctIndex 0-4). É PROIBIDO discursiva, subjetiva ou prova oral.
+     * REGRA DE PERTINÊNCIA: 100% das questões DEVEM cobrar EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
      * É TERMINANTEMENTE PROIBIDO formular questões sobre artigos ou tópicos de fora deste recorte.
      * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou o entendimento consolidado deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais, sem inventar números de processos fictícios.
    
-   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).${hybridDirective}`;
+   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).`;
 
     const grounding = getGroundingForTrilhaPart(dayNum, currentMat.nome, currentMat.conteudo);
     if (grounding.hasGrounding) {
@@ -3653,7 +3865,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     if (!dayItem || !dayItem.materias || nextMatIdx >= dayItem.materias.length) return;
     
     // Check if already in cache or homologated
-    if (getLocalHomologatedLesson(dayNum, nextMatIdx)) return;
+    if (getLocalHomologatedLesson(dayNum, nextMatIdx) || isOfficialPart(dayNum, nextMatIdx)) return;
     if (getCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase)) return;
 
     const nextMat = dayItem.materias[nextMatIdx];
@@ -3667,12 +3879,18 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     try {
       console.log(`[ATHENA Pre-fetch] Disparando em background geração da Parte ${nextMatIdx + 1} de ${dayItem.materias.length} (Dia ${dayNum} - ${nextMat.nome})...`);
-      const { text, model } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mStyle, resolvedPhase as any);
+      const { text, model } = await askATHENA(nextMsg, [], ATHENA_AUDIENCE_TITLE, undefined, mStyle, resolvedPhase as any);
       setCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase, {
         text,
         model,
         timestamp: Date.now()
       });
+      if (user) {
+        persistBlock6(
+          { role: 'model', content: text, subject: nextMat.nome, article: dayNum, trilhaDay: dayNum, trilhaMaterialIndex: nextMatIdx },
+          { day: dayNum, part: nextMatIdx, subject: nextMat.nome, article: dayNum }
+        );
+      }
       console.log(`[ATHENA Pre-fetch] Parte ${nextMatIdx + 1} (Dia ${dayNum}) salva em cache local com sucesso!`);
     } catch (err) {
       console.warn(`[ATHENA Pre-fetch] Não foi possível pré-carregar Parte ${nextMatIdx + 1}:`, err);
@@ -3746,7 +3964,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       if (homologated && homologated.content) {
         console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte 1! Carregamento imediato.`);
         const parsed = parseATHENAResponse(homologated.content);
-        const resolvedChallenge = homologated.challenge || parsed.challenge;
+        const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
         const botMessage: Message = {
           role: 'model',
           content: parsed.content,
@@ -3754,11 +3972,20 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           blocks: parsed.blocks,
           currentBlockIndex: 0,
           subject: guidedSubjectName,
-          article: 1,
+          article: dayNum,
           sourceType: 'gemini',
           modelName: 'Oficial Homologado pelo CEO',
+          trilhaDay: dayNum,
           trilhaMaterialIndex: 0
         };
+
+        persistBlock6(botMessage, {
+          sessionId: id,
+          day: dayNum,
+          part: 0,
+          subject: guidedSubjectName,
+          article: 1
+        });
 
         const cachedSession: ChatSession = {
           ...newSession,
@@ -3798,11 +4025,20 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           blocks: parsed.blocks,
           currentBlockIndex: 0,
           subject: guidedSubjectName,
-          article: 1,
+          article: dayNum,
           sourceType: 'gemini',
           modelName: `${cached.model} (Cache Instantâneo)`,
+          trilhaDay: dayNum,
           trilhaMaterialIndex: 0
         };
+
+        persistBlock6(botMessage, {
+          sessionId: id,
+          day: dayNum,
+          part: 0,
+          subject: guidedSubjectName,
+          article: 1
+        });
 
         const cachedSession: ChatSession = {
           ...newSession,
@@ -3860,12 +4096,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     if (!msg || !msg.blocks) return;
     
     const isLastBlock = (msg.currentBlockIndex ?? 0) >= msg.blocks.length - 1;
+    const session = sessions.find(s => s.id === currentSessionId);
+    const trilha = inferTrilhaContext(session, messages, msg);
     
     if (isLastBlock) {
-      const session = sessions.find(s => s.id === currentSessionId);
-      if (session && session.trilhaDay) {
-        const dayNum = session.trilhaDay;
-        const currentMatIdx = (msg?.trilhaMaterialIndex !== undefined) ? msg.trilhaMaterialIndex : (session.trilhaMaterialIndex ?? 0);
+      await saveReview(msgIdx);
+      const dayNum = trilha.day;
+      if (dayNum !== undefined) {
+        const currentMatIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : trilha.part;
         const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
         
         if (dayItem && dayItem.materias) {
@@ -3906,6 +4144,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             await saveSession({
               title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
               guidedSubject: nextMat.nome,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx,
               messages: updatedMessages
             }, currentSessionId);
@@ -3924,7 +4163,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               if (homologated && homologated.content) {
                 console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte ${nextMatIdx + 1}! Carregamento imediato.`);
                 const parsed = parseATHENAResponse(homologated.content);
-                const resolvedChallenge = homologated.challenge || parsed.challenge;
+                const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
                 const botMessage: Message = {
                   role: 'model',
                   content: parsed.content,
@@ -3932,11 +4171,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: 'Oficial Homologado pelo CEO',
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
                 setIsLoading(false);
@@ -3986,11 +4233,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: `${cached.model} (Cache Instantâneo)`,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
                 setIsLoading(false);
@@ -4032,7 +4287,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               try {
                 // Cada parte da trilha possui comando autocontido com escopo exato.
                 // Usamos histórico limpo ([]), idêntico ao prefetch, para máxima agilidade e sem poluição de contexto.
-                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
+                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, resolvedPhase);
                 const parsed = parseATHENAResponse(responseText);
                 const botMessage: Message = {
                   role: 'model',
@@ -4041,11 +4296,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: usedModel,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 
                 const finalMessages = [...updatedMessages, botMessage];
                 setMessages(finalMessages);
@@ -4112,7 +4375,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
                 const finalMessages = [...updatedMessages, botErrorMessage];
@@ -4153,28 +4417,42 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           return;
         }
 
-        // Default (non-trilha) flow
+        // Default (non-trilha) flow — nunca na Trilha Jurídica
+        if (isTrilhaLesson(trilha, msg)) {
+          return;
+        }
         const nextArt = (msg.article || currentArticle) + 1;
         setCurrentArticle(nextArt);
         handleSendMessage(`Excelente. Vamos avançar para o Artigo ${nextArt} da ${guidedSubject}?`, true, nextArt);
         return;
       }
 
+      const nextBlockIndex = (msg.currentBlockIndex ?? 0) + 1;
       const updatedMessages = (messages || []).map((m, i) => {
         if (i === msgIdx) {
-          const nextIndex = (m.currentBlockIndex ?? 0) + 1;
-          
-          // If it's the last block, and we have an active study item, mark it complete
-          if (nextIndex === (m.blocks?.length ?? 0) - 1 && activeStudyItem) {
+          if (nextBlockIndex === (m.blocks?.length ?? 0) - 1 && activeStudyItem) {
             markScheduleItemComplete(activeStudyItem.scheduleId, activeStudyItem.itemIndex);
           }
 
-          return { ...m, currentBlockIndex: nextIndex };
+          return { ...m, currentBlockIndex: nextBlockIndex };
         }
         return m;
       });
       setMessages(updatedMessages);
-      saveSession({ messages: updatedMessages });
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: trilha.day ?? session?.trilhaDay,
+        trilhaMaterialIndex: msg.trilhaMaterialIndex ?? trilha.part
+      });
+      if (nextBlockIndex >= (msg.blocks.length - 1)) {
+        persistBlock6(msg, {
+          sessionId: currentSessionId,
+          day: trilha.day,
+          part: msg.trilhaMaterialIndex ?? trilha.part,
+          subject: msg.subject || guidedSubject,
+          article: msg.article
+        });
+      }
 
       // Transição suave com scroll automático para o novo bloco revelado
       const targetBlockIndex = (messages[msgIdx]?.currentBlockIndex ?? 0) + 1;
@@ -4201,16 +4479,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     for (const name of namesToSanitize) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), '$1, Futuro(a) Magistrado(a)');
-      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), 'Futuro(a) Magistrado(a)');
+      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), `$1, ${ATHENA_AUDIENCE_TITLE}`);
+      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), ATHENA_AUDIENCE_TITLE);
     }
-    return sanitized;
+    return sanitizeAthenaVoice(sanitized);
   };
 
   const handleCeoApproveLesson = async (targetMsgIdx?: number) => {
     const activeSess = sessions.find(s => s.id === currentSessionId);
-    if (!activeSess || activeSess.trilhaDay === undefined) return null;
-    const day = activeSess.trilhaDay;
 
     let targetMsg: Message | undefined;
     if (targetMsgIdx !== undefined && messages[targetMsgIdx]) {
@@ -4219,29 +4495,33 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
     }
 
+    const trilha = inferTrilhaContext(activeSess, messages, targetMsg);
+    if (trilha.day === undefined) return null;
+    const day = trilha.day;
     if (!targetMsg || !targetMsg.content) {
       alert("Aguarde o conteúdo da lição ser gerado antes de aprovar.");
       return null;
     }
 
-    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (activeSess.trilhaMaterialIndex ?? 0);
+    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (trilha.part ?? 0);
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
     const partSubject = (dayItem && dayItem.materias && dayItem.materias[part]) 
       ? dayItem.materias[part].nome 
-      : (targetMsg.subject || activeSess.guidedSubject || 'Direito');
+      : (targetMsg.subject || activeSess?.guidedSubject || 'Direito');
 
     setIsSavingHomologation(true);
     try {
       let sanitizedContent = sanitizeHomologatedContent(targetMsg.content, user?.displayName);
       const sanitizedBlocks = targetMsg.blocks?.map(b => sanitizeHomologatedContent(b, user?.displayName));
 
-      // Preservação essencial das questões e do bloco de desafio para que nunca sumam
-      const lessonChallenge = targetMsg.challenge || null;
-      if (lessonChallenge && !sanitizedContent.includes('[ATHENA_CHALLENGE]')) {
-        sanitizedContent = sanitizedContent.trim() + '\n\n[ATHENA_CHALLENGE]\n' + JSON.stringify(lessonChallenge, null, 2);
+      const lessonChallenge = normalizeObjectiveChallenge(targetMsg.challenge)
+        || extractChallengeFromText(sanitizedContent).challenge
+        || null;
+      if (lessonChallenge) {
+        sanitizedContent = embedChallengeInContent(sanitizedContent, lessonChallenge);
       }
 
-      const lesson: HomologatedLesson = {
+      const lesson = ensureObjectiveChallenge({
         id: getLessonDocId(day, part),
         day,
         part,
@@ -4251,35 +4531,60 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         blocks: sanitizedBlocks,
         challenge: lessonChallenge,
         status: 'approved',
-        approvedBy: user?.email || 'jhonny.spider@gmail.com',
+        approvedBy: 'jhonny.spider@gmail.com',
         approvedAt: Date.now(),
         modelUsed: targetMsg.modelName || 'gemini-3.8-flash',
-        version: 1
-      };
-      await saveHomologatedLesson(lesson);
+        version: 1,
+        review: extractReviewBlock(sanitizedContent, sanitizedBlocks) || undefined
+      });
+      const republished = parseATHENAResponse(lesson.content);
+      const saved = await saveHomologatedLesson(lesson);
       setHomologatedLessonState(lesson);
+      if (user) {
+        const reviewText = extractReviewBlock(sanitizedContent, sanitizedBlocks);
+        if (reviewText) {
+          setCompressedReviews(upsertCompressedReview(user.uid, buildCompressedReview({
+            content: reviewText,
+            subject: partSubject,
+            article: day,
+            sessionId: currentSessionId || undefined,
+            day,
+            part
+          })));
+        }
+      }
 
-      // Também sincroniza a mensagem da sessão com a versão limpa e universal
       const updatedMessages = (messages || []).map((m, i) => {
         if ((targetMsgIdx !== undefined && i === targetMsgIdx) || (targetMsgIdx === undefined && m === targetMsg)) {
           return {
             ...m,
-            content: sanitizedContent,
-            blocks: sanitizedBlocks,
-            challenge: lessonChallenge || m.challenge
+            content: republished.content,
+            blocks: republished.blocks,
+            challenge: lesson.challenge || republished.challenge || m.challenge
           };
         }
         return m;
       });
       setMessages(updatedMessages);
-      saveSession({ messages: updatedMessages }, currentSessionId);
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: day,
+        trilhaMaterialIndex: part
+      }, currentSessionId);
 
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) homologado com sucesso! Salvo no cache central e no dispositivo.`);
+      const quizCount = lesson.challenge?.questions?.length || 0;
+      setHomologationSuccessBanner(
+        saved.cloud
+          ? (quizCount
+            ? `Dia ${day} · Parte ${part + 1} publicado no catálogo oficial com ${quizCount} questões objetivas. Essa parte vale para todos os alunos.`
+            : `Dia ${day} · Parte ${part + 1} publicado sem questões objetivas. Use Regerar questões para refazer só esse bloco.`)
+          : `Dia ${day} · Parte ${part + 1} ficou só neste aparelho. O catálogo oficial recusou a gravação${saved.error ? `: ${saved.error}` : ''}. Toque em Aprovar e Salvar de novo.`
+      );
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
       return lesson;
     } catch (err: any) {
       console.warn("Aviso ao homologar lição (preservada no cache local):", err);
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) salvo no cache local com sucesso!`);
+      setHomologationSuccessBanner(`Dia ${day} · Parte ${part + 1} não entrou no catálogo oficial. ${err?.message || 'Tente Aprovar e Salvar de novo.'}`);
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
       return null;
     } finally {
@@ -4305,7 +4610,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setIsLoading(true);
     const msg = getTrilhaDayPartitionMessage(day, dayItem.materias, part, dayItem.semana, mentorshipStyle);
     try {
-      const { text, model } = await askATHENA(msg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, mentorshipPhase);
+      const { text, model } = await askATHENA(msg, [], ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, mentorshipPhase);
       const parsed = parseATHENAResponse(text);
       const botMessage: Message = {
         role: 'model',
@@ -4314,15 +4619,24 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         blocks: parsed.blocks,
         currentBlockIndex: 0,
         subject: dayItem.materias[part].nome,
-        article: 1,
+        article: day,
         sourceType: 'gemini',
         modelName: `${model} (Regerado pelo CEO)`,
+        trilhaDay: day,
         trilhaMaterialIndex: part
       };
+      persistBlock6(botMessage, {
+        sessionId: currentSessionId,
+        day,
+        part,
+        subject: dayItem.materias[part].nome,
+        article: day
+      });
       const userMsg: Message = { role: 'user', content: msg };
       setMessages([userMsg, botMessage]);
       await saveSession({
         messages: [userMsg, botMessage],
+        trilhaDay: day,
         trilhaMaterialIndex: part
       }, currentSessionId);
       setHomologatedLessonState(prev => prev ? { ...prev, status: 'draft' } : null);
@@ -4331,6 +4645,95 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       alert("Erro ao regerar: " + (err.message || String(err)));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCeoRegenerateQuestions = async () => {
+    const activeSess = sessions.find(s => s.id === currentSessionId);
+    const targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
+    const trilha = inferTrilhaContext(activeSess, messages, targetMsg);
+    if (!targetMsg || trilha.day === undefined) {
+      alert('Abra a parte da trilha antes de regerar as questões.');
+      return;
+    }
+    const day = trilha.day;
+    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (trilha.part ?? 0);
+    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
+    const subject = (dayItem?.materias && dayItem.materias[part])
+      ? dayItem.materias[part].nome
+      : (targetMsg.subject || activeSess?.guidedSubject || 'Direito');
+    const outline = (targetMsg.blocks || [])
+      .map((block, index) => {
+        if (/desafio\s+athena/i.test(block) && index >= 4) return '';
+        return `[BLOCK_${index + 1}] ${block.replace(/\s+/g, ' ').slice(0, 900)}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+    if (!confirm(`Regerar somente as questões objetivas da Parte ${part + 1} do Dia ${day}? O texto dos outros blocos permanece.`)) return;
+
+    setIsRegeneratingQuestions(true);
+    try {
+      const { text, model } = await regenerateObjectiveChallenge(
+        `Dia ${day}, parte ${part + 1}. Matéria: ${subject}.\nGere 10 questões objetivas inéditas somente sobre este recorte. Não reescreva a aula.\n\n${outline}`
+      );
+      const quiz = parseChallengeModelOutput(text);
+      if (!quiz || quiz.questions.length < 8) {
+        throw new Error('A IA não devolveu um bloco objetivo utilizável. Tente de novo.');
+      }
+      const baseContent = targetMsg.content?.includes('[BLOCK_1]')
+        ? targetMsg.content
+        : (targetMsg.blocks || []).map((block, index) => `[BLOCK_${index + 1}]\n${block}`).join('\n\n');
+      const mergedContent = embedChallengeInContent(baseContent, quiz);
+      const parsed = parseATHENAResponse(mergedContent);
+      const challengeIndex = findChallengeBlockIndex(parsed.blocks);
+      const lesson = ensureObjectiveChallenge({
+        id: getLessonDocId(day, part),
+        day,
+        part,
+        subject,
+        topic: targetMsg.subject || subject,
+        content: mergedContent,
+        blocks: parsed.blocks,
+        challenge: quiz,
+        status: 'approved',
+        approvedBy: 'jhonny.spider@gmail.com',
+        approvedAt: Date.now(),
+        modelUsed: model,
+        version: 1,
+        review: extractReviewBlock(mergedContent, parsed.blocks) || undefined
+      });
+      const saved = await saveHomologatedLesson(lesson);
+      setHomologatedLessonState(lesson);
+      const updatedMessages = (messages || []).map((m) => {
+        if (m !== targetMsg) return m;
+        return {
+          ...m,
+          content: parsed.content,
+          blocks: parsed.blocks,
+          challenge: lesson.challenge || quiz,
+          currentBlockIndex: Math.max(m.currentBlockIndex ?? 0, challengeIndex),
+          modelName: `${model} (questões regeradas)`,
+          trilhaDay: day,
+          trilhaMaterialIndex: part
+        };
+      });
+      setMessages(updatedMessages);
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: day,
+        trilhaMaterialIndex: part
+      }, currentSessionId);
+      setHomologationSuccessBanner(
+        saved.cloud
+          ? `Questões da Parte ${part + 1} do Dia ${day} atualizadas (${lesson.challenge?.questions.length || quiz.questions.length}). O restante da aula foi mantido.`
+          : `As questões novas ficaram só neste aparelho${saved.error ? `: ${saved.error}` : ''}.`
+      );
+      setTimeout(() => setHomologationSuccessBanner(null), 6000);
+    } catch (err: any) {
+      console.error('Erro ao regerar questões:', err);
+      alert(err?.message || 'Não foi possível regerar só as questões.');
+    } finally {
+      setIsRegeneratingQuestions(false);
     }
   };
 
@@ -4383,11 +4786,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const skipTrilhaLesson = async (msgIdx: number) => {
     const session = sessions.find(s => s.id === currentSessionId);
-    if (session && session.trilhaDay !== undefined) {
-      const dayNum = session.trilhaDay;
-      const currentMatIdx = (messages[msgIdx]?.trilhaMaterialIndex !== undefined) ? messages[msgIdx].trilhaMaterialIndex : (session.trilhaMaterialIndex ?? 0);
+    const trilha = inferTrilhaContext(session, messages, messages[msgIdx]);
+    if (trilha.day !== undefined) {
+      const dayNum = trilha.day;
+      const currentMatIdx = (messages[msgIdx]?.trilhaMaterialIndex !== undefined) ? messages[msgIdx].trilhaMaterialIndex : trilha.part;
       const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
-      const isEstudo = session.trilhaSessionType === 'estudo' || !session.trilhaSessionType;
+      const isEstudo = !session?.trilhaSessionType || session.trilhaSessionType === 'estudo';
       
       if (dayItem && dayItem.materias && isEstudo) {
         const nextMatIdx = currentMatIdx + 1;
@@ -4436,7 +4840,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
             if (homologated && homologated.content) {
               const parsed = parseATHENAResponse(homologated.content);
-              const resolvedChallenge = homologated.challenge || parsed.challenge;
+              const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
               const botMessage: Message = {
                 role: 'model',
                 content: parsed.content,
@@ -4444,11 +4848,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 blocks: parsed.blocks,
                 currentBlockIndex: 0,
                 subject: nextMat.nome,
-                article: 1,
+                article: dayNum,
                 sourceType: 'gemini',
                 modelName: 'Oficial Homologado pelo CEO',
+                trilhaDay: dayNum,
                 trilhaMaterialIndex: nextMatIdx
               };
+              persistBlock6(botMessage, {
+                sessionId: currentSessionId,
+                day: dayNum,
+                part: nextMatIdx,
+                subject: nextMat.nome,
+                article: 1
+              });
               const finalMessages = [...updatedMessages, botMessage];
               setMessages(finalMessages);
               setIsLoading(false);
@@ -4473,7 +4885,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             } else if (session?.trilhaSessionType === 'oral') {
               resolvedPhase = 'oral';
             }
-            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
+            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, resolvedPhase);
             const parsed = parseATHENAResponse(responseText);
             const botMessage: Message = {
               role: 'model',
@@ -4482,11 +4894,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               blocks: parsed.blocks,
               currentBlockIndex: 0,
               subject: nextMat.nome,
-              article: 1,
+              article: dayNum,
               sourceType: 'gemini',
               modelName: usedModel,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx
             };
+            persistBlock6(botMessage, {
+              sessionId: currentSessionId,
+              day: dayNum,
+              part: nextMatIdx,
+              subject: nextMat.nome,
+              article: 1
+            });
             
             const finalMessages = [...updatedMessages, botMessage];
             setMessages(finalMessages);
@@ -4520,7 +4940,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
               currentBlockIndex: 0,
               subject: nextMat.nome,
-              article: 1,
+              article: dayNum,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx
             };
             const finalMessages = [...updatedMessages, botErrorMessage];
@@ -4624,51 +5045,28 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const saveReview = async (msgIdx: number) => {
     const msg = messages[msgIdx];
-    const targetSubject = msg.subject || guidedSubject || 'Estudo Geral';
-    const targetArticle = msg.article || currentArticle || 0;
-    
-    if (!msg.blocks || !currentSessionId) return;
-    
-    // Try to find the review block
-    let reviewText = msg.blocks[msg.blocks.length - 1];
-    
-    if (msg.blocks.length >= 6) {
-      reviewText = msg.blocks[5];
-    } else {
-      const likelyReview = msg.blocks.find(b => 
-        b.toLowerCase().includes('revisão') || 
-        (b.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('•')).length >= 5)
-      );
-      if (likelyReview) reviewText = likelyReview;
-    }
-    
-    if (!reviewText || reviewText.length < 20) return;
-
     const session = sessions.find(s => s.id === currentSessionId);
-    if (!session) return;
-    
-    const currentReviews = session.reviews || [];
-    
-    // Check if duplicate in this session
-    const isDuplicate = currentReviews.some(r => 
-      r.subject === targetSubject && 
-      r.article === targetArticle && 
-      r.content === reviewText
-    );
-    
-    if (isDuplicate) return;
+    const targetSubject = msg.subject || guidedSubject || session?.guidedSubject || 'Estudo Geral';
+    const targetArticle = msg.article || currentArticle || session?.trilhaDay || 0;
+    const reviewText = extractReviewBlock(msg.content, msg.blocks);
+    if (!reviewText || !user) return;
 
-    const newReview: Review = {
-      id: crypto.randomUUID(),
-      sessionId: currentSessionId,
+    const newReview = buildCompressedReview({
+      content: reviewText,
       subject: targetSubject,
       article: targetArticle,
-      content: reviewText,
-      timestamp: Date.now()
-    };
+      sessionId: currentSessionId || undefined,
+      day: session?.trilhaDay,
+      part: msg.trilhaMaterialIndex ?? session?.trilhaMaterialIndex
+    });
+    setCompressedReviews(upsertCompressedReview(user.uid, newReview));
 
-    await saveSession({ reviews: [...currentReviews, newReview] });
-    // Save to local IndexedDB cache
+    if (session) {
+      const currentReviews = session.reviews || [];
+      if (!currentReviews.some((r) => r.id === newReview.id)) {
+        await saveSession({ reviews: [...currentReviews, newReview] });
+      }
+    }
     cacheArticle(targetSubject, targetArticle, reviewText);
   };
 
@@ -5079,7 +5477,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   )}
                 >
                   <item.icon size={18} className={cn(activeTab === item.id ? "text-brand-gold" : "text-slate-500 group-hover:text-brand-gold/70")} />
-                  {item.label}
+                  <span className="flex-1 text-left">{item.label}</span>
+                  {item.id === 'reviews' && reviews.length > 0 && (
+                    <span className="text-[10px] font-black text-brand-gold bg-brand-gold/10 px-2 py-0.5 rounded-full">
+                      {reviews.length}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -5475,22 +5878,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                     </div>
 
                     <div className="w-full space-y-2.5">
-                      {/* Botão Oficial Google Sign-In */}
-                      <button 
-                        type="button"
-                        onClick={handleGoogleLogin}
-                        className="w-full flex items-center justify-center gap-2.5 px-6 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold uppercase tracking-wider text-[11px] rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24">
-                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                        </svg>
-                        <span>Entrar com Conta Google</span>
-                      </button>
-
-                      {/* Acesso Rápido Visitante */}
                       <button 
                         type="button"
                         onClick={handleLoginAsGuest}
@@ -5784,14 +6171,15 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               >
                 <div className="text-center space-y-4">
                    <h2 className="text-3xl font-serif font-bold text-slate-100"><span className="text-brand-gold">Revisão</span> Comprimida</h2>
-                   <p className="text-slate-400 text-sm">Acesse rapidamente os pontos-chave de todos os artigos já estudados.</p>
+                   <p className="text-slate-400 text-sm">Somente o Bloco 6 de cada parte publicada, agrupado por dia. O mesmo texto vale para todos os alunos.</p>
                 </div>
                 <Suspense fallback={<div className="h-48 bg-slate-900 border border-white/5 rounded-[2.5rem] animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Carregando lista de revisões comprimidas...</div>}>
                   <ReviewList 
                     reviews={reviews} 
                     onSelect={(rev) => {
+                      const exists = sessions.some((s) => s.id === rev.sessionId);
+                      if (!exists) return;
                       switchSession(rev.sessionId);
-                      // Force a scroll to the specific section after a small delay for DOM updates
                       setTimeout(() => {
                         const id = `review-${rev.subject.replace(/\s+/g, '-').toLowerCase()}-${rev.article}`;
                         const element = document.getElementById(id);
@@ -6750,9 +7138,10 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                     <AnimatePresence mode="popLayout">
                       {(() => {
                         const activeSess = sessions.find(s => s.id === currentSessionId);
-                        const tDay = activeSess?.trilhaDay;
-                        const tMatIdx = activeSess?.trilhaMaterialIndex;
-                        const tTotal = tDay ? (TRILHA_JURIDICA_DATA.find(d => d.dia === tDay)?.materias?.length || 0) : 0;
+                        const inferredTrilha = inferTrilhaContext(activeSess, messages);
+                        const tDay = inferredTrilha.day;
+                        const tMatIdx = inferredTrilha.part;
+                        const tTotal = inferredTrilha.total || (tDay ? 5 : 0);
                         
                         const visibleMessages = (messages || []).filter(m => !getIsInstructionMessage(m));
                         
@@ -6921,10 +7310,20 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
 
                                   <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
                                     <button
-                                      onClick={handleCeoRegenerateLesson}
-                                      disabled={isLoading}
+                                      onClick={handleCeoRegenerateQuestions}
+                                      disabled={isLoading || isRegeneratingQuestions}
                                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Regerar lição do zero com a IA Gemini"
+                                      title="Regerar somente as questões objetivas e manter o resto da aula"
+                                    >
+                                      <Target size={14} className={cn(isRegeneratingQuestions && "animate-pulse")} />
+                                      {isRegeneratingQuestions ? 'Gerando questões...' : 'Regerar questões'}
+                                    </button>
+
+                                    <button
+                                      onClick={handleCeoRegenerateLesson}
+                                      disabled={isLoading || isRegeneratingQuestions}
+                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                      title="Regerar a aula inteira com a IA Gemini"
                                     >
                                       <RotateCw size={14} className={cn(isLoading && "animate-spin")} />
                                       Regerar IA

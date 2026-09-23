@@ -90,7 +90,7 @@ export function calcularIncidenciaParaMaterias(
       label: 'Lei Seca (Literalidade)',
       porcentagens: { leiSeca: 75, doutrina: 15, jurisprudencia: 10 },
       justificativa: "A LINDB e as normas fundamentais dos artigos iniciais dos códigos têm cobrança majoritariamente literal nas provas de Juiz Substituo e Promotor, perfazendo cerca de 75% das questões históricas.",
-      concursoHistorico: "TJ-SP 2024 / MPSC 2025: Cobrança focada 100% no texto estrito dos arts. 1º ao 6º da LINDB."
+      concursoHistorico: "Concursos da magistratura: cobrança focada no texto estrito dos arts. 1º ao 6º da LINDB."
     };
   }
 
@@ -100,7 +100,7 @@ export function calcularIncidenciaParaMaterias(
       label: 'Jurisprudência / Precedentes',
       porcentagens: { leiSeca: 35, doutrina: 20, jurisprudencia: 45 },
       justificativa: "Embora o art. 5º tenha forte base literal, a jurisprudência correlata do STF e os remédios constitucionais (HC, MS, HD) dominam as fases objetivas e discursivas de concursos jurídicos de elite.",
-      concursoHistorico: "Magistratura Federal TRF4 2025: Foco absoluto em informativos do STF sobre buscas domiciliares e provas ilícitas."
+      concursoHistorico: "Concursos da magistratura: foco em informativos do STF sobre buscas domiciliares e provas ilícitas."
     };
   }
 
@@ -111,7 +111,7 @@ export function calcularIncidenciaParaMaterias(
       label: 'Jurisprudência Temática',
       porcentagens: { leiSeca: 20, doutrina: 15, jurisprudencia: 65 },
       justificativa: "As decisões dos tribunais e os precedentes vinculantes (STF/STJ) representam mais de 65% das questões deste ponto. Estude com foco absoluto em Súmulas e Informativos recentes da Corte de Uniformização.",
-      concursoHistorico: "DPU 2024 / TJ-RJ 2025: 70% das questões contendo controle concentrado ou repercussão geral exigiram tese exata do STF."
+      concursoHistorico: "Concursos da defensoria pública e da magistratura: teses de controle concentrado e repercussão geral do STF."
     };
   }
 
@@ -121,7 +121,7 @@ export function calcularIncidenciaParaMaterias(
       label: 'Teórico-Doutrinário (Doutrina Densa)',
       porcentagens: { leiSeca: 25, doutrina: 55, jurisprudencia: 20 },
       justificativa: "Este bloco conceitual exige grande amparo teórico. Doutrina de vanguarda, classificações clássicas (como correntes de dolo, erro de tipo/proibição, princípios e poder constituinte) determinam o corte.",
-      concursoHistorico: "MPSP 2025: Questões de Teoria do Crime e Teoria da Constituição explorando divergências trilaterais da doutrina."
+      concursoHistorico: "Concursos do ministério público: Teoria do Crime e Teoria da Constituição com divergências doutrinárias."
     };
   }
 
@@ -131,7 +131,7 @@ export function calcularIncidenciaParaMaterias(
       label: 'Lei Seca e Súmulas Correlatas',
       porcentagens: { leiSeca: 60, doutrina: 15, jurisprudencia: 25 },
       justificativa: "A Nova Lei de Licitações (Lei 14.133/21) e a Lei de Improbidade Administrativa têm relevância maciça por texto estrito das regras operacionais, harmonizada com Súmulas do TCU e STF.",
-      concursoHistorico: "TJ-MG 2025: Exigências literais sobre modalidades de contratação e atos passivos de dolo na improbidade."
+      concursoHistorico: "Concursos da magistratura: exigências literais sobre modalidades de contratação e atos de improbidade."
     };
   }
 
@@ -142,7 +142,7 @@ export function calcularIncidenciaParaMaterias(
       label: 'Incidência de Lei Seca',
       porcentagens: { leiSeca: 62, doutrina: 18, jurisprudencia: 20 },
       justificativa: "Análise histórica indica que concursos jurídicos mantêm o padrão de exigir o conhecimento acurado dos códigos (prazos, rito comum, legitimações, exceções estruturais). Faça uma leitura minuciosa da literalidade.",
-      concursoHistorico: "TJ-PR 2024 / MP-RS 2024: Predominância de regras técnicas descritas estritamente nos artigos do CPC e Código Civil."
+      concursoHistorico: "Concursos da magistratura e do ministério público: regras técnicas do CPC e do Código Civil."
     };
   }
 
@@ -152,6 +152,6 @@ export function calcularIncidenciaParaMaterias(
     label: 'Equilíbrio Doutrinário / Súmulas',
     porcentagens: { leiSeca: 30, doutrina: 40, jurisprudencia: 30 },
     justificativa: "Este é um assunto integrativo que exige sólida interpretação teórica aliada às balizas do texto legal e do tribunal.",
-    concursoHistorico: "Concursos Juri 2025: Divisão harmônica clássica entre conceitos, precedentes e leis especiais."
+    concursoHistorico: "Concursos da magistratura, do ministério público, da defensoria, da procuradoria e de delegado de polícia: equilíbrio entre conceitos, precedentes e leis especiais."
   };
 }
