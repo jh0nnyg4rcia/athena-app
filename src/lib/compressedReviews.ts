@@ -338,13 +338,22 @@ export function harvestCompressedReviewsLocal(
     if (seenLesson.has(key)) continue;
     seenLesson.add(key);
     if (lesson.status && lesson.status !== 'approved') continue;
-    const review = collectFromLesson(lesson.content, lesson.blocks, {
-      subject: lesson.subject || trilhaSubject(lesson.day, lesson.part),
-      article: lesson.day,
-      day: lesson.day,
-      part: lesson.part,
-      timestamp: lesson.approvedAt
-    });
+    const review = lesson.review
+      ? buildCompressedReview({
+          content: lesson.review,
+          subject: lesson.subject || trilhaSubject(lesson.day, lesson.part),
+          article: lesson.day,
+          day: lesson.day,
+          part: lesson.part,
+          timestamp: lesson.approvedAt
+        })
+      : collectFromLesson(lesson.content, lesson.blocks, {
+          subject: lesson.subject || trilhaSubject(lesson.day, lesson.part),
+          article: lesson.day,
+          day: lesson.day,
+          part: lesson.part,
+          timestamp: lesson.approvedAt
+        });
     if (review) found.push(review);
   }
 

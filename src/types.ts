@@ -155,6 +155,7 @@ export interface HomologatedLesson {
   approvedAt: number;
   modelUsed?: string;
   version?: number;
+  review?: string;
 }
 
 export interface RegisteredStudent {

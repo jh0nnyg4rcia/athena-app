@@ -73,7 +73,8 @@ import {
   revokeHomologatedLesson, 
   getLocalHomologatedLesson, 
   getLessonDocId,
-  fetchAllHomologatedLessons
+  syncOfficialCatalog,
+  isOfficialPart
 } from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -2033,13 +2034,33 @@ export default function App() {
     window.addEventListener('athena-trilha-cached', onHomologated);
     window.addEventListener('athena-lessons-restored', onHomologated);
     window.addEventListener('athena-vault-ready', onHomologated);
-    void fetchAllHomologatedLessons();
+    window.addEventListener('athena-catalog-synced', onHomologated);
+    void syncOfficialCatalog().then((parts) => {
+      if (cancelled || !parts.length) return;
+      setCompressedReviews(harvestCompressedReviewsLocal(user.uid, {
+        sessions,
+        homologated: parts
+          .filter((part) => (part.review || '').trim().length >= 20)
+          .map((part) => ({
+            id: part.id,
+            day: part.day,
+            part: part.part,
+            subject: part.subject,
+            content: '',
+            review: part.review,
+            status: 'approved' as const,
+            approvedBy: 'jhonny.spider@gmail.com',
+            approvedAt: part.approvedAt || Date.now()
+          }))
+      }));
+    });
     return () => {
       cancelled = true;
       window.removeEventListener('athena-lesson-homologated', onHomologated);
       window.removeEventListener('athena-trilha-cached', onHomologated);
       window.removeEventListener('athena-lessons-restored', onHomologated);
       window.removeEventListener('athena-vault-ready', onHomologated);
+      window.removeEventListener('athena-catalog-synced', onHomologated);
     };
   }, [user?.uid, sessions.length, activeTab]);
 
@@ -3826,7 +3847,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     if (!dayItem || !dayItem.materias || nextMatIdx >= dayItem.materias.length) return;
     
     // Check if already in cache or homologated
-    if (getLocalHomologatedLesson(dayNum, nextMatIdx)) return;
+    if (getLocalHomologatedLesson(dayNum, nextMatIdx) || isOfficialPart(dayNum, nextMatIdx)) return;
     if (getCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase)) return;
 
     const nextMat = dayItem.materias[nextMatIdx];
@@ -4491,12 +4512,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         blocks: sanitizedBlocks,
         challenge: lessonChallenge,
         status: 'approved',
-        approvedBy: user?.email || 'jhonny.spider@gmail.com',
+        approvedBy: 'jhonny.spider@gmail.com',
         approvedAt: Date.now(),
         modelUsed: targetMsg.modelName || 'gemini-3.8-flash',
-        version: 1
+        version: 1,
+        review: extractReviewBlock(sanitizedContent, sanitizedBlocks) || undefined
       };
-      await saveHomologatedLesson(lesson);
+      const saved = await saveHomologatedLesson(lesson);
       setHomologatedLessonState(lesson);
       if (user) {
         const reviewText = extractReviewBlock(sanitizedContent, sanitizedBlocks);
@@ -4531,12 +4553,16 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         trilhaMaterialIndex: part
       }, currentSessionId);
 
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) homologado com sucesso! Salvo no cache central e no dispositivo.`);
+      setHomologationSuccessBanner(
+        saved.cloud
+          ? `Dia ${day} · Parte ${part + 1} publicado no catálogo oficial. Essa parte não se perde na atualização e vale para todos os alunos.`
+          : `Dia ${day} · Parte ${part + 1} ficou só neste aparelho. O catálogo oficial recusou a gravação${saved.error ? `: ${saved.error}` : ''}. Toque em Aprovar e Salvar de novo.`
+      );
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
       return lesson;
     } catch (err: any) {
       console.warn("Aviso ao homologar lição (preservada no cache local):", err);
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) salvo no cache local com sucesso!`);
+      setHomologationSuccessBanner(`Dia ${day} · Parte ${part + 1} não entrou no catálogo oficial. ${err?.message || 'Tente Aprovar e Salvar de novo.'}`);
       setTimeout(() => setHomologationSuccessBanner(null), 6000);
       return null;
     } finally {
@@ -6034,7 +6060,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               >
                 <div className="text-center space-y-4">
                    <h2 className="text-3xl font-serif font-bold text-slate-100"><span className="text-brand-gold">Revisão</span> Comprimida</h2>
-                   <p className="text-slate-400 text-sm">Somente o Bloco 6 (Revisão Comprimida) de cada parte, organizado por dia da trilha.</p>
+                   <p className="text-slate-400 text-sm">Somente o Bloco 6 de cada parte publicada, agrupado por dia. O mesmo texto vale para todos os alunos.</p>
                 </div>
                 <Suspense fallback={<div className="h-48 bg-slate-900 border border-white/5 rounded-[2.5rem] animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Carregando lista de revisões comprimidas...</div>}>
                   <ReviewList 

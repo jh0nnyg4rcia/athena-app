@@ -7,7 +7,6 @@ import {
   getRememberedLesson,
   hydrateLessonVault,
   listRememberedLessons,
-  persistLocalStorageSafe,
   putVaultLesson,
   rememberLesson
 } from './lessonVault';
@@ -29,6 +28,51 @@ void hydrateLessonVault().then(() => {
 
 export function getLessonDocId(day: number, part: number): string {
   return `day_${day}_part_${part}`;
+}
+
+const officialPartIds = new Set<string>();
+
+export function isOfficialPart(day: number, part: number): boolean {
+  const id = getLessonDocId(day, part);
+  return officialPartIds.has(id) || Boolean(getRememberedLesson(id));
+}
+
+export type OfficialPart = {
+  id: string;
+  day: number;
+  part: number;
+  subject: string;
+  review: string;
+  approvedAt?: number;
+};
+
+/** Índice leve: o que está publicado para todos, sem baixar o texto integral das aulas. */
+export async function syncOfficialCatalog(): Promise<OfficialPart[]> {
+  await hydrateLessonVault();
+  try {
+    const snap = await getDocs(collection(db, 'homologated_parts'));
+    const parts: OfficialPart[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as OfficialPart;
+      const id = data.id || docSnap.id;
+      officialPartIds.add(id);
+      parts.push({
+        id,
+        day: Number(data.day),
+        part: Number(data.part),
+        subject: data.subject || 'Trilha Jurídica',
+        review: data.review || '',
+        approvedAt: data.approvedAt
+      });
+    });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('athena-catalog-synced', { detail: { count: parts.length } }));
+    }
+    return parts;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'homologated_parts');
+    return [];
+  }
 }
 
 function isUsableLesson(lesson?: HomologatedLesson | null): lesson is HomologatedLesson {
@@ -87,13 +131,19 @@ export function getLocalHomologatedLesson(day: number, part: number): Homologate
 }
 
 /**
- * Salva lição homologada na memória, IndexedDB e localStorage.
+ * Salva a lição no cofre IndexedDB. O corpo não fica no localStorage:
+ * 100 dias estouram a cota (~5 MB) e a atualização só deixa as sementes dos 3 primeiros dias.
  */
 export function setLocalHomologatedLesson(lesson: HomologatedLesson): void {
   rememberLesson(lesson);
   const key = `${LOCAL_STORAGE_PREFIX}${lesson.id}`;
-  persistLocalStorageSafe(key, JSON.stringify(lesson));
-  void putVaultLesson(lesson);
+  void putVaultLesson(lesson).then(() => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  });
 }
 
 /**
@@ -110,79 +160,112 @@ export function removeLocalHomologatedLesson(day: number, part: number): void {
 }
 
 export async function getHomologatedLesson(day: number, part: number): Promise<HomologatedLesson | null> {
+  await hydrateLessonVault();
   const local = getLocalHomologatedLesson(day, part);
-  if (local) return local;
-
-  if (isQuotaExhausted()) return null;
-
   const docId = getLessonDocId(day, part);
+
   try {
-    const docRef = doc(db, 'homologated_lessons', docId);
-    const snap = await getDoc(docRef);
+    const snap = await getDoc(doc(db, 'homologated_lessons', docId));
     if (snap.exists()) {
-      const data = { id: docId, ...(snap.data() as HomologatedLesson) };
-      if (data && (data.content || data.blocks?.length)) {
-        setLocalHomologatedLesson({ ...data, status: data.status || 'approved' });
-        return getLocalHomologatedLesson(day, part);
+      const data = normalizeLesson(docId, snap.data() as HomologatedLesson);
+      if (data.content || data.blocks?.length) {
+        setLocalHomologatedLesson(data);
+        return data;
       }
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `homologated_lessons/${docId}`);
   }
 
-  return null;
+  return local;
+}
+
+function normalizeLesson(docId: string, raw: HomologatedLesson): HomologatedLesson {
+  return {
+    ...raw,
+    id: raw.id || docId,
+    status: raw.status || 'approved'
+  };
 }
 
 function compactForFirestore(lesson: HomologatedLesson): HomologatedLesson {
-  const payload: HomologatedLesson = { ...lesson };
-  let encoded = JSON.stringify(cleanData(payload));
-  if (encoded.length <= FIRESTORE_SAFE_CHARS) return payload;
+  const payload: HomologatedLesson = {
+    id: lesson.id,
+    day: Math.round(lesson.day),
+    part: Math.round(lesson.part),
+    subject: (lesson.subject || 'Trilha Jurídica').slice(0, 200),
+    topic: lesson.topic,
+    content: lesson.content,
+    status: 'approved',
+    approvedBy: 'jhonny.spider@gmail.com',
+    approvedAt: lesson.approvedAt || Date.now(),
+    modelUsed: lesson.modelUsed,
+    version: lesson.version || 1,
+    review: lesson.review
+  };
+  if (lesson.challenge) payload.challenge = lesson.challenge;
 
-  if (payload.blocks?.length) {
-    payload.content = payload.blocks.join('\n\n');
+  let encoded = JSON.stringify(cleanData(payload));
+  if (encoded.length > FIRESTORE_SAFE_CHARS && payload.challenge) {
+    delete payload.challenge;
     encoded = JSON.stringify(cleanData(payload));
   }
-  if (encoded.length > FIRESTORE_SAFE_CHARS && payload.challenge) {
-    const { challenge: _drop, ...rest } = payload;
-    return rest as HomologatedLesson;
+  if (encoded.length > FIRESTORE_SAFE_CHARS) {
+    payload.content = payload.content.slice(0, 850000);
   }
   return payload;
 }
 
-async function writeFirestoreWithRetry(lesson: HomologatedLesson): Promise<void> {
-  if (isQuotaExhausted()) {
-    console.warn('[CuratedLessonService] Firestore com cota excedida. Lição preservada no cofre local.');
-    return;
-  }
+export type LessonSaveResult = { cloud: boolean; error?: string };
 
+async function writeFirestoreWithRetry(lesson: HomologatedLesson): Promise<void> {
   const docId = lesson.id;
-  const docRef = doc(db, 'homologated_lessons', docId);
   const cleaned = cleanData(compactForFirestore(lesson));
+  const partStub = cleanData({
+    id: docId,
+    day: Math.round(lesson.day),
+    part: Math.round(lesson.part),
+    subject: (lesson.subject || 'Trilha Jurídica').slice(0, 200),
+    status: 'approved',
+    approvedBy: 'jhonny.spider@gmail.com',
+    approvedAt: lesson.approvedAt || Date.now(),
+    review: (lesson.review || '').slice(0, 20000)
+  });
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await setDoc(docRef, cleaned, { merge: true });
-      console.log(`[CuratedLessonService] Lição ${docId} gravada no Firestore (tentativa ${attempt + 1}).`);
+      await setDoc(doc(db, 'homologated_lessons', docId), cleaned, { merge: true });
+      await setDoc(doc(db, 'homologated_parts', docId), partStub, { merge: true });
+      officialPartIds.add(docId);
       return;
     } catch (error) {
       lastError = error;
-      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
     }
   }
   handleFirestoreError(lastError, OperationType.WRITE, `homologated_lessons/${docId}`);
+  const message = lastError instanceof Error ? lastError.message : String(lastError || 'falha ao gravar');
+  throw new Error(message);
 }
 
 /**
- * Homologa na memória + IndexedDB de imediato e sincroniza o Firestore em segundo plano.
+ * Grava no cofre local e espera o Firestore. O catálogo oficial é a nuvem:
+ * sem essa gravação, a atualização do app volta só para as sementes dos dias 1 a 3.
  */
-export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<void> {
+export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<LessonSaveResult> {
   setLocalHomologatedLesson(lesson);
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: lesson }));
   }
 
-  void writeFirestoreWithRetry(lesson);
+  try {
+    await writeFirestoreWithRetry(lesson);
+    return { cloud: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { cloud: false, error: message };
+  }
 }
 
 export async function revokeHomologatedLesson(day: number, part: number): Promise<void> {
@@ -218,9 +301,7 @@ let lastCloudFetch: HomologatedLesson[] | null = null;
 export async function fetchAllHomologatedLessons(): Promise<HomologatedLesson[]> {
   await hydrateLessonVault();
   const local = Object.values(getLocalHomologatedList());
-  if (isQuotaExhausted() || typeof window === 'undefined') {
-    return local;
-  }
+  if (typeof window === 'undefined') return local;
   if (lastCloudFetch && Date.now() - lastCloudFetchAt < 30000) {
     return lastCloudFetch;
   }
@@ -229,8 +310,8 @@ export async function fetchAllHomologatedLessons(): Promise<HomologatedLesson[]>
     const snap = await getDocs(collection(db, 'homologated_lessons'));
     const cloud: HomologatedLesson[] = [];
     snap.forEach((docSnap) => {
-      const data = { id: docSnap.id, ...(docSnap.data() as HomologatedLesson) };
-      if (!data.content && !data.blocks?.length) return;
+      const data = normalizeLesson(docSnap.id, docSnap.data() as HomologatedLesson);
+      if (!data.content && !data.blocks?.length && !data.review) return;
       if (data.status && data.status !== 'approved') return;
       setLocalHomologatedLesson(data);
       cloud.push(data);
@@ -242,7 +323,7 @@ export async function fetchAllHomologatedLessons(): Promise<HomologatedLesson[]>
     lastCloudFetch = Array.from(byId.values());
     lastCloudFetchAt = Date.now();
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('athena-lessons-restored', { detail: { count: lastCloudFetch.length } }));
+      window.dispatchEvent(new CustomEvent('athena-lessons-restored', { detail: { count: cloud.length, total: lastCloudFetch.length } }));
     }
     return lastCloudFetch;
   } catch (error) {

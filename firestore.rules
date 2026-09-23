@@ -119,10 +119,59 @@ service cloud.firestore {
       }
     }
 
+    function isCeoPublisher() {
+      return incoming().get('approvedBy', '') is string
+        && incoming().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
+    }
+
+    function isValidHomologatedLesson(lessonId) {
+      return lessonId.matches('^day_[0-9]{1,3}_part_[0-9]{1,2}$')
+        && incoming().get('id', '') == lessonId
+        && incoming().get('day', 0) is int
+        && incoming().get('day', 0) >= 1
+        && incoming().get('day', 0) <= 100
+        && incoming().get('part', -1) is int
+        && incoming().get('part', -1) >= 0
+        && incoming().get('part', -1) <= 20
+        && incoming().get('content', '') is string
+        && incoming().get('content', '').size() >= 20
+        && incoming().get('content', '').size() <= 900000
+        && incoming().get('status', '') == 'approved'
+        && incoming().get('subject', '') is string
+        && incoming().get('subject', '').size() <= 200
+        && isCeoPublisher();
+    }
+
     match /homologated_lessons/{lessonId} {
       allow read: if true;
-      allow create, update: if isAdmin() || incoming().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
-      allow delete: if isAdmin() || existing().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com';
+      allow create, update: if isAdmin() || isValidHomologatedLesson(lessonId);
+      allow delete: if isAdmin() || (
+        existing().get('approvedBy', '') is string
+        && existing().get('approvedBy', '').lower() == 'jhonny.spider@gmail.com'
+      );
+    }
+
+    function isValidOfficialPart(partId) {
+      return partId.matches('^day_[0-9]{1,3}_part_[0-9]{1,2}$')
+        && incoming().get('id', '') == partId
+        && incoming().get('day', 0) is int
+        && incoming().get('day', 0) >= 1
+        && incoming().get('day', 0) <= 100
+        && incoming().get('part', -1) is int
+        && incoming().get('part', -1) >= 0
+        && incoming().get('part', -1) <= 20
+        && incoming().get('subject', '') is string
+        && incoming().get('subject', '').size() <= 200
+        && incoming().get('status', '') == 'approved'
+        && incoming().get('review', '') is string
+        && incoming().get('review', '').size() <= 20000
+        && isCeoPublisher();
+    }
+
+    match /homologated_parts/{partId} {
+      allow read: if true;
+      allow create, update: if isAdmin() || isValidOfficialPart(partId);
+      allow delete: if isAdmin();
     }
 
     match /system_config/{configId} {
