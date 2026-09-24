@@ -5142,11 +5142,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         animate={isSidebarOpen ? { x: 0 } : { x: window.innerWidth < 1024 ? "-100%" : 0 }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm bg-slate-900 shadow-[20px_0_60px_rgba(0,0,0,0.5)] border-r border-brand-gold/10 lg:relative lg:w-72 lg:shadow-none lg:bg-slate-900/80 lg:backdrop-blur-xl lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm bg-slate-900 shadow-[20px_0_60px_rgba(0,0,0,0.5)] border-r border-brand-gold/10 lg:relative lg:h-full lg:min-h-0 lg:overflow-hidden lg:w-72 lg:shadow-none lg:bg-slate-900/80 lg:backdrop-blur-xl lg:translate-x-0",
           !isSidebarOpen && "pointer-events-none lg:pointer-events-auto"
         )}
       >
-        <div className="flex flex-col h-full overflow-y-auto scrollbar-thin scrollbar-thumb-brand-gold/15 p-6 pointer-events-auto">
+        <div className="flex flex-col h-full min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-brand-gold/15 p-6 pointer-events-auto">
           <div className="flex items-center justify-between mb-10 shrink-0">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-brand-gold/10 rounded-xl border border-brand-gold/20">
@@ -5545,25 +5545,25 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 </div>
               </div>
             )}
-          </nav>
 
-          {user && (
-            <div className="mt-auto pt-8 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setDeleteAccountError(null);
-                  setDeleteAccountOpen(true);
-                  if (window.innerWidth < 1024) setIsSidebarOpen(false);
-                }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200 text-[11px] font-bold uppercase tracking-wider"
-                aria-label="Excluir conta"
-              >
-                <Trash2 size={16} />
-                Excluir conta
-              </button>
-            </div>
-          )}
+            {user && (
+              <div className="pt-6 mt-2 border-t border-white/5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteAccountError(null);
+                    setDeleteAccountOpen(true);
+                    if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200 text-[11px] font-bold uppercase tracking-wider"
+                  aria-label="Excluir conta"
+                >
+                  <Trash2 size={16} />
+                  Excluir conta
+                </button>
+              </div>
+            )}
+          </nav>
         </div>
       </motion.aside>
 
