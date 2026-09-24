@@ -5636,7 +5636,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                       <form onSubmit={handleRegisterStudent} className="space-y-4">
                         <div className="text-left space-y-1">
                           <h3 className="text-xs font-serif font-bold text-slate-200">Novo Cadastro</h3>
-                          <p className="text-[10px] text-slate-400">Nome, e-mail e, se quiser, uma senha. Se deixar a senha em branco, enviamos um e-mail para você criar a senha de acesso.</p>
+                          <p className="text-[10px] text-slate-400">Crie sua senha para entrar. Se deixar em branco, enviamos um e-mail com o link para você criar a senha.</p>
                         </div>
 
                         <div className="space-y-3">
@@ -5684,7 +5684,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                           <div className="space-y-1 text-left">
                             <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="register-password">
-                              Senha (opcional)
+                              Sua senha
                             </label>
                             <div className="relative">
                               <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
@@ -5759,10 +5759,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                         </p>
                         <p className="text-[11px] text-slate-400 leading-relaxed">
                           {registeredSuccess.delivery === 'link'
-                            ? 'Enviamos um e-mail para você criar a senha. Abra a mensagem e defina a senha antes de entrar.'
-                            : registeredSuccess.delivery === 'password'
-                              ? 'Enviamos a senha para esse e-mail. Use o que chegou na mensagem para entrar.'
-                              : 'Entre com a senha que você escolheu. O e-mail de confirmação não foi enviado.'}
+                            ? 'Enviamos um e-mail com o link para você criar a senha. Abra a mensagem e defina a senha antes de entrar.'
+                            : 'Entre com a senha que você criou. Nenhum e-mail é necessário.'}
                         </p>
                       </div>
 
@@ -5803,7 +5801,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                       {forgotSent ? (
                         <div className="space-y-4">
                           <p className="text-xs text-slate-300 leading-relaxed">
-                            Se este e-mail tiver cadastro, enviamos as instruções de acesso.
+                            Se este e-mail tiver cadastro, enviamos um link para você criar uma nova senha.
                           </p>
                           <button
                             type="button"
@@ -5816,7 +5814,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                       ) : (
                         <form onSubmit={handleForgotCode} className="space-y-4">
                           <p className="text-xs text-slate-400 leading-relaxed">
-                            Informe o e-mail da conta. A nova senha, se houver cadastro, chega só por e-mail.
+                            Informe o e-mail da conta. Se houver cadastro, enviamos um link para você criar uma nova senha.
                           </p>
 
                           <div>

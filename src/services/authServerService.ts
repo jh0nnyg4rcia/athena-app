@@ -1,6 +1,5 @@
 import firebaseConfig from '../../firebase-applet-config.json';
 import { normalizeEmail, sanitizeDisplayName, validatePassword } from '../lib/authPolicy';
-import { canSendAuthMail, sendAccessEmail } from './authMailer';
 import { generateTemporaryPassword, hashPassword, verifyPassword } from './passwordHash';
 
 const API_KEY = (process.env.FIREBASE_WEB_API_KEY || firebaseConfig.apiKey || '').trim();
@@ -172,11 +171,6 @@ export async function registerEmailAccount(input: {
   const created = await createAccount(email, password, name);
 
   try {
-    if (canSendAuthMail()) {
-      await storePasswordHash(created.uid, email, password);
-      await sendAccessEmail({ kind: 'welcome', name, email, password });
-      return { emailSent: true, delivery: 'password' };
-    }
     if (!provided) {
       await identityPost('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email });
       return { emailSent: true, delivery: 'link' };
@@ -210,35 +204,15 @@ export async function resetEmailAccess(input: { email: unknown }): Promise<void>
   if (!email) return;
 
   const admin = await loadAdmin();
-  if (!admin || !canSendAuthMail()) {
-    if (admin) {
-      try {
-        const user = await admin.auth.getUserByEmail(email);
-        await clearPasswordHash(user.uid);
-      } catch {
-        /* a resposta continua igual quando o e-mail não existe */
-      }
+  if (admin) {
+    try {
+      const user = await admin.auth.getUserByEmail(email);
+      await clearPasswordHash(user.uid);
+    } catch {
+      /* a resposta continua igual quando o e-mail não existe */
     }
-    await identityPost('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email }).catch(() => undefined);
-    return;
   }
-
-  try {
-    const user = await admin.auth.getUserByEmail(email);
-    const password = generateTemporaryPassword();
-    await admin.auth.updateUser(user.uid, { password });
-    await storePasswordHash(user.uid, email, password);
-    await sendAccessEmail({
-      kind: 'reset',
-      name: user.displayName || 'Aluno',
-      email,
-      password
-    });
-  } catch (error) {
-    const code = String((error as { code?: string })?.code || '');
-    if (code.includes('user-not-found')) return;
-    console.warn('[ATHENA Auth] Falha ao redefinir acesso.');
-  }
+  await identityPost('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email }).catch(() => undefined);
 }
 
 export async function verifyGoogleSession(idToken: string): Promise<{
