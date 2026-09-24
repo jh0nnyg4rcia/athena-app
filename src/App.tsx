@@ -65,7 +65,7 @@ import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
 import { type UserProfile, type HomologatedLesson } from './types';
-import { loginWithEmail, loginWithGoogle, publicClientAuthError, registerAccount, requestNewPassword } from './services/authClient';
+import { clearLocalAccountData, deleteCurrentAccount, loginWithEmail, loginWithGoogle, publicClientAuthError, registerAccount, requestNewPassword } from './services/authClient';
 import { getCachedTrilhaPart, setCachedTrilhaPart, sanitizeTrilhaCacheForObjectivePhase } from './services/trilhaCacheService';
 import { 
   getHomologatedLesson, 
@@ -1778,6 +1778,9 @@ export default function App() {
   const [forgotInput, setForgotInput] = useState('');
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
 
   const handleRegisterStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1859,6 +1862,26 @@ export default function App() {
       await logOut();
     } catch {}
     setUser(null);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteAccountBusy || !user?.uid) return;
+    setDeleteAccountError(null);
+    setDeleteAccountBusy(true);
+    const uid = String(user.uid);
+    try {
+      await deleteCurrentAccount();
+      clearLocalAccountData(uid);
+      try {
+        await logOut();
+      } catch {}
+      setUser(null);
+      setDeleteAccountOpen(false);
+    } catch (error) {
+      setDeleteAccountError(publicClientAuthError(error));
+    } finally {
+      setDeleteAccountBusy(false);
+    }
   };
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -4979,6 +5002,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                  </span>
                  <span className="text-[9px] text-slate-500 font-mono truncate max-w-[140px]">{user.email}</span>
                </div>
+               <button
+                type="button"
+                onClick={() => {
+                  setDeleteAccountError(null);
+                  setDeleteAccountOpen(true);
+                }}
+                className="px-2 py-2 text-slate-400 hover:text-red-300 transition-colors rounded-xl hover:bg-red-500/10 active:scale-95 inline-flex items-center gap-1"
+                title="Excluir conta"
+                aria-label="Excluir conta"
+               >
+                 <Trash2 size={16} />
+                 <span className="text-[10px] font-bold uppercase tracking-wide">Excluir</span>
+               </button>
                <button 
                 onClick={() => handleLogout()}
                 className="p-2 text-slate-400 hover:text-red-400 transition-colors rounded-xl hover:bg-red-500/10 active:scale-95"
@@ -4999,6 +5035,48 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
            </button>
         </div>
       </header>
+
+      {deleteAccountOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-red-500/40 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
+            <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/30 text-red-300 mx-auto flex items-center justify-center">
+              <Trash2 size={26} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="font-serif font-bold text-lg text-slate-100">Excluir conta</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                A exclusão é imediata e permanente. Saem a conta, a senha, o progresso da trilha e o histórico de estudo deste usuário.
+              </p>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Também dá para excluir em{' '}
+                <a href="https://projetoathena.app.br/excluir-conta.html" target="_blank" rel="noopener noreferrer" className="text-brand-gold underline">
+                  projetoathena.app.br/excluir-conta.html
+                </a>
+                .
+              </p>
+            </div>
+            {deleteAccountError && (
+              <p className="text-[11px] text-amber-300">{deleteAccountError}</p>
+            )}
+            <button
+              type="button"
+              disabled={deleteAccountBusy}
+              onClick={() => handleDeleteAccount()}
+              className="w-full px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold uppercase tracking-wider text-[11px] rounded-xl disabled:opacity-60"
+            >
+              {deleteAccountBusy ? 'Excluindo...' : 'Excluir permanentemente'}
+            </button>
+            <button
+              type="button"
+              disabled={deleteAccountBusy}
+              onClick={() => setDeleteAccountOpen(false)}
+              className="w-full px-4 py-2.5 text-slate-300 text-[11px] uppercase tracking-wider"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Resilient Quota Notification Banner */}
       {firestoreQuotaReached && (
@@ -5731,15 +5809,23 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                     </button>
 
                     {/* Link da Política de Privacidade e LGPD */}
-                    <div className="pt-2 text-center">
+                    <div className="pt-2 text-center space-y-2">
                       <a 
-                        href="https://jh0nnyg4rcia.github.io/athena-app/privacidade.html"
+                        href="https://projetoathena.app.br/privacidade.html"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-[10px] text-slate-500 hover:text-brand-gold transition-colors inline-flex items-center gap-1 underline underline-offset-2"
                       >
                         <ShieldCheck size={12} />
                         <span>Política de Privacidade & LGPD</span>
+                      </a>
+                      <a
+                        href="https://projetoathena.app.br/excluir-conta.html"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-[10px] text-slate-500 hover:text-brand-gold transition-colors underline underline-offset-2"
+                      >
+                        Excluir conta e dados
                       </a>
                     </div>
                   </div>

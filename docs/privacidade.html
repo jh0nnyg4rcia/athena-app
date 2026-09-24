@@ -151,8 +151,8 @@
     <h1>ATHENA Mentoria Jurídica</h1>
     <p class="subtitle">Política de Privacidade, Proteção de Dados Pessoais e Diretrizes de Exclusão de Conta</p>
     <div class="meta-bar">
-      <span><strong>Atualizado em:</strong> 20 de Setembro de 2026</span>
-      <span><strong>Versão:</strong> 1.0 (Google Play & LGPD Compliance)</span>
+      <span><strong>Atualizado em:</strong> 24 de setembro de 2026</span>
+      <span><strong>Versão:</strong> 1.1 (Google Play & LGPD Compliance)</span>
     </div>
   </header>
 
@@ -180,15 +180,16 @@
       <p>Para proporcionar a melhor experiência de mentoria jurídica adaptativa e garantir a segurança do seu acesso, coletamos apenas os dados estritamente necessários:</p>
       
       <ul>
-        <li><strong>Nome Completo:</strong> Coletado no momento do cadastro para personalização do atendimento pedagógico e saudações pela Inteligência Artificial.</li>
-        <li><strong>Cadastro de Pessoa Física (CPF):</strong> Coletado exclusivamente para autenticação inequívoca, prevenção a fraudes e garantia de unicidade de conta estudantil. O CPF é mantido sob sigilo e nunca compartilhado.</li>
-        <li><strong>Endereço de E-mail:</strong> Utilizado como identificador de conta, para validação de acesso, recuperação do código PIN e envio de comunicações institucionais indispensáveis.</li>
-        <li><strong>Código de Acesso (PIN de 6 dígitos):</strong> Gerado pelo sistema para autenticação rápida e segura no aplicativo.</li>
-        <li><strong>Dados de Progresso Acadêmico:</strong> Lições concluídas na Trilha de 100 Dias, tempo de estudo, acertos e erros no método de Pareto 80/20 e histórico de desafios práticos. Esses dados são usados exclusivamente para orientar a curva de aprendizado do próprio estudante.</li>
+        <li><strong>Nome:</strong> Informado no cadastro. Pode ser enviado à inteligência artificial apenas como identificador interno da requisição. A saudação exibida no aplicativo usa um título genérico de público, e não o nome pessoal como cumprimento.</li>
+        <li><strong>E-mail:</strong> Identificador da conta e destino do link para criar ou redefinir a senha, quando o usuário pede esse link. O e-mail não é enviado ao modelo de inteligência artificial.</li>
+        <li><strong>Senha:</strong> Criada pelo próprio usuário. Se o campo ficar em branco no cadastro, ou se ele usar “esqueci minha senha”, o Firebase envia um link para ele criar a senha. A ATHENA guarda somente um hash bcrypt no servidor, em coleção que o aplicativo não lê. A senha não aparece nas respostas da API, nem nos registros, nem é enviada ao modelo.</li>
+        <li><strong>Conta Google:</strong> Se o usuário escolhe “Entrar com Google”, recebemos o identificador, o e-mail e o nome que o Google confirma na sessão. Não recebemos a senha do Google.</li>
+        <li><strong>Progresso de estudo:</strong> Lições da trilha, tempo, acertos, erros e histórico de conversas de estudo, usados para retomar o estudo daquele usuário.</li>
+        <li><strong>Microfone:</strong> Usado somente durante o exercício oral, se a pessoa autorizar. Não é ligado na abertura do aplicativo.</li>
       </ul>
 
       <div class="highlight-box">
-        <strong>Princípio da Minimização:</strong> O ATHENA <strong>não</strong> coleta sua localização por GPS, <strong>não</strong> acessa seus contatos, fotos, microfone (salvo durante exercícios orais se autorizado) ou dados de navegação fora do escopo do aplicativo.
+        <strong>O que não coletamos:</strong> a ATHENA não pede documento de identidade, não usa senha numérica de acesso e não lê GPS, contatos, fotos ou arquivos fora do que a pessoa envia no próprio estudo.
       </div>
     </div>
 
@@ -196,8 +197,8 @@
       <h2>4. Uso de Inteligência Artificial e Modelos de Linguagem</h2>
       <p>O ATHENA integra recursos de Inteligência Artificial generativa avançada (modelos Google Gemini) para criar explicações doutrinárias, análises de julgados do STF/STJ e simulados práticos:</p>
       <ul>
-        <li>As requisições pedagógicas à API de Inteligência Artificial contêm apenas o tema jurídico de estudo e o nome pelo qual o estudante deseja ser chamado.</li>
-        <li><strong>Seus dados cadastrais sigilosos (como CPF e e-mail) NUNCA são transmitidos aos modelos de linguagem.</strong></li>
+        <li>A requisição pedagógica leva o texto do estudo e, como identificador interno, o nome cadastrado. O e-mail e a senha não entram nessa requisição.</li>
+        <li><strong>E-mail e senha não são transmitidos ao modelo de linguagem.</strong></li>
         <li>O processamento ocorre de acordo com as normas empresariais da Google Cloud Platform, que asseguram que os conteúdos educacionais não são usados para treinar modelos públicos de IA.</li>
       </ul>
     </div>
@@ -229,9 +230,10 @@
       <p>Atendendo integralmente às diretrizes da <strong>Google Play Store (Account and Data Deletion Policy)</strong> e da LGPD, você tem o direito garantido de apagar sua conta e todos os dados associados a qualquer momento.</p>
       
       <div class="danger-box">
-        <strong>Como solicitar a exclusão imediata da sua conta:</strong>
-        <p style="margin-top: 0.5rem;">Envie um e-mail com o assunto <em>"Exclusão de Conta ATHENA"</em> para <strong><a href="mailto:projetoathena.app@gmail.com">projetoathena.app@gmail.com</a></strong> informando o e-mail ou CPF cadastrado no aplicativo.</p>
-        <p style="margin-top: 0.5rem;">Sua conta, histórico de lições, estatísticas de Pareto e registros no banco de dados serão <strong>permanentemente e irreversivelmente eliminados no prazo máximo de 5 (cinco) dias úteis</strong>.</p>
+        <strong>A exclusão começa no aplicativo e também nesta web:</strong>
+        <p style="margin-top: 0.5rem;">No aplicativo, entre na conta e toque em <strong>Excluir conta</strong> (ícone de lixeira, ao lado de Sair). A exclusão é imediata.</p>
+        <p style="margin-top: 0.5rem;">Pela web, use <a href="https://projetoathena.app.br/excluir-conta.html">https://projetoathena.app.br/excluir-conta.html</a>. Informe o e-mail e a senha da conta. Conta criada só com Google precisa ser excluída dentro do aplicativo, já com a sessão do Google aberta.</p>
+        <p style="margin-top: 0.5rem;">São apagados a conta de acesso, o hash da senha, o perfil e o progresso daquele usuário (sessões, estatísticas, questões, agenda, trilha e gamificação). O catálogo oficial de aulas não é apagado, porque não é dado pessoal do aluno.</p>
       </div>
     </div>
 

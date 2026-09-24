@@ -1,6 +1,7 @@
 import express from "express";
 import { askATHENA, evaluateAnswer, generateObjectiveChallenge, testGeminiPing } from "../services/geminiServerService";
 import {
+  deleteOwnedAccount,
   loginEmailAccount,
   publicAuthMessage,
   registerEmailAccount,
@@ -192,6 +193,24 @@ export function createAthenaApiApp(): express.Express {
       /* mesma resposta para não revelar se o e-mail existe */
     }
     res.json({ ok: true });
+  });
+
+  app.post("/api/auth/delete-account", rateLimit(5, 15 * 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    const header = String(req.headers.authorization || "");
+    const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    try {
+      await deleteOwnedAccount({
+        idToken: token,
+        email: req.body?.email,
+        password: req.body?.password
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      const message = publicAuthMessage(error);
+      const status = message === "E-mail ou senha incorretos." ? 401 : 400;
+      res.status(status).json({ error: message });
+    }
   });
 
   app.post("/api/auth/session", rateLimit(20, 60_000), async (req, res) => {

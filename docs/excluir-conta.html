@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excluir conta — ATHENA Mentoria Jurídica</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --card-bg: #111827;
+      --gold-light: #fbbf24;
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg-dark);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      line-height: 1.6;
+      padding: 2rem 1.25rem 4rem;
+    }
+    main { max-width: 560px; margin: 0 auto; }
+    h1 {
+      font-family: 'Cinzel', serif;
+      font-size: 1.8rem;
+      margin: 0.75rem 0;
+    }
+    p, li { color: #d1d5db; }
+    a { color: var(--gold-light); }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      margin-top: 1.5rem;
+    }
+    label { display: block; font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); margin: 1rem 0 0.35rem; }
+    input {
+      width: 100%;
+      padding: 0.85rem 0.9rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: #090d16;
+      color: #fff;
+      font: inherit;
+    }
+    button {
+      width: 100%;
+      margin-top: 1.25rem;
+      padding: 0.9rem 1rem;
+      border: 0;
+      border-radius: 0.75rem;
+      background: #dc2626;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    .note { margin-top: 1rem; font-size: 0.92rem; }
+    #status { margin-top: 1rem; min-height: 1.4rem; }
+    ul { margin: 0.75rem 0 0 1.2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="privacidade.html">Política de Privacidade</a></p>
+    <h1>Excluir conta</h1>
+    <p>Esta página apaga a conta ATHENA criada com e-mail e senha. A exclusão é imediata: some o acesso, o hash da senha e o progresso desse usuário. O catálogo oficial de aulas permanece.</p>
+
+    <div class="card">
+      <form id="delete-form">
+        <label for="email">E-mail da conta</label>
+        <input id="email" name="email" type="email" autocomplete="username" required maxlength="120">
+        <label for="password">Senha</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="72">
+        <button id="submit" type="submit">Excluir permanentemente</button>
+      </form>
+      <p id="status" role="status"></p>
+      <p class="note">A senha só serve para provar que a conta é sua. Ela não fica gravada nesta página.</p>
+    </div>
+
+    <div class="card">
+      <p><strong>Conta criada só com Google</strong></p>
+      <p class="note">Essa conta não tem senha da ATHENA. Abra o aplicativo, entre com Google e toque em Excluir conta, ao lado de Sair.</p>
+      <ul>
+        <li>No aplicativo a exclusão usa a sessão já aberta.</li>
+        <li>Dúvidas: <a href="mailto:projetoathena.app@gmail.com">projetoathena.app@gmail.com</a></li>
+      </ul>
+    </div>
+  </main>
+  <script>
+    const SAFE = new Set([
+      'E-mail ou senha incorretos.',
+      'Não foi possível excluir a conta agora. Tente de novo mais tarde.',
+      'Muitas requisições. Tente novamente em instantes.',
+      'Não foi possível concluir a autenticação.',
+      'Não foi possível concluir a autenticação. Tente novamente.'
+    ]);
+    const form = document.getElementById('delete-form');
+    const status = document.getElementById('status');
+    const submit = document.getElementById('submit');
+    const password = document.getElementById('password');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      submit.disabled = true;
+      status.textContent = 'Excluindo a conta...';
+      const email = document.getElementById('email').value.trim();
+      const secret = password.value;
+      try {
+        const response = await fetch('https://southamerica-east1-gen-lang-client-0822763072.cloudfunctions.net/athenaApi/api/auth/delete-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: secret })
+        });
+        const data = await response.json().catch(() => ({}));
+        password.value = '';
+        const raw = typeof data.error === 'string' ? data.error : '';
+        if (!response.ok) {
+          status.textContent = SAFE.has(raw) ? raw : 'Não foi possível excluir a conta.';
+          return;
+        }
+        form.reset();
+        status.textContent = 'Conta excluída. Esse e-mail e essa senha não entram mais na ATHENA.';
+      } catch {
+        password.value = '';
+        status.textContent = 'Sem conexão. Tente de novo.';
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

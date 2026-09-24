@@ -15,6 +15,7 @@ const SAFE_MESSAGES = [
   'E-mail ou senha incorretos.',
   'Não foi possível concluir o cadastro. Se você já tem conta, entre ou peça uma nova senha.',
   'Não foi possível enviar a senha por e-mail. Tente de novo mais tarde.',
+  'Não foi possível excluir a conta agora. Tente de novo mais tarde.',
   'Dados de cadastro inválidos.',
   'Informe uma senha.',
   'A senha precisa ter entre 10 e 72 caracteres.',
@@ -142,6 +143,37 @@ export async function loginWithGoogle(): Promise<User> {
     await logOut().catch(() => undefined);
     throw error;
   }
+}
+
+export function clearLocalAccountData(uid: string): void {
+  try {
+    const drop: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (key === 'athena_local_user' || key === 'athena_registered_students') {
+        drop.push(key);
+      } else if (uid && key.startsWith('athena_') && key.includes(uid)) {
+        drop.push(key);
+      }
+    }
+    drop.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    /* storage indisponível */
+  }
+  try {
+    indexedDB.deleteDatabase('athena_offline_cache');
+  } catch {
+    /* indexedDB indisponível */
+  }
+}
+
+export async function deleteCurrentAccount(): Promise<void> {
+  const current = auth.currentUser;
+  if (!current) throw new Error('Não foi possível concluir a autenticação.');
+  const token = await current.getIdToken();
+  await postAuth('/api/auth/delete-account', {}, token);
+  clearLocalAccountData(current.uid);
 }
 
 export async function requestNewPassword(emailRaw: string): Promise<void> {

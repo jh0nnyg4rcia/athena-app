@@ -199,6 +199,78 @@ export async function loginEmailAccount(input: { email: unknown; password: unkno
   if (uid) await assertStoredHash(uid, email, password);
 }
 
+const USER_DATA_COLLECTIONS = [
+  'sessions',
+  'stats',
+  'failed_questions',
+  'schedules',
+  'trilha',
+  'gamification'
+] as const;
+
+const DELETE_UNAVAILABLE = 'Não foi possível excluir a conta agora. Tente de novo mais tarde.';
+
+type PurgeDoc = {
+  delete: () => Promise<unknown>;
+  collection: (name: string) => {
+    limit: (count: number) => {
+      get: () => Promise<{ empty: boolean; docs: Array<{ ref: { delete: () => Promise<unknown> } }> }>;
+    };
+  };
+};
+
+async function purgeOwnedUserData(uid: string): Promise<void> {
+  const admin = await loadAdmin();
+  if (!admin) throw new AuthFlowError(DELETE_UNAVAILABLE);
+  const db = admin.db as unknown as {
+    collection: (name: string) => { doc: (id: string) => PurgeDoc };
+  };
+  const userDoc = db.collection('users').doc(uid);
+  for (const name of USER_DATA_COLLECTIONS) {
+    const page = userDoc.collection(name);
+    for (;;) {
+      const snap = await page.limit(200).get();
+      if (snap.empty) break;
+      await Promise.all(snap.docs.map((item) => item.ref.delete()));
+    }
+  }
+  await userDoc.delete();
+  await db.collection('auth_secrets').doc(uid).delete();
+  try {
+    await admin.auth.deleteUser(uid);
+  } catch (error) {
+    const code = String((error as { code?: string })?.code || '');
+    if (!code.includes('user-not-found')) throw new AuthFlowError(DELETE_UNAVAILABLE);
+  }
+}
+
+export async function deleteOwnedAccount(input: {
+  idToken?: string;
+  email?: unknown;
+  password?: unknown;
+}): Promise<void> {
+  const token = typeof input.idToken === 'string' ? input.idToken.trim() : '';
+  let uid = '';
+  if (token) {
+    const session = await verifyGoogleSession(token);
+    uid = session.uid;
+  } else {
+    const email = normalizeEmail(input.email);
+    const password = typeof input.password === 'string' ? input.password : '';
+    if (!email || !password) throw new AuthFlowError('INVALID_LOGIN');
+    const signed = await identityPost('accounts:signInWithPassword', {
+      email,
+      password,
+      returnSecureToken: true
+    });
+    uid = String(signed.localId || '');
+    if (!uid) throw new AuthFlowError('INVALID_LOGIN');
+    await assertStoredHash(uid, email, password);
+  }
+  if (!uid) throw new AuthFlowError('AUTH_FAILED');
+  await purgeOwnedUserData(uid);
+}
+
 export async function resetEmailAccess(input: { email: unknown }): Promise<void> {
   const email = normalizeEmail(input.email);
   if (!email) return;
@@ -276,6 +348,7 @@ const PUBLIC_AUTH_MESSAGES = new Set([
   'Não foi possível concluir o cadastro. Se você já tem conta, entre ou peça uma nova senha.',
   'E-mail ou senha incorretos.',
   'Não foi possível enviar a senha por e-mail. Tente de novo mais tarde.',
+  'Não foi possível excluir a conta agora. Tente de novo mais tarde.',
   'Dados de cadastro inválidos.',
   'Informe uma senha.',
   'A senha precisa ter entre 10 e 72 caracteres.',
