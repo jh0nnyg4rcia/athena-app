@@ -5002,19 +5002,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                  </span>
                  <span className="text-[9px] text-slate-500 font-mono truncate max-w-[140px]">{user.email}</span>
                </div>
-               <button
-                type="button"
-                onClick={() => {
-                  setDeleteAccountError(null);
-                  setDeleteAccountOpen(true);
-                }}
-                className="px-2 py-2 text-slate-400 hover:text-red-300 transition-colors rounded-xl hover:bg-red-500/10 active:scale-95 inline-flex items-center gap-1"
-                title="Excluir conta"
-                aria-label="Excluir conta"
-               >
-                 <Trash2 size={16} />
-                 <span className="text-[10px] font-bold uppercase tracking-wide">Excluir</span>
-               </button>
                <button 
                 onClick={() => handleLogout()}
                 className="p-2 text-slate-400 hover:text-red-400 transition-colors rounded-xl hover:bg-red-500/10 active:scale-95"
@@ -5559,6 +5546,24 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               </div>
             )}
           </nav>
+
+          {user && (
+            <div className="mt-auto pt-8 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteAccountError(null);
+                  setDeleteAccountOpen(true);
+                  if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200 text-[11px] font-bold uppercase tracking-wider"
+                aria-label="Excluir conta"
+              >
+                <Trash2 size={16} />
+                Excluir conta
+              </button>
+            </div>
+          )}
         </div>
       </motion.aside>
 
