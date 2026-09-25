@@ -21,7 +21,9 @@ export function ReviewList({
     const byDay = new Map<number | 'outros', Review[]>();
     for (const review of reviews) {
       const day = reviewDay(review);
-      const key = day ?? 'outros';
+      const part = reviewPart(review);
+      if (day === undefined || part === undefined || part < 0 || part > 4) continue;
+      const key = day;
       const list = byDay.get(key) || [];
       list.push(review);
       byDay.set(key, list);
@@ -44,7 +46,7 @@ export function ReviewList({
           <BookOpen className="text-slate-700" size={32} />
         </div>
         <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Nenhuma revisão comprimida ainda.</p>
-        <p className="text-xs text-slate-600 mt-2">O Bloco 6 de cada parte da trilha aparece aqui, agrupado por dia, ao gerar ou homologar a lição.</p>
+        <p className="text-xs text-slate-600 mt-2">As cinco revisões do dia aparecem aqui quando você estuda essa parte da trilha.</p>
       </div>
     );
   }

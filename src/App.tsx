@@ -108,19 +108,18 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { IncidenceChart } from './components/IncidenceChart';
-import { cacheArticle, cacheQuestion, getCachedArticles } from './services/localCache';
+import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
 import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, sanitizeAthenaVoice } from './lib/athenaVoice';
 import {
-  harvestCompressedReviews,
   harvestCompressedReviewsLocal,
   upsertCompressedReview,
   deleteCompressedReview,
-  mergeReviewLists,
   extractReviewBlock,
   buildCompressedReview,
-  persistReviewFromMessage
+  persistReviewFromMessage,
+  selectUserStudiedReviews
 } from './lib/compressedReviews';
 import { inferTrilhaContext, isTrilhaLesson } from './lib/trilhaContext';
 import {
@@ -1904,7 +1903,7 @@ export default function App() {
     sessions.forEach(s => {
       if (s.reviews) fromSessions.push(...s.reviews);
     });
-    return mergeReviewLists(compressedReviews, fromSessions);
+    return selectUserStudiedReviews([...compressedReviews, ...fromSessions]);
   }, [sessions, compressedReviews]);
 
   useEffect(() => {
@@ -1912,76 +1911,13 @@ export default function App() {
       setCompressedReviews([]);
       return;
     }
-    let cancelled = false;
     setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
-    const run = async (fetchCloud: boolean) => {
-      try {
-        const articles = await getCachedArticles();
-        const next = await harvestCompressedReviews(user.uid, {
-          sessions,
-          articles,
-          fetchCloud
-        });
-        if (!cancelled) setCompressedReviews(next);
-      } catch {
-        if (!cancelled) setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
-      }
-    };
-    void run(true);
-    const onHomologated = () => {
-      setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
-      void run(false);
-    };
-    window.addEventListener('athena-lesson-homologated', onHomologated);
-    window.addEventListener('athena-trilha-cached', onHomologated);
-    window.addEventListener('athena-lessons-restored', onHomologated);
-    window.addEventListener('athena-vault-ready', onHomologated);
-    window.addEventListener('athena-catalog-synced', onHomologated);
-    void syncOfficialCatalog().then((parts) => {
-      if (cancelled || !parts.length) return;
-      setCompressedReviews(harvestCompressedReviewsLocal(user.uid, {
-        sessions,
-        homologated: parts
-          .filter((part) => (part.review || '').trim().length >= 20)
-          .map((part) => ({
-            id: part.id,
-            day: part.day,
-            part: part.part,
-            subject: part.subject,
-            content: '',
-            review: part.review,
-            status: 'approved' as const,
-            approvedBy: 'jhonny.spider@gmail.com',
-            approvedAt: part.approvedAt || Date.now()
-          }))
-      }));
-    });
-    return () => {
-      cancelled = true;
-      window.removeEventListener('athena-lesson-homologated', onHomologated);
-      window.removeEventListener('athena-trilha-cached', onHomologated);
-      window.removeEventListener('athena-lessons-restored', onHomologated);
-      window.removeEventListener('athena-vault-ready', onHomologated);
-      window.removeEventListener('athena-catalog-synced', onHomologated);
-    };
   }, [user?.uid, sessions.length, activeTab]);
 
   useEffect(() => {
-    if (!user) return;
-    const sess = sessions.find((s) => s.id === currentSessionId);
-    let next: Review[] | null = null;
-    for (const m of messages) {
-      if (m.role !== 'model') continue;
-      next = persistReviewFromMessage(user.uid, m, {
-        sessionId: currentSessionId || undefined,
-        guidedSubject: sess?.guidedSubject || guidedSubject,
-        currentArticle: sess?.currentArticle || currentArticle,
-        trilhaDay: sess?.trilhaDay,
-        trilhaMaterialIndex: sess?.trilhaMaterialIndex
-      });
-    }
-    if (next) setCompressedReviews(next);
-  }, [user?.uid, messages, currentSessionId]);
+    if (!user?.uid) return;
+    void syncOfficialCatalog();
+  }, [user?.uid]);
   const [userStats, setUserStats] = useState<UserStat[]>([]);
   const [gamification, setGamification] = useState<GamificationData>({
     totalXP: 0,
@@ -2855,33 +2791,32 @@ export default function App() {
     }
   };
 
-  const deleteReview = async (reviewId: string, sessionId?: string) => {
+  const deleteReview = async (reviewId: string) => {
     if (!user) return;
     try {
-      setCompressedReviews(deleteCompressedReview(user.uid, reviewId));
+      const next = deleteCompressedReview(user.uid, reviewId, reviews);
+      setCompressedReviews(next);
 
-      let targetSessionId = sessionId;
-      
-      // Fallback for older reviews missing sessionId
-      if (!targetSessionId) {
-        const sessionWithReview = sessions.find(s => s.reviews?.some(r => r.id === reviewId));
-        if (sessionWithReview) targetSessionId = sessionWithReview.id;
-      }
+      const touched = sessions.filter((session) => session.reviews?.some((review) => review.id === reviewId));
+      if (!touched.length) return;
 
-      if (!targetSessionId) return;
-
-      const session = sessions.find(s => s.id === targetSessionId);
-      if (!session || !session.reviews) return;
-      
-      const updatedReviews = session.reviews.filter(r => r.id !== reviewId);
-      const updatedSession = { ...session, reviews: updatedReviews };
-      LocalPersistence.saveSession(user.uid, updatedSession);
-      setSessions(prev => prev.map(s => s.id === targetSessionId ? updatedSession : s));
+      const updatedSessions = sessions.map((session) => {
+        if (!session.reviews?.some((review) => review.id === reviewId)) return session;
+        const updated = { ...session, reviews: session.reviews.filter((review) => review.id !== reviewId) };
+        LocalPersistence.saveSession(user.uid, updated);
+        return updated;
+      });
+      setSessions(updatedSessions);
 
       if (auth.currentUser && !isQuotaExhausted()) {
-        const sessionRef = doc(db, `users/${user.uid}/sessions`, targetSessionId);
-        const cleaned = cleanData({ reviews: updatedReviews });
-        await setDoc(sessionRef, cleaned, { merge: true });
+        await Promise.all(touched.map(async (session) => {
+          const updatedReviews = (session.reviews || []).filter((review) => review.id !== reviewId);
+          await setDoc(
+            doc(db, `users/${user.uid}/sessions`, session.id),
+            cleanData({ reviews: updatedReviews }),
+            { merge: true }
+          );
+        }));
       }
     } catch (error) {
       console.error("Delete review error:", error);
@@ -3014,8 +2949,39 @@ export default function App() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+  const pendingReadingStartRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const anchorIndex = pendingReadingStartRef.current;
+    if (anchorIndex !== null) {
+      let cancelled = false;
+      const align = () => {
+        if (cancelled) return;
+        const scroller = document.getElementById('main-scroller');
+        const block = document.getElementById(`block-${anchorIndex}-0`);
+        if (!scroller) return;
+        if (!block) {
+          scroller.scrollTop = 0;
+          return;
+        }
+        const top = block.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+        scroller.scrollTop = Math.max(0, top - 28);
+      };
+      const raf = requestAnimationFrame(() => {
+        align();
+        window.setTimeout(align, 120);
+        window.setTimeout(() => {
+          align();
+          if (pendingReadingStartRef.current === anchorIndex) pendingReadingStartRef.current = null;
+        }, 420);
+      });
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(raf);
+      };
+    }
+    const readingTrilha = messages.some((m) => m.role === 'model' && typeof m.trilhaDay === 'number');
+    if (readingTrilha) return;
     scrollToBottom();
   }, [messages, isLoading]);
 
@@ -3214,7 +3180,10 @@ export default function App() {
         subject: activeSubject,
         article: activeArticle
       });
-      setMessages(prev => [...prev, botMessage]);
+      setMessages(prev => {
+        if (dayNum !== undefined) pendingReadingStartRef.current = prev.length;
+        return [...prev, botMessage];
+      });
 
       if (dayNum !== undefined) {
         const matIdx = activeSession?.trilhaMaterialIndex ?? 0;
@@ -3437,7 +3406,10 @@ ${matList}
             subject: activeSubject,
             article: dayNum ?? activeArticle
           });
-          setMessages(prev => [...prev, botMessage]);
+          setMessages(prev => {
+            if (dayNum !== undefined) pendingReadingStartRef.current = prev.length;
+            return [...prev, botMessage];
+          });
 
           const activeId = (targetSessionId || currentSessionId);
           if (activeId) {
@@ -3729,12 +3701,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         model,
         timestamp: Date.now()
       });
-      if (user) {
-        persistBlock6(
-          { role: 'model', content: text, subject: nextMat.nome, article: dayNum, trilhaDay: dayNum, trilhaMaterialIndex: nextMatIdx },
-          { day: dayNum, part: nextMatIdx, subject: nextMat.nome, article: dayNum }
-        );
-      }
       console.log(`[ATHENA Pre-fetch] Parte ${nextMatIdx + 1} (Dia ${dayNum}) salva em cache local com sucesso!`);
     } catch (err) {
       console.warn(`[ATHENA Pre-fetch] Não foi possível pré-carregar Parte ${nextMatIdx + 1}:`, err);
@@ -3746,6 +3712,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     if (!dayItem || !dayItem.materias || dayItem.materias.length === 0) return;
 
     setActiveTab('chat');
+    document.getElementById('main-scroller')?.scrollTo({ top: 0, behavior: 'auto' });
 
     const materialIndex = 0;
     let initialMsg = '';
@@ -3841,6 +3808,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         setCurrentSessionId(id);
         setGuidedSubject(guidedSubjectName);
         setCurrentArticle(1);
+        pendingReadingStartRef.current = 1;
         setMessages([{ role: 'user', content: initialMsg }, botMessage]);
         setIsLoading(false);
 
@@ -3894,6 +3862,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         setCurrentSessionId(id);
         setGuidedSubject(guidedSubjectName);
         setCurrentArticle(1);
+        pendingReadingStartRef.current = 1;
         setMessages([{ role: 'user', content: initialMsg }, botMessage]);
         setIsLoading(false);
 
@@ -4029,6 +3998,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   article: 1
                 });
                 const finalMessages = [...updatedMessages, botMessage];
+                pendingReadingStartRef.current = finalMessages.length - 1;
                 setMessages(finalMessages);
                 setIsLoading(false);
 
@@ -4091,6 +4061,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   article: 1
                 });
                 const finalMessages = [...updatedMessages, botMessage];
+                pendingReadingStartRef.current = finalMessages.length - 1;
                 setMessages(finalMessages);
                 setIsLoading(false);
 
@@ -4155,6 +4126,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 });
                 
                 const finalMessages = [...updatedMessages, botMessage];
+                pendingReadingStartRef.current = finalMessages.length - 1;
                 setMessages(finalMessages);
 
                 const updatedSessionsGemini = sessions.map(s => {
@@ -4477,6 +4449,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         article: day
       });
       const userMsg: Message = { role: 'user', content: msg };
+      pendingReadingStartRef.current = 1;
       setMessages([userMsg, botMessage]);
       await saveSession({
         messages: [userMsg, botMessage],
@@ -4706,6 +4679,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 article: 1
               });
               const finalMessages = [...updatedMessages, botMessage];
+              pendingReadingStartRef.current = finalMessages.length - 1;
               setMessages(finalMessages);
               setIsLoading(false);
               await saveSession({
@@ -4753,6 +4727,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             });
             
             const finalMessages = [...updatedMessages, botMessage];
+            pendingReadingStartRef.current = finalMessages.length - 1;
             setMessages(finalMessages);
 
             const updatedSessionsSkip = sessions.map(s => {
@@ -6068,7 +6043,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               >
                 <div className="text-center space-y-4">
                    <h2 className="text-3xl font-serif font-bold text-slate-100"><span className="text-brand-gold">Revisão</span> Comprimida</h2>
-                   <p className="text-slate-400 text-sm">Somente o Bloco 6 de cada parte publicada, agrupado por dia. O mesmo texto vale para todos os alunos.</p>
+                   <p className="text-slate-400 text-sm">As cinco revisões de cada dia que você gerou ao estudar. Só aparece o que você mesmo estudou.</p>
                 </div>
                 <Suspense fallback={<div className="h-48 bg-slate-900 border border-white/5 rounded-[2.5rem] animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Carregando lista de revisões comprimidas...</div>}>
                   <ReviewList 
@@ -6086,8 +6061,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                       }, 300);
                     }} 
                     onDelete={(id) => {
-                      const rev = reviews.find(r => r.id === id);
-                      deleteReview(id, rev?.sessionId);
+                      deleteReview(id);
                     }}
                   />
                 </Suspense>
@@ -7325,26 +7299,23 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
           </div>
         </div>
 
-        {/* Input Bar */}
-        {user && activeTab === 'chat' && (
-          <div className="p-4 lg:p-6 bg-slate-950/80 backdrop-blur-xl border-t border-white/5 relative z-30 pb-6">
-            
-            {/* Scroll to Top FAB */}
-            <AnimatePresence>
-              {showScrollTop && (
-                <motion.button
-                  initial={{ opacity: 0, scale: 0.8, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.8, y: 20 }}
-                  onClick={scrollToTop}
-                  className="absolute -top-16 right-4 sm:right-8 p-3 bg-brand-gold text-slate-950 rounded-full shadow-[0_10px_30px_rgba(212,175,55,0.4)] hover:scale-110 active:scale-95 transition-all z-30 mb-0"
-                  title="Voltar ao Topo"
-                >
-                  <ChevronRight size={20} className="-rotate-90" />
-                </motion.button>
-              )}
-            </AnimatePresence>
+        <AnimatePresence>
+          {user && activeTab === 'chat' && showScrollTop && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 20 }}
+              onClick={scrollToTop}
+              className="fixed bottom-24 right-4 sm:right-8 p-3 bg-brand-gold text-slate-950 rounded-full shadow-[0_10px_30px_rgba(212,175,55,0.4)] hover:scale-110 active:scale-95 transition-all z-30"
+              title="Voltar ao Topo"
+            >
+              <ChevronRight size={20} className="-rotate-90" />
+            </motion.button>
+          )}
+        </AnimatePresence>
 
+        {user && activeTab === 'chat' && isCEO && (
+          <div className="p-4 lg:p-6 bg-slate-950/80 backdrop-blur-xl border-t border-white/5 relative z-30 pb-6">
             {/* Attachment Preview */}
             <AnimatePresence>
               {attachedFile && (
@@ -7371,8 +7342,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
 
 
 
-            {isCEO ? (
-              <form 
+            <form 
                 onSubmit={(e) => {
                   e.preventDefault();
                   handleSendMessage();
@@ -7426,16 +7396,6 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   <Send size={20} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
                 </button>
               </form>
-            ) : (
-              <div className="max-w-4xl mx-auto p-4 lg:p-5 rounded-2xl lg:rounded-3xl bg-slate-900/70 border border-brand-gold/25 flex items-center justify-center gap-3.5 text-center backdrop-blur-md shadow-lg">
-                <div className="w-8 h-8 rounded-xl bg-brand-gold/10 border border-brand-gold/30 flex items-center justify-center text-brand-gold shrink-0">
-                  <Lock size={15} />
-                </div>
-                <p className="text-xs text-slate-300 font-medium leading-relaxed">
-                  A consulta avulsa por chat está temporariamente desativada. Concentre-se nos estudos da sua <strong className="text-brand-gold">Trilha Diária 80/20</strong>!
-                </p>
-              </div>
-            )}
           </div>
         )}
 

@@ -153,6 +153,15 @@ export async function putVaultReviews(reviews: Review[]): Promise<void> {
   }
 }
 
+export async function deleteVaultReview(reviewId: string): Promise<void> {
+  if (!reviewId) return;
+  try {
+    await idbDelete(REVIEWS_STORE, reviewId);
+  } catch (err) {
+    console.warn('[LessonVault] Falha ao remover revisão comprimida do IndexedDB:', err);
+  }
+}
+
 export async function listVaultReviews(): Promise<Review[]> {
   try {
     return await idbGetAll<Review>(REVIEWS_STORE);

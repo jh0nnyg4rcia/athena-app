@@ -1,13 +1,10 @@
-import { Review, HomologatedLesson, ChatSession, Message } from '../types';
-import { TRILHA_JURIDICA_DATA } from '../data/trilhaData';
-import { fetchAllHomologatedLessons, getLocalHomologatedList } from '../services/curatedLessonService';
-import { listCachedTrilhaParts } from '../services/trilhaCacheService';
+import { Review, ChatSession, Message } from '../types';
 import { LocalPersistence } from '../services/localPersistence';
-import homologatedSeedsData from '../data/homologatedSeeds.json';
-import { hydrateLessonVault, listVaultReviews, persistLocalStorageSafe, putVaultReviews } from '../services/lessonVault';
+import { deleteVaultReview, persistLocalStorageSafe, putVaultReviews } from '../services/lessonVault';
 
 const STORAGE_PREFIX = 'athena_compressed_reviews_';
-const seeds = (homologatedSeedsData || {}) as Record<string, HomologatedLesson>;
+const DELETED_PREFIX = 'athena_deleted_compressed_reviews_';
+const PARTS_PER_DAY = 5;
 
 function stripChallenge(text: string): string {
   return (text || '')
@@ -166,9 +163,32 @@ export function loadCompressedReviews(userId: string): Review[] {
   }
 }
 
+function loadDeletedReviewIds(userId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(`${DELETED_PREFIX}${userId}`);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberDeletedReview(userId: string, reviewId: string): void {
+  const ids = loadDeletedReviewIds(userId);
+  ids.add(reviewId);
+  persistLocalStorageSafe(`${DELETED_PREFIX}${userId}`, JSON.stringify([...ids]));
+}
+
+function forgetDeletedReview(userId: string, reviewId: string): void {
+  const ids = loadDeletedReviewIds(userId);
+  if (!ids.delete(reviewId)) return;
+  persistLocalStorageSafe(`${DELETED_PREFIX}${userId}`, JSON.stringify([...ids]));
+}
+
 export function saveCompressedReviews(userId: string, reviews: Review[]): void {
-  persistLocalStorageSafe(`${STORAGE_PREFIX}${userId}`, JSON.stringify(reviews));
-  void putVaultReviews(reviews);
+  const studied = selectUserStudiedReviews(reviews);
+  persistLocalStorageSafe(`${STORAGE_PREFIX}${userId}`, JSON.stringify(studied));
+  void putVaultReviews(studied);
 }
 
 export function upsertCompressedReview(userId: string, review: Review): Review[] {
@@ -192,19 +212,18 @@ export function upsertCompressedReview(userId: string, review: Review): Review[]
   } else {
     next = [review, ...existing];
   }
+  forgetDeletedReview(userId, review.id);
   saveCompressedReviews(userId, next);
-  return next;
+  return selectUserStudiedReviews(next);
 }
 
-export function deleteCompressedReview(userId: string, reviewId: string): Review[] {
-  const next = loadCompressedReviews(userId).filter((r) => r.id !== reviewId);
+export function deleteCompressedReview(userId: string, reviewId: string, current?: Review[]): Review[] {
+  rememberDeletedReview(userId, reviewId);
+  const base = selectUserStudiedReviews([...(current || []), ...loadCompressedReviews(userId)]);
+  const next = base.filter((review) => review.id !== reviewId);
   saveCompressedReviews(userId, next);
+  void deleteVaultReview(reviewId);
   return next;
-}
-
-function trilhaSubject(day: number, part: number, fallback?: string): string {
-  const item = TRILHA_JURIDICA_DATA.find((d) => d.dia === day);
-  return item?.materias?.[part]?.nome || fallback || 'Trilha Jurídica';
 }
 
 function collectFromLesson(
@@ -236,15 +255,26 @@ export function persistReviewFromMessage(
     trilhaMaterialIndex?: number;
   }
 ): Review[] {
+  const day = msg.trilhaDay ?? meta?.trilhaDay;
+  const part = msg.trilhaMaterialIndex ?? meta?.trilhaMaterialIndex;
+  const stored = selectUserStudiedReviews(loadCompressedReviews(userId));
+  if (typeof day !== 'number' || typeof part !== 'number' || part < 0 || part >= PARTS_PER_DAY) {
+    return stored;
+  }
   const review = collectFromLesson(msg.content, msg.blocks, {
     subject: msg.subject || meta?.guidedSubject || 'Estudo Geral',
-    article: msg.article || meta?.currentArticle,
-    day: msg.trilhaDay ?? meta?.trilhaDay,
-    part: msg.trilhaMaterialIndex ?? meta?.trilhaMaterialIndex,
+    article: meta?.currentArticle ?? msg.article,
+    day,
+    part,
     sessionId: meta?.sessionId
   });
-  if (!review) return loadCompressedReviews(userId);
-  return upsertCompressedReview(userId, review);
+  if (!review) return stored;
+  return upsertCompressedReview(userId, {
+    ...review,
+    id: `trilha:${day}:${part}`,
+    day,
+    part
+  });
 }
 
 function collectFromSessions(sessions: ChatSession[]): Review[] {
@@ -290,14 +320,6 @@ function mergeSessions(userId: string, extras?: ChatSession[]): ChatSession[] {
   return Array.from(byId.values());
 }
 
-export type HarvestArticle = {
-  subject: string;
-  article: number;
-  content: string;
-  timestamp?: number;
-  summary?: string;
-};
-
 function mergeReviewIntoStore(store: Review[], review: Review): Review[] {
   const idx = store.findIndex((r) => r.id === review.id);
   if (idx >= 0) {
@@ -316,98 +338,53 @@ function mergeReviewIntoStore(store: Review[], review: Review): Review[] {
   return [review, ...store];
 }
 
+/** Até 5 partes (0–4) por dia, só as que este usuário gerou ao estudar. */
+export function selectUserStudiedReviews(reviews: Review[]): Review[] {
+  const normalized: Review[] = [];
+  for (const review of reviews || []) {
+    const day = reviewDay(review);
+    const part = reviewPart(review);
+    if (day === undefined || part === undefined) continue;
+    if (!Number.isInteger(day) || day < 1) continue;
+    if (!Number.isInteger(part) || part < 0 || part >= PARTS_PER_DAY) continue;
+    if (!review.content || isMostlyQuiz(review.content)) continue;
+    const sessionId = String(review.sessionId || '');
+    if (!sessionId || sessionId.startsWith('trilha:') || sessionId.startsWith('tema:')) continue;
+    normalized.push({
+      ...review,
+      id: `trilha:${day}:${part}`,
+      day,
+      part
+    });
+  }
+  return mergeReviewLists(normalized);
+}
+
 /**
- * Colheita síncrona (sementes, cache, sessões, cofre). Não espera Firestore.
+ * Reúne só as revisões que este usuário gerou ao estudar o dia.
+ * O catálogo oficial das aulas não entra nesta lista.
  */
 export function harvestCompressedReviewsLocal(
   userId: string,
-  extras?: { sessions?: ChatSession[]; articles?: HarvestArticle[]; homologated?: HomologatedLesson[]; vaultReviews?: Review[] }
+  extras?: { sessions?: ChatSession[] }
 ): Review[] {
-  const found: Review[] = [];
-
-  const homologated: HomologatedLesson[] = [
-    ...Object.values(seeds || {}),
-    ...Object.values(getLocalHomologatedList()),
-    ...(extras?.homologated || [])
-  ];
-
-  const seenLesson = new Set<string>();
-  for (const lesson of homologated) {
-    if (!lesson) continue;
-    const key = lesson.id || `${lesson.day}:${lesson.part}`;
-    if (seenLesson.has(key)) continue;
-    seenLesson.add(key);
-    if (lesson.status && lesson.status !== 'approved') continue;
-    const review = lesson.review
-      ? buildCompressedReview({
-          content: lesson.review,
-          subject: lesson.subject || trilhaSubject(lesson.day, lesson.part),
-          article: lesson.day,
-          day: lesson.day,
-          part: lesson.part,
-          timestamp: lesson.approvedAt
-        })
-      : collectFromLesson(lesson.content, lesson.blocks, {
-          subject: lesson.subject || trilhaSubject(lesson.day, lesson.part),
-          article: lesson.day,
-          day: lesson.day,
-          part: lesson.part,
-          timestamp: lesson.approvedAt
-        });
-    if (review) found.push(review);
+  const deleted = loadDeletedReviewIds(userId);
+  let store = selectUserStudiedReviews(loadCompressedReviews(userId)).filter((review) => !deleted.has(review.id));
+  for (const review of collectFromSessions(mergeSessions(userId, extras?.sessions))) {
+    const [studied] = selectUserStudiedReviews([review]);
+    if (!studied || deleted.has(studied.id)) continue;
+    store = mergeReviewIntoStore(store, studied);
   }
-
-  for (const cached of listCachedTrilhaParts()) {
-    const review = collectFromLesson(cached.text, undefined, {
-      subject: trilhaSubject(cached.day, cached.part),
-      article: cached.day,
-      day: cached.day,
-      part: cached.part,
-      timestamp: cached.timestamp
-    });
-    if (review) found.push(review);
-  }
-
-  found.push(...collectFromSessions(mergeSessions(userId, extras?.sessions)));
-
-  for (const article of extras?.articles || []) {
-    const review = collectFromLesson(article.content || article.summary, undefined, {
-      subject: article.subject || 'Estudo Geral',
-      article: article.article,
-      timestamp: article.timestamp
-    });
-    if (review) found.push(review);
-  }
-
-  let store = loadCompressedReviews(userId);
-  for (const review of extras?.vaultReviews || []) {
-    if (review?.id && review.content) store = mergeReviewIntoStore(store, review);
-  }
-  for (const review of found) {
-    store = mergeReviewIntoStore(store, review);
-  }
-  saveCompressedReviews(userId, store);
-  return store;
+  const selected = selectUserStudiedReviews(store).filter((review) => !deleted.has(review.id));
+  saveCompressedReviews(userId, selected);
+  return selected;
 }
 
 export async function harvestCompressedReviews(
   userId: string,
-  extras?: { sessions?: ChatSession[]; articles?: HarvestArticle[]; fetchCloud?: boolean }
+  extras?: { sessions?: ChatSession[] }
 ): Promise<Review[]> {
-  await hydrateLessonVault();
-  const vaultReviews = await listVaultReviews();
-  const immediate = harvestCompressedReviewsLocal(userId, { ...extras, vaultReviews });
-  if (extras?.fetchCloud === false) return immediate;
-
-  try {
-    const cloud = await fetchAllHomologatedLessons();
-    if (cloud.length) {
-      return harvestCompressedReviewsLocal(userId, { ...extras, homologated: cloud, vaultReviews });
-    }
-  } catch {
-    /* cache/sementes já cobrem o offline */
-  }
-  return harvestCompressedReviewsLocal(userId, { ...extras, vaultReviews });
+  return harvestCompressedReviewsLocal(userId, extras);
 }
 
 export function mergeReviewLists(...lists: Review[][]): Review[] {
