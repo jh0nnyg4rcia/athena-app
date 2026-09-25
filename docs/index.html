@@ -31,48 +31,50 @@
   <!-- Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
 
   <style>
     :root {
-      --bg-dark: #080c14;
-      --bg-card: #0f1626;
-      --bg-card-hover: #162035;
-      --gold: #f59e0b;
-      --gold-light: #fbbf24;
-      --gold-dark: #b45309;
+      --bg-dark: #020617;
+      --bg-card: #0f172a;
+      --bg-card-hover: #111c33;
+      --gold: #d4af37;
+      --gold-light: #e4c56a;
+      --gold-dark: #a6862a;
       --emerald: #10b981;
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
-      --border-card: rgba(245, 158, 11, 0.2);
+      --border-card: rgba(212, 175, 55, 0.18);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
-        radial-gradient(circle at 50% 0%, rgba(30, 27, 75, 0.4) 0%, transparent 60%),
-        radial-gradient(circle at 100% 40%, rgba(245, 158, 11, 0.05) 0%, transparent 40%);
+      background-image:
+        radial-gradient(circle at top right, rgba(212, 175, 55, 0.1), transparent 42%),
+        radial-gradient(circle at bottom left, rgba(6, 78, 59, 0.18), transparent 48%);
       color: var(--text-main);
-      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-family: 'Inter', sans-serif;
       line-height: 1.6;
       overflow-x: hidden;
+      min-height: 100vh;
     }
 
-    .font-serif { font-family: 'Cinzel', serif; }
+    .font-serif { font-family: 'Playfair Display', serif; }
 
     /* Top Announcement Bar */
     .top-announcement-bar {
-      background: linear-gradient(90deg, #92400e 0%, #d97706 50%, #92400e 100%);
-      color: #fff;
-      font-size: 0.82rem;
-      font-weight: 600;
-      padding: 0.5rem 1rem;
+      background: rgba(15, 23, 42, 0.72);
+      color: #cbd5e1;
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.7rem 1rem;
       text-align: center;
-      border-bottom: 1px solid rgba(251, 191, 36, 0.3);
-      position: relative;
-      z-index: 55;
+      border: 1px solid rgba(212, 175, 55, 0.18);
+      border-radius: 1.25rem;
+      margin: 1.25rem auto 0;
+      max-width: 920px;
     }
 
     .pill-google-play {
@@ -94,20 +96,21 @@
       left: 0;
       right: 0;
       z-index: 50;
-      background: rgba(8, 12, 20, 0.92);
+      height: 4rem;
+      background: rgba(2, 6, 23, 0.8);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      transition: all 0.3s ease;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
 
     .nav-container {
-      max-width: 1200px;
+      height: 100%;
       margin: 0 auto;
-      padding: 0.85rem 1.5rem;
+      padding: 0 1rem 0 1.25rem;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 1rem;
     }
 
     .logo-box {
@@ -121,17 +124,34 @@
       width: 42px;
       height: 42px;
       border-radius: 10px;
-      box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);
+      box-shadow: 0 0 15px rgba(212, 175, 55, 0.28);
     }
 
     .logo-text {
-      font-family: 'Cinzel', serif;
-      font-weight: 900;
-      font-size: 1.35rem;
-      letter-spacing: 0.05em;
-      background: linear-gradient(135deg, #ffffff 40%, var(--gold-light) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      font-family: 'Playfair Display', serif;
+      font-weight: 700;
+      font-size: 1.05rem;
+      letter-spacing: -0.01em;
+      color: #f1f5f9;
+    }
+
+    .logo-kicker {
+      display: block;
+      margin-top: 0.1rem;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: rgba(212, 175, 55, 0.75);
+    }
+
+    .status-dot {
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 999px;
+      background: #10b981;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.55);
     }
 
     .nav-links {
@@ -173,14 +193,18 @@
     }
 
     .btn-gold {
-      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-      color: #080c14;
-      box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.4);
+      background: #d4af37;
+      color: #020617;
+      border-radius: 1rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 0.78rem;
+      box-shadow: 0 8px 24px rgba(212, 175, 55, 0.28);
     }
 
     .btn-gold:hover {
       transform: translateY(-2px);
-      box-shadow: 0 15px 30px -5px rgba(245, 158, 11, 0.5);
+      box-shadow: 0 15px 30px -5px rgba(212, 175, 55, 0.35);
       filter: brightness(1.05);
     }
 
@@ -220,8 +244,8 @@
       display: inline-flex;
       align-items: center;
       gap: 0.5rem;
-      background: rgba(245, 158, 11, 0.12);
-      border: 1px solid rgba(245, 158, 11, 0.35);
+      background: rgba(212, 175, 55, 0.1);
+      border: 1px solid rgba(212, 175, 55, 0.22);
       color: var(--gold-light);
       padding: 0.4rem 1.25rem;
       border-radius: 9999px;
@@ -241,22 +265,25 @@
 
     /* Hero */
     .hero-section {
-      padding: 4.5rem 1.5rem 4rem;
+      padding: 2.5rem 1.5rem 2.5rem;
       text-align: center;
     }
 
+    .app-main .container { max-width: 980px; }
+
     .hero-title {
-      font-size: clamp(2.4rem, 5.5vw, 4rem);
-      font-weight: 900;
+      font-size: clamp(2.1rem, 4.4vw, 3.4rem);
+      font-weight: 700;
       line-height: 1.15;
-      margin-bottom: 1.5rem;
-      background: linear-gradient(135deg, #ffffff 40%, var(--gold-light) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      max-width: 980px;
+      margin-bottom: 1rem;
+      color: #f1f5f9;
+      letter-spacing: -0.02em;
+      max-width: 820px;
       margin-left: auto;
       margin-right: auto;
     }
+
+    .hero-title span { color: var(--gold); }
 
     .hero-subtitle {
       font-size: clamp(1.05rem, 2.2vw, 1.3rem);
@@ -275,13 +302,13 @@
     }
 
     .hero-banner-wrap {
-      max-width: 900px;
+      max-width: 860px;
       margin: 0 auto;
-      border-radius: 1.25rem;
+      border-radius: 2rem;
       overflow: hidden;
-      border: 1px solid rgba(245, 158, 11, 0.35);
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(245, 158, 11, 0.15);
-      transition: transform 0.3s;
+      border: 1px solid rgba(212, 175, 55, 0.2);
+      box-shadow: 0 24px 50px rgba(0, 0, 0, 0.45);
+      background: rgba(15, 23, 42, 0.6);
     }
 
     .hero-banner-wrap:hover {
@@ -296,10 +323,14 @@
 
     /* Metrics Grid */
     .metrics-section {
-      padding: 3rem 0;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      background: rgba(15, 22, 38, 0.5);
+      padding: 0 0 2rem;
+    }
+
+    .metrics-grid > div {
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 1.5rem;
+      padding: 1.25rem 1rem;
     }
 
     .metrics-grid {
@@ -310,10 +341,10 @@
     }
 
     .metric-number {
-      font-family: 'Cinzel', serif;
-      font-size: 2.7rem;
-      font-weight: 800;
-      color: var(--gold-light);
+      font-family: 'Playfair Display', serif;
+      font-size: 2.4rem;
+      font-weight: 700;
+      color: var(--gold);
       margin-bottom: 0.3rem;
     }
 
@@ -327,18 +358,16 @@
 
     /* Cards */
     .card {
-      background: var(--bg-card);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 1.25rem;
-      padding: 2.25rem;
-      transition: all 0.3s ease;
-      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 1.75rem;
+      padding: 1.75rem;
+      transition: border-color 0.2s ease;
+      box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.8);
     }
 
     .card:hover {
-      border-color: rgba(245, 158, 11, 0.3);
-      background: var(--bg-card-hover);
-      transform: translateY(-4px);
+      border-color: rgba(212, 175, 55, 0.28);
     }
 
     /* Section Headers */
@@ -381,10 +410,10 @@
       justify-content: center;
       width: 36px;
       height: 36px;
-      background: rgba(245, 158, 11, 0.15);
-      color: var(--gold-light);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      border-radius: 8px;
+      background: rgba(212, 175, 55, 0.12);
+      color: var(--gold);
+      border: 1px solid rgba(212, 175, 55, 0.28);
+      border-radius: 0.75rem;
       font-weight: 800;
       font-size: 0.9rem;
       margin-bottom: 1.25rem;
@@ -392,11 +421,11 @@
 
     /* Interactive Simulator */
     .simulator-wrap {
-      background: #0b111e;
-      border: 2px solid rgba(245, 158, 11, 0.4);
-      border-radius: 1.5rem;
-      padding: 2.5rem;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(245, 158, 11, 0.15);
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(212, 175, 55, 0.22);
+      border-radius: 2rem;
+      padding: 2rem;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
       max-width: 860px;
       margin: 0 auto;
     }
@@ -490,8 +519,8 @@
       top: -14px;
       left: 50%;
       transform: translateX(-50%);
-      background: linear-gradient(135deg, #f59e0b, #d97706);
-      color: #080c14;
+      background: #d4af37;
+      color: #020617;
       font-size: 0.75rem;
       font-weight: 800;
       padding: 0.3rem 1.25rem;
@@ -539,9 +568,9 @@
 
     /* Footer */
     footer {
-      background: #050810;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      padding: 4rem 1.5rem 2.5rem;
+      background: transparent;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 3rem 1.5rem 2.5rem;
       color: var(--text-muted);
     }
 
@@ -555,8 +584,8 @@
     }
 
     .footer-col h4 {
-      font-family: 'Cinzel', serif;
-      color: #fff;
+      font-family: 'Playfair Display', serif;
+      color: #f1f5f9;
       font-size: 1.1rem;
       margin-bottom: 1.25rem;
     }
@@ -587,46 +616,195 @@
       font-size: 0.85rem;
     }
 
-    @media (max-width: 768px) {
+    .app-shell {
+      display: flex;
+      align-items: stretch;
+      min-height: calc(100vh - 4rem);
+    }
+
+    .app-sidebar {
+      width: 18rem;
+      flex-shrink: 0;
+      position: sticky;
+      top: 4rem;
+      height: calc(100vh - 4rem);
+      overflow-y: auto;
+      background: rgba(15, 23, 42, 0.82);
+      border-right: 1px solid rgba(212, 175, 55, 0.1);
+      padding: 1.5rem 1.15rem 2rem;
+      backdrop-filter: blur(16px);
+    }
+
+    .side-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .side-mark {
+      width: 2.6rem;
+      height: 2.6rem;
+      border-radius: 0.85rem;
+      display: grid;
+      place-items: center;
+      background: rgba(212, 175, 55, 0.1);
+      border: 1px solid rgba(212, 175, 55, 0.22);
+      color: var(--gold);
+    }
+
+    .side-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      list-style: none;
+      margin-top: 1.25rem;
+    }
+
+    .side-nav a {
+      display: block;
+      padding: 0.75rem 0.9rem;
+      border-radius: 0.85rem;
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 0.92rem;
+      border: 1px solid transparent;
+    }
+
+    .side-nav a:hover,
+    .side-nav a.active {
+      color: var(--gold);
+      background: rgba(212, 175, 55, 0.1);
+      border-color: rgba(212, 175, 55, 0.2);
+    }
+
+    .side-download {
+      display: flex;
+      width: 100%;
+      margin-bottom: 0.35rem;
+    }
+
+    .app-main { flex: 1; min-width: 0; }
+
+    .menu-btn, .sidebar-backdrop { display: none; }
+
+    .header-brand { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: inherit; }
+    .header-seal {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 999px;
+      background: var(--gold);
+      color: #020617;
+      display: grid;
+      place-items: center;
+      border: 2px solid #020617;
+      box-shadow: 0 8px 18px rgba(212, 175, 55, 0.25);
+    }
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: #64748b;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 900px) {
       .nav-links { display: none; }
       .pricing-card.featured { transform: none; }
+      .menu-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.4rem;
+        height: 2.4rem;
+        border-radius: 0.75rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.8);
+        color: #e2e8f0;
+        cursor: pointer;
+      }
+      .app-sidebar {
+        position: fixed;
+        z-index: 45;
+        top: 4rem;
+        left: 0;
+        bottom: 0;
+        width: min(85vw, 20rem);
+        height: auto;
+        transform: translateX(-105%);
+        transition: transform 0.22s ease;
+        background: #0f172a;
+      }
+      .app-sidebar.open { transform: translateX(0); }
+      .sidebar-backdrop.open {
+        display: block;
+        position: fixed;
+        inset: 4rem 0 0;
+        background: rgba(2, 6, 23, 0.55);
+        z-index: 40;
+      }
     }
   </style>
 </head>
 <body>
 
-  <!-- TOP ANNOUNCEMENT BAR: PERÍODO DE TESTE & GOOGLE PLAY -->
-  <div class="top-announcement-bar">
-    <div class="container" style="display: flex; align-items: center; justify-content: center; gap: 0.85rem; flex-wrap: wrap; text-align: center;">
-      <span>📲 <strong>ATUALIZE O APLICATIVO (v1.3.5):</strong> A primeira parte de Constitucional abre no início da leitura. A revisão comprimida mostra só as cinco partes que você estudou no dia. Instale por cima da versão anterior, sem desinstalar.</span>
-      <span class="pill-google-play">🟢 Em breve na Google Play Store</span>
-    </div>
-  </div>
-
-  <!-- NAVBAR -->
   <header class="glass-nav">
     <div class="nav-container">
-      <a href="#" class="logo-box">
-        <img src="athena-icon.png" alt="ATHENA" class="logo-img">
-        <span class="logo-text">ATHENA</span>
-      </a>
-
-      <ul class="nav-links">
-        <li><a href="#metodologia" class="nav-link">Metodologia</a></li>
-        <li><a href="#mobilidade" class="nav-link">Sem Planner</a></li>
-        <li><a href="#blocos" class="nav-link">6 Blocos</a></li>
-        <li><a href="#simulador" class="nav-link">Simulador IA</a></li>
-        <li><a href="#planos" class="nav-link">Planos</a></li>
-        <li><a href="#faq" class="nav-link">FAQ</a></li>
-      </ul>
-
-      <div class="nav-cta">
-        <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" download>
-          📲 Baixar App
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <button class="menu-btn" type="button" aria-label="Abrir menu" onclick="toggleSidebar()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <a href="#topo" class="header-brand">
+          <span class="header-seal" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M7 7h10M8 21h8M9 7l-4 8a3 3 0 0 0 2.6 4.5h.1M15 7l4 8a3 3 0 0 1-2.6 4.5h-.1"/></svg>
+          </span>
+          <span>
+            <span class="logo-text">ATHENA</span>
+            <span class="header-status"><span class="status-dot"></span> Online • Mentoria Ativa</span>
+          </span>
         </a>
       </div>
+      <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold" download>Baixar app</a>
     </div>
   </header>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+  <div class="app-shell">
+    <aside class="app-sidebar" id="app-sidebar">
+      <div class="side-brand">
+        <span class="side-mark" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M7 7h10M8 21h8M9 7l-4 8a3 3 0 0 0 2.6 4.5h.1M15 7l4 8a3 3 0 0 1-2.6 4.5h-.1"/></svg>
+        </span>
+        <div>
+          <div class="logo-text">ATHENA</div>
+          <span class="logo-kicker">Mentoria Jurídica</span>
+        </div>
+      </div>
+      <a href="download/ATHENA-Mentoria-Juridica.apk" class="btn btn-gold side-download" download>Baixar o aplicativo</a>
+      <ul class="side-nav">
+        <li><a href="#topo" onclick="closeSidebar()">Início</a></li>
+        <li><a href="#metodologia" onclick="closeSidebar()">Metodologia</a></li>
+        <li><a href="#mobilidade" onclick="closeSidebar()">Estudo no celular</a></li>
+        <li><a href="#blocos" onclick="closeSidebar()">6 blocos</a></li>
+        <li><a href="#simulador" onclick="closeSidebar()">Simulador</a></li>
+        <li><a href="#trilha" onclick="closeSidebar()">Carreiras</a></li>
+        <li><a href="#planos" onclick="closeSidebar()">Planos</a></li>
+        <li><a href="#faq" onclick="closeSidebar()">Perguntas</a></li>
+        <li><a href="privacidade.html">Privacidade</a></li>
+        <li><a href="excluir-conta.html">Excluir conta</a></li>
+      </ul>
+    </aside>
+    <main class="app-main" id="topo">
+
+  <div class="top-announcement-bar">
+    <div style="display: flex; align-items: center; justify-content: center; gap: 0.85rem; flex-wrap: wrap; text-align: center;">
+      <span><strong style="color: var(--gold);">Versão 1.3.5:</strong> a primeira parte de Constitucional abre no início da leitura. A revisão comprimida mostra só as cinco partes que você estudou no dia.</span>
+      <span class="pill-google-play">Em breve na Google Play</span>
+    </div>
+  </div>
 
   <!-- HERO SECTION -->
   <section class="hero-section">
@@ -634,7 +812,7 @@
       <div class="badge-pill">🏛️ Período Oficial de Testes & Validação • Acesso Liberado</div>
       
       <h1 class="hero-title font-serif">
-        A Mais Avançada Mentoria Jurídica com IA para Carreiras de Elite
+        A mentoria jurídica com <span>IA</span> para carreiras de elite
       </h1>
 
       <p class="hero-subtitle">
@@ -654,7 +832,7 @@
           </svg>
           <div style="text-align: left; line-height: 1.2;">
             <span style="font-size: 0.7rem; color: var(--text-muted); display: block;">Google Play Store</span>
-            <strong style="font-size: 0.82rem; color: #fbbf24;">Em breve disponível</strong>
+            <strong style="font-size: 0.82rem; color: var(--gold);">Em breve disponível</strong>
           </div>
         </div>
         <a href="#simulador" class="btn btn-outline">
@@ -697,7 +875,7 @@
   </section>
 
   <!-- METODOLOGIA PARETO -->
-  <section id="metodologia" style="padding: 6rem 0;">
+  <section id="metodologia" style="padding: 3.5rem 0;">
     <div class="container">
       <div class="section-head">
         <div class="section-tag">Eficiência Absoluta</div>
@@ -730,7 +908,7 @@
   </section>
 
   <!-- MARKETING MOBILIDADE / SEM PLANNER / TUDO NO MESMO LUGAR -->
-  <section id="mobilidade" style="padding: 6rem 0; background: radial-gradient(circle at 50% 30%, rgba(245, 158, 11, 0.08) 0%, rgba(15, 22, 38, 0.6) 70%); border-top: 1px solid rgba(255, 255, 255, 0.06); border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
+  <section id="mobilidade" style="padding: 3.5rem 0; background: radial-gradient(circle at 50% 30%, rgba(212, 175, 55, 0.08) 0%, rgba(15, 22, 38, 0.6) 70%); border-top: 1px solid rgba(255, 255, 255, 0.06); border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
     <div class="container">
       <div class="section-head">
         <div class="section-tag">Liberdade & Praticidade Absoluta</div>
@@ -770,7 +948,7 @@
       </div>
 
       <!-- DESTAQUE MOBILE -->
-      <div style="margin-top: 3.5rem; background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(16, 185, 129, 0.06) 100%); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 1.25rem; padding: 2.25rem; text-align: center;">
+      <div style="margin-top: 3.5rem; background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(16, 185, 129, 0.06) 100%); border: 1px solid rgba(212, 175, 55, 0.22); border-radius: 1.25rem; padding: 2.25rem; text-align: center;">
         <h4 class="font-serif" style="color: #fff; font-size: 1.35rem; margin-bottom: 0.75rem;">Sua Mentoria Completa no Bolso, Pronta Para Usar</h4>
         <p style="color: #cbd5e1; max-width: 760px; margin: 0 auto 1.5rem; font-size: 1rem;">
           Com a ATHENA, qualquer intervalo vira uma sessão produtiva de estudos de alto rendimento. Sem peso na mochila, sem desculpas.
@@ -789,7 +967,7 @@
   </section>
 
   <!-- OS 6 BLOCOS PEDAGÓGICOS -->
-  <section id="blocos" style="padding: 6rem 0; background: rgba(15, 22, 38, 0.4);">
+  <section id="blocos" style="padding: 3.5rem 0; background: rgba(15, 22, 38, 0.4);">
     <div class="container">
       <div class="section-head">
         <div class="section-tag">Engenharia Pedagógica</div>
@@ -838,7 +1016,7 @@
   </section>
 
   <!-- SIMULADOR INTERATIVO AO VIVO -->
-  <section id="simulador" style="padding: 6rem 0;">
+  <section id="simulador" style="padding: 3.5rem 0;">
     <div class="container">
       <div class="section-head">
         <div class="section-tag">Demonstração Interativa</div>
@@ -851,7 +1029,7 @@
           <span style="color: var(--gold-light); font-weight: 700; font-size: 0.9rem; text-transform: uppercase;">
             ⚖️ Direito Constitucional • Magistratura / MP
           </span>
-          <span style="background: rgba(245, 158, 11, 0.2); color: var(--gold-light); padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 700;">
+          <span style="background: rgba(212, 175, 55, 0.16); color: var(--gold-light); padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 700;">
             +50 XP
           </span>
         </div>
@@ -898,7 +1076,7 @@
   </section>
 
   <!-- CARREIRAS ATENDIDAS -->
-  <section id="trilha" style="padding: 6rem 0;">
+  <section id="trilha" style="padding: 3.5rem 0;">
     <div class="container">
       <div class="section-head">
         <div class="section-tag">Para os Mais Concorridos</div>
@@ -935,7 +1113,7 @@
   </section>
 
   <!-- PLANOS E ASSINATURA -->
-  <section id="planos" style="padding: 6rem 0; background: rgba(15, 22, 38, 0.4);">
+  <section id="planos" style="padding: 3.5rem 0; background: rgba(15, 22, 38, 0.4);">
     <div class="container">
       <div class="section-head">
         <div class="section-tag">Acesso & Investimento</div>
@@ -992,7 +1170,7 @@
   </section>
 
   <!-- FAQ -->
-  <section id="faq" style="padding: 6rem 0;">
+  <section id="faq" style="padding: 3.5rem 0;">
     <div class="container">
       <div class="section-head">
         <div class="section-tag">Tire Suas Dúvidas</div>
@@ -1044,7 +1222,7 @@
   </section>
 
   <!-- CTA FINAL -->
-  <section style="padding: 6rem 0; text-align: center; background: radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.12) 0%, transparent 70%);">
+  <section style="padding: 3.5rem 0; text-align: center; background: radial-gradient(circle at 50% 50%, rgba(212, 175, 55, 0.1) 0%, transparent 70%);">
     <div class="container">
       <div class="section-tag" style="margin-bottom: 0.5rem;">Acesso Imediato</div>
       <h2 class="font-serif" style="font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; margin-bottom: 1.25rem;">
@@ -1112,7 +1290,7 @@
         <h4>Download</h4>
         <ul>
           <li><a href="download/ATHENA-Mentoria-Juridica.apk" download>Baixar APK Android (Instalação Direta)</a></li>
-          <li><span style="color: var(--text-muted); font-size: 0.88rem;">Google Play Store <em style="color: var(--gold-light); font-size: 0.75rem; font-style: normal; margin-left: 4px; background: rgba(245,158,11,0.15); padding: 2px 6px; border-radius: 4px;">(Em breve)</em></span></li>
+          <li><span style="color: var(--text-muted); font-size: 0.88rem;">Google Play Store <em style="color: var(--gold-light); font-size: 0.75rem; font-style: normal; margin-left: 4px; background: rgba(212, 175, 55, 0.15); padding: 2px 6px; border-radius: 4px;">(Em breve)</em></span></li>
         </ul>
       </div>
     </div>
@@ -1124,9 +1302,19 @@
       </p>
     </div>
   </footer>
+    </main>
+  </div>
 
   <!-- Interatividade JS -->
   <script>
+    function toggleSidebar() {
+      document.getElementById('app-sidebar').classList.toggle('open');
+      document.getElementById('sidebar-backdrop').classList.toggle('open');
+    }
+    function closeSidebar() {
+      document.getElementById('app-sidebar').classList.remove('open');
+      document.getElementById('sidebar-backdrop').classList.remove('open');
+    }
     function handleSelectOption(element, isCorrect, letter) {
       const options = document.querySelectorAll('.quiz-option');
       options.forEach(opt => {
