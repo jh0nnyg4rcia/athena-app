@@ -8,6 +8,7 @@
 import { LITERAL_ARTICLES } from "./literalLegislation";
 import { DOCTRINAL_REPOSITORY, DoctrinalModule } from "./doctrinalRepository";
 import { TRILHA_JURIDICA_DATA } from "./trilhaData";
+import { normativeOverridePrompt } from "./trilhaNormativeOverrides";
 
 export interface TrilhaGroundingResult {
   hasGrounding: boolean;
@@ -153,11 +154,35 @@ function findDoctrinalContext(subject: string, content: string): DoctrinalModule
 /**
  * Retorna o bloco de Grounding Soberano completo para uma parte da Trilha
  */
+function namedResolutionNumber(subject: string): string | null {
+  const folded = normalizeStr(subject);
+  const match = folded.match(/resolucao\s+(\d{2,4})/);
+  return match ? match[1] : null;
+}
+
+function sourceMatchesNamedResolution(subject: string, source: string): boolean {
+  if (!normalizeStr(subject).includes('conama')) return true;
+  const number = namedResolutionNumber(subject);
+  if (!number) return true;
+  return normalizeStr(source).includes(number);
+}
+
 export function getGroundingForTrilhaPart(
   dayNum: number,
   subject: string,
   content: string
 ): TrilhaGroundingResult {
+  const lock = normativeOverridePrompt(subject, content);
+  if (lock) {
+    const prompt = `\n${lock}\nDIRETRIZES DESTA TRAVA:\n- Esta trava prevalece sobre qualquer texto recuperado por semelhança de palavras (em especial Resolução do CNJ).\n- Os seis blocos, as questões e a revisão comprimida esgotam-se neste diploma.\n- Cada tópico, instituto, prazo, competência, exceção e ponto principal abre em **negrito**.\n- Não invente número de processo nem de súmula.`;
+    return {
+      hasGrounding: true,
+      statuteText: lock,
+      doctrinalCore: lock,
+      formattedGroundingPrompt: prompt
+    };
+  }
+
   // 1. Tentar fonte direta do dia se existir
   const directSource = extractFromDayFullSource(dayNum, subject);
   if (directSource && directSource.length > 100) {
@@ -175,7 +200,7 @@ export function getGroundingForTrilhaPart(
   const literal = findLiteralArticles(subject, content);
   const doctrine = findDoctrinalContext(subject, content);
 
-  if (!literal && !doctrine) {
+  if ((!literal && !doctrine) || !sourceMatchesNamedResolution(subject, `${literal}\n${doctrine?.coreDoctrine || ''}\n${doctrine?.title || ''}`)) {
     return {
       hasGrounding: false,
       statuteText: "",
