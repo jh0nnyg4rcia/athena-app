@@ -75,8 +75,8 @@ import {
   getLocalHomologatedLesson, 
   getLessonDocId,
   syncOfficialCatalog,
-  isOfficialPart,
-  ensureObjectiveChallenge
+  ensureObjectiveChallenge,
+  restoreOfficialLessonsFromCloud
 } from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -1916,6 +1916,13 @@ export default function App() {
   }, [user?.uid, sessions.length, activeTab]);
 
   useEffect(() => {
+    const slots = TRILHA_JURIDICA_DATA.flatMap((item) =>
+      (item.materias || []).map((_, part) => ({ day: item.dia, part }))
+    );
+    void restoreOfficialLessonsFromCloud(slots);
+  }, []);
+
+  useEffect(() => {
     if (!user?.uid) return;
     void syncOfficialCatalog();
   }, [user?.uid]);
@@ -3682,8 +3689,9 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
     if (!dayItem || !dayItem.materias || nextMatIdx >= dayItem.materias.length) return;
     
-    // Check if already in cache or homologated
-    if (getLocalHomologatedLesson(dayNum, nextMatIdx) || isOfficialPart(dayNum, nextMatIdx)) return;
+    // Aula oficial vem do Firestore, documento a documento. Não gasta o proxy Gemini.
+    const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
+    if (homologated?.content) return;
     if (getCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase)) return;
 
     const nextMat = dayItem.materias[nextMatIdx];

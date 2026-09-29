@@ -7,6 +7,7 @@ import {
   extractChallengeFromText,
   normalizeObjectiveChallenge
 } from '../lib/objectiveChallenge';
+import { lessonHasBody, shouldAdoptCloudLesson } from '../lib/officialCacheRestore';
 import {
   deleteVaultLesson,
   getRememberedLesson,
@@ -81,7 +82,71 @@ export async function syncOfficialCatalog(): Promise<OfficialPart[]> {
 }
 
 function isUsableLesson(lesson?: HomologatedLesson | null): lesson is HomologatedLesson {
-  return Boolean(lesson && lesson.status === 'approved' && (lesson.content || lesson.blocks?.length));
+  return Boolean(lesson && lesson.status === 'approved' && lessonHasBody(lesson));
+}
+
+const RESTORE_CONCURRENCY = 4;
+let restoreFlight: Promise<number> | null = null;
+
+/**
+ * Repõe no cofre local as aulas oficiais que faltam.
+ * Cada documento é lido por id (a listagem da coleção pode ser negada).
+ * Não apaga aula local, não grava no Firestore e não chama o proxy Gemini.
+ */
+export function restoreOfficialLessonsFromCloud(
+  slots: Array<{ day: number; part: number }>
+): Promise<number> {
+  if (restoreFlight) return restoreFlight;
+  restoreFlight = restoreOfficialLessonsNow(slots).finally(() => {
+    restoreFlight = null;
+  });
+  return restoreFlight;
+}
+
+async function restoreOfficialLessonsNow(
+  slots: Array<{ day: number; part: number }>
+): Promise<number> {
+  await hydrateLessonVault();
+  const pending = slots.filter((slot) => {
+    const id = getLessonDocId(slot.day, slot.part);
+    return !lessonHasBody(getRememberedLesson(id));
+  });
+
+  let restored = 0;
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const slot = pending[cursor];
+      cursor += 1;
+      const docId = getLessonDocId(slot.day, slot.part);
+      try {
+        const snap = await getDoc(doc(db, 'homologated_lessons', docId));
+        if (!snap.exists()) continue;
+        const cloud = ensureObjectiveChallenge(normalizeLesson(docId, snap.data() as HomologatedLesson));
+        if (!shouldAdoptCloudLesson(getRememberedLesson(docId), cloud)) continue;
+        setLocalHomologatedLesson(cloud);
+        officialPartIds.add(docId);
+        restored += 1;
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, `homologated_lessons/${docId}`);
+      }
+    }
+  };
+
+  const workers = Math.min(RESTORE_CONCURRENCY, pending.length);
+  if (workers > 0) {
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('athena-lessons-restored', {
+        detail: { count: restored, total: listRememberedLessons().length }
+      })
+    );
+  }
+  return restored;
 }
 
 function readLocalStorageLessons(): Record<string, HomologatedLesson> {
