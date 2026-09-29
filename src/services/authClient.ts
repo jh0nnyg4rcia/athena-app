@@ -162,6 +162,7 @@ export function clearLocalAccountData(uid: string): void {
     /* storage indisponível */
   }
   try {
+    // O cofre athena_lesson_vault guarda o catálogo oficial e não é apagado aqui.
     indexedDB.deleteDatabase('athena_offline_cache');
   } catch {
     /* indexedDB indisponível */
