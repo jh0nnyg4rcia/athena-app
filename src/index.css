@@ -23,14 +23,21 @@
 
 .markdown-body {
   @apply space-y-4 text-slate-300;
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
 }
 
-.markdown-body h1 { @apply text-2xl font-serif font-bold text-brand-gold border-b border-brand-gold/20 pb-2 mb-4; }
-.markdown-body h2 { @apply text-xl font-serif font-semibold text-brand-gold mt-8 mb-2 flex items-center gap-2; }
+.markdown-body h1 { @apply text-2xl font-serif font-bold text-brand-gold border-b border-brand-gold/20 pb-2 mb-4; text-align: left; }
+.markdown-body h2 { @apply text-xl font-serif font-bold text-brand-gold mt-8 mb-2 flex items-center gap-2; text-align: left; }
 .markdown-body h2::before { content: ""; @apply w-1 h-6 bg-brand-gold rounded-full inline-block; }
-.markdown-body p { @apply leading-relaxed; }
+.markdown-body h3 { @apply text-lg font-bold text-slate-100 mt-6 mb-2; text-align: left; }
+.markdown-body p,
+.markdown-body li,
+.markdown-body blockquote { @apply leading-relaxed; text-align: justify; text-justify: inter-word; hyphens: auto; }
 .markdown-body ul { @apply list-disc list-outside ml-5 space-y-2; }
-.markdown-body strong { @apply text-slate-100 font-semibold; }
+.markdown-body strong,
+.markdown-body b { @apply text-slate-50 font-bold; }
 .markdown-body blockquote { 
   @apply bg-brand-gold/5 border-l-4 border-brand-gold p-4 rounded-r-xl italic font-serif text-slate-200 my-6;
 }

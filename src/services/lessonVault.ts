@@ -28,6 +28,8 @@ function openVault(): Promise<IDBDatabase> {
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
+      // Atualização do app só cria depósito que ainda não existe.
+      // Não apaga lessons, trilha_parts nem compressed_reviews já gravados.
       if (!db.objectStoreNames.contains(LESSONS_STORE)) {
         db.createObjectStore(LESSONS_STORE, { keyPath: 'id' });
       }

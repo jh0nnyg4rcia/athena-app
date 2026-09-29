@@ -4,14 +4,13 @@ import { BookOpen, ChevronRight, Trash2, X, History } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Review } from '../types';
 import { reviewDay, reviewPart } from '../lib/compressedReviews';
+import { emphasizeStudyMarkdown } from '../lib/emphasizeStudyMarkdown';
 
 export function ReviewList({
   reviews,
-  onSelect,
   onDelete
 }: {
   reviews: Review[];
-  onSelect: (review: Review) => void;
   onDelete: (id: string) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -67,14 +66,14 @@ export function ReviewList({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {group.items.map((review) => {
               const part = reviewPart(review);
+              const open = openId === review.id;
               return (
                 <motion.div
                   key={review.id}
-                  className="p-5 bg-slate-900 border border-white/5 hover:border-brand-gold/30 rounded-3xl cursor-pointer group transition-all relative"
+                  className={`p-5 bg-slate-900 border border-white/5 hover:border-brand-gold/30 rounded-3xl group transition-all relative ${open ? 'md:col-span-2' : ''}`}
                 >
                   <div className="flex items-center justify-between mb-3">
                     <span
-                      onClick={() => onSelect(review)}
                       className="text-[10px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-2 py-0.5 rounded-full max-w-[80%] truncate"
                       title={review.subject}
                     >
@@ -130,25 +129,24 @@ export function ReviewList({
                       </AnimatePresence>
                     </div>
                   </div>
-                  <div
-                    onClick={() => {
-                      setOpenId(openId === review.id ? null : review.id);
-                      onSelect(review);
-                    }}
-                  >
-                    {openId === review.id ? (
-                      <div className="markdown-body text-sm text-slate-200 leading-relaxed">
-                        <ReactMarkdown>{review.content}</ReactMarkdown>
+                  <div>
+                    {open ? (
+                      <div className="markdown-body text-sm text-slate-200">
+                        <ReactMarkdown>{emphasizeStudyMarkdown(review.content)}</ReactMarkdown>
                       </div>
                     ) : (
-                      <p className="text-sm font-serif font-bold text-slate-100 group-hover:text-brand-gold transition-colors line-clamp-3 leading-relaxed">
+                      <p className="text-sm font-serif font-bold text-slate-100 leading-relaxed line-clamp-3">
                         {review.content.split('\n').find((l) => l.trim() && !l.trim().startsWith('#'))?.replace(/^[•\s*#\d.)-]+/, '') || 'Revisão comprimida'}
                       </p>
                     )}
-                    <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-4 font-bold uppercase tracking-widest">
-                      <span>{openId === review.id ? 'Recolher' : 'Ler revisão completa'}</span>
-                      <ChevronRight size={12} className={openId === review.id ? 'rotate-90 transition-transform' : 'group-hover:translate-x-1 transition-transform'} />
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenId(open ? null : review.id)}
+                      className="flex items-center gap-2 text-[10px] text-slate-500 mt-4 font-bold uppercase tracking-widest hover:text-brand-gold"
+                    >
+                      <span>{open ? 'Recolher' : 'Ler revisão completa'}</span>
+                      <ChevronRight size={12} className={open ? 'rotate-90 transition-transform' : ''} />
+                    </button>
                   </div>
                 </motion.div>
               );

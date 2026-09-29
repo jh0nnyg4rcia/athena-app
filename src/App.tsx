@@ -59,6 +59,7 @@ import {
   Home
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { emphasizeStudyMarkdown } from './lib/emphasizeStudyMarkdown';
 import { memo } from 'react';
 import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
@@ -296,7 +297,7 @@ interface FailedQuestion extends Question {
 }
 
 const MemoizedMarkdown = memo(({ content }: { content: string }) => (
-  <ReactMarkdown>{content}</ReactMarkdown>
+  <ReactMarkdown>{emphasizeStudyMarkdown(content)}</ReactMarkdown>
 ));
 
 MemoizedMarkdown.displayName = 'MemoizedMarkdown';
@@ -3661,7 +3662,8 @@ Adote rigores condizentes com estes dados, concentrando a explanação guiada ne
      * É TERMINANTEMENTE PROIBIDO formular questões sobre artigos ou tópicos de fora deste recorte.
      * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou o entendimento consolidado deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais, sem inventar números de processos fictícios.
    
-   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).`;
+   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}). Cada tópico começa com o rótulo em **negrito** seguido de dois-pontos.
+   - FORMATAÇÃO OBRIGATÓRIA EM TODOS OS BLOCOS: cada tópico, instituto, prazo, competência, exceção e ponto principal fica em **negrito**. Não entregue a lista de pontos principais em texto puro.`;
 
     const grounding = getGroundingForTrilhaPart(dayNum, currentMat.nome, currentMat.conteudo);
     if (grounding.hasGrounding) {
@@ -6048,18 +6050,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 <Suspense fallback={<div className="h-48 bg-slate-900 border border-white/5 rounded-[2.5rem] animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Carregando lista de revisões comprimidas...</div>}>
                   <ReviewList 
                     reviews={reviews} 
-                    onSelect={(rev) => {
-                      const exists = sessions.some((s) => s.id === rev.sessionId);
-                      if (!exists) return;
-                      switchSession(rev.sessionId);
-                      setTimeout(() => {
-                        const id = `review-${rev.subject.replace(/\s+/g, '-').toLowerCase()}-${rev.article}`;
-                        const element = document.getElementById(id);
-                        if (element) {
-                          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }
-                      }, 300);
-                    }} 
                     onDelete={(id) => {
                       deleteReview(id);
                     }}
