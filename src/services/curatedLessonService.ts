@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, cleanData, isQuotaExhausted } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, cleanData, isQuotaExhausted, isQuotaExceededError, setQuotaExhausted } from '../lib/firebase';
 import { HomologatedLesson } from '../types';
 import homologatedSeedsData from '../data/homologatedSeeds.json';
 import {
@@ -7,7 +7,7 @@ import {
   extractChallengeFromText,
   normalizeObjectiveChallenge
 } from '../lib/objectiveChallenge';
-import { lessonHasBody, shouldAdoptCloudLesson } from '../lib/officialCacheRestore';
+import { catalogSaveFailureMessage, lessonHasBody, shouldAdoptCloudLesson } from '../lib/officialCacheRestore';
 import {
   deleteVaultLesson,
   getRememberedLesson,
@@ -21,6 +21,30 @@ const staticSeeds: Record<string, HomologatedLesson> = (homologatedSeedsData || 
 
 const LOCAL_STORAGE_PREFIX = 'athena_homologated_';
 const FIRESTORE_SAFE_CHARS = 900_000;
+const FIRESTORE_SAFE_BYTES = 900_000;
+const CATALOG_WRITE_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Tempo esgotado ao gravar a aula no catálogo.')), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+function payloadBytes(value: unknown): number {
+  const encoded = JSON.stringify(value);
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(encoded).length;
+  return encoded.length;
+}
 
 void hydrateLessonVault().then(() => {
   try {
@@ -204,10 +228,10 @@ export function getLocalHomologatedLesson(day: number, part: number): Homologate
  * Salva a lição no cofre IndexedDB. O corpo não fica no localStorage:
  * 100 dias estouram a cota (~5 MB) e a atualização só deixa as sementes dos 3 primeiros dias.
  */
-export function setLocalHomologatedLesson(lesson: HomologatedLesson): void {
+export function setLocalHomologatedLesson(lesson: HomologatedLesson): Promise<void> {
   rememberLesson(lesson);
   const key = `${LOCAL_STORAGE_PREFIX}${lesson.id}`;
-  void putVaultLesson(lesson).then(() => {
+  return putVaultLesson(lesson).then(() => {
     try {
       localStorage.removeItem(key);
     } catch {
@@ -294,14 +318,15 @@ function compactForFirestore(lesson: HomologatedLesson): HomologatedLesson {
     version: lesson.version || 1,
     review: lesson.review
   };
+  if (lesson.review) payload.review = lesson.review.slice(0, 20000);
   if (lesson.challenge) payload.challenge = lesson.challenge;
 
   let encoded = JSON.stringify(cleanData(payload));
-  if (encoded.length > FIRESTORE_SAFE_CHARS) {
-    payload.content = payload.content.slice(0, 850000);
+  while ((encoded.length > FIRESTORE_SAFE_CHARS || payloadBytes(cleanData(payload)) > FIRESTORE_SAFE_BYTES) && payload.content.length > 20000) {
+    payload.content = payload.content.slice(0, Math.floor(payload.content.length * 0.85));
     encoded = JSON.stringify(cleanData(payload));
   }
-  if (encoded.length > FIRESTORE_SAFE_CHARS && payload.challenge) {
+  if ((encoded.length > FIRESTORE_SAFE_CHARS || payloadBytes(cleanData(payload)) > FIRESTORE_SAFE_BYTES) && payload.challenge) {
     delete payload.challenge;
   }
   return payload;
@@ -323,15 +348,32 @@ async function writeFirestoreWithRetry(lesson: HomologatedLesson): Promise<void>
     review: (lesson.review || '').slice(0, 20000)
   });
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let lessonWritten = false;
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await setDoc(doc(db, 'homologated_lessons', docId), cleaned, { merge: true });
-      await setDoc(doc(db, 'homologated_parts', docId), partStub, { merge: true });
+      if (!lessonWritten) {
+        await withTimeout(setDoc(doc(db, 'homologated_lessons', docId), cleaned, { merge: true }), CATALOG_WRITE_TIMEOUT_MS);
+        lessonWritten = true;
+      }
+      try {
+        await withTimeout(setDoc(doc(db, 'homologated_parts', docId), partStub, { merge: true }), CATALOG_WRITE_TIMEOUT_MS);
+      } catch (partError) {
+        if (isQuotaExceededError(partError)) setQuotaExhausted(true);
+        else handleFirestoreError(partError, OperationType.WRITE, `homologated_parts/${docId}`);
+      }
       officialPartIds.add(docId);
       return;
     } catch (error) {
       lastError = error;
-      await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+      if (isQuotaExceededError(error)) {
+        setQuotaExhausted(true);
+        break;
+      }
+      if (lessonWritten) {
+        officialPartIds.add(docId);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 800));
     }
   }
   handleFirestoreError(lastError, OperationType.WRITE, `homologated_lessons/${docId}`);
@@ -340,23 +382,26 @@ async function writeFirestoreWithRetry(lesson: HomologatedLesson): Promise<void>
 }
 
 /**
- * Grava no cofre local e espera o Firestore. O catálogo oficial é a nuvem:
- * sem essa gravação, a atualização do app volta só para as sementes dos dias 1 a 3.
+ * Publica no catálogo oficial e só então grava no cofre local.
+ * Sem a confirmação da nuvem, a aula não conta como salva: desinstalar o app apagaria o texto.
  */
 export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<LessonSaveResult> {
   lesson = ensureObjectiveChallenge(lesson);
-  setLocalHomologatedLesson(lesson);
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: lesson }));
-  }
 
   try {
     await writeFirestoreWithRetry(lesson);
+    await setLocalHomologatedLesson(lesson);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: lesson }));
+    }
     return { cloud: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { cloud: false, error: message };
+    if (isQuotaExceededError(error)) setQuotaExhausted(true);
+    const quota = isQuotaExceededError(error) || isQuotaExhausted();
+    return {
+      cloud: false,
+      error: catalogSaveFailureMessage(quota ? new Error('resource-exhausted') : error)
+    };
   }
 }
 

@@ -1996,6 +1996,23 @@ export default function App() {
   const [editingLessonContent, setEditingLessonContent] = useState('');
   const [editingLessonIndex, setEditingLessonIndex] = useState<number | undefined>(undefined);
   const [homologationSuccessBanner, setHomologationSuccessBanner] = useState<string | null>(null);
+  const [homologationBannerTone, setHomologationBannerTone] = useState<'ok' | 'warn'>('ok');
+  const homologationBannerTimer = useRef<number | null>(null);
+
+  const showHomologationBanner = (text: string, tone: 'ok' | 'warn') => {
+    if (homologationBannerTimer.current) {
+      window.clearTimeout(homologationBannerTimer.current);
+      homologationBannerTimer.current = null;
+    }
+    setHomologationBannerTone(tone);
+    setHomologationSuccessBanner(text);
+    if (tone === 'ok') {
+      homologationBannerTimer.current = window.setTimeout(() => {
+        setHomologationSuccessBanner(null);
+        homologationBannerTimer.current = null;
+      }, 6000);
+    }
+  };
 
   useEffect(() => {
     const activeSess = sessions.find(s => s.id === currentSessionId);
@@ -4365,7 +4382,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       });
       const republished = parseATHENAResponse(lesson.content);
       const saved = await saveHomologatedLesson(lesson);
-      setHomologatedLessonState(lesson);
+      if (saved.cloud) setHomologatedLessonState(lesson);
       if (user) {
         const reviewText = extractReviewBlock(sanitizedContent, sanitizedBlocks);
         if (reviewText) {
@@ -4399,19 +4416,20 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       }, currentSessionId);
 
       const quizCount = lesson.challenge?.questions?.length || 0;
-      setHomologationSuccessBanner(
-        saved.cloud
-          ? (quizCount
+      if (saved.cloud) {
+        showHomologationBanner(
+          quizCount
             ? `Dia ${day} · Parte ${part + 1} publicado no catálogo oficial com ${quizCount} questões objetivas. Essa parte vale para todos os alunos.`
-            : `Dia ${day} · Parte ${part + 1} publicado sem questões objetivas. Use Regerar questões para refazer só esse bloco.`)
-          : `Dia ${day} · Parte ${part + 1} ficou só neste aparelho. O catálogo oficial recusou a gravação${saved.error ? `: ${saved.error}` : ''}. Toque em Aprovar e Salvar de novo.`
-      );
-      setTimeout(() => setHomologationSuccessBanner(null), 6000);
-      return lesson;
+            : `Dia ${day} · Parte ${part + 1} publicado sem questões objetivas. Use Regerar questões para refazer só esse bloco.`,
+          'ok'
+        );
+      } else {
+        showHomologationBanner(`Dia ${day} · Parte ${part + 1}: ${saved.error || 'não entrou no catálogo oficial.'}`, 'warn');
+      }
+      return saved.cloud ? lesson : null;
     } catch (err: any) {
-      console.warn("Aviso ao homologar lição (preservada no cache local):", err);
-      setHomologationSuccessBanner(`Dia ${day} · Parte ${part + 1} não entrou no catálogo oficial. ${err?.message || 'Tente Aprovar e Salvar de novo.'}`);
-      setTimeout(() => setHomologationSuccessBanner(null), 6000);
+      console.warn("Aviso ao homologar lição:", err);
+      showHomologationBanner(`Dia ${day} · Parte ${part + 1} não entrou no catálogo oficial. ${err?.message || 'Tente Aprovar e Salvar de novo.'}`, 'warn');
       return null;
     } finally {
       setIsSavingHomologation(false);
@@ -4530,7 +4548,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         review: extractReviewBlock(mergedContent, parsed.blocks) || undefined
       });
       const saved = await saveHomologatedLesson(lesson);
-      setHomologatedLessonState(lesson);
+      if (saved.cloud) setHomologatedLessonState(lesson);
       const updatedMessages = (messages || []).map((m) => {
         if (m !== targetMsg) return m;
         return {
@@ -4550,12 +4568,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         trilhaDay: day,
         trilhaMaterialIndex: part
       }, currentSessionId);
-      setHomologationSuccessBanner(
+      showHomologationBanner(
         saved.cloud
           ? `Questões da Parte ${part + 1} do Dia ${day} atualizadas (${lesson.challenge?.questions.length || quiz.questions.length}). O restante da aula foi mantido.`
-          : `As questões novas ficaram só neste aparelho${saved.error ? `: ${saved.error}` : ''}.`
+          : `Dia ${day} · Parte ${part + 1}: ${saved.error || 'as questões não entraram no catálogo oficial.'}`,
+        saved.cloud ? 'ok' : 'warn'
       );
-      setTimeout(() => setHomologationSuccessBanner(null), 6000);
     } catch (err: any) {
       console.error('Erro ao regerar questões:', err);
       alert(err?.message || 'Não foi possível regerar só as questões.');
@@ -7133,13 +7151,18 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                               <motion.div
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="mx-auto max-w-4xl w-full mb-6 p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-between gap-3 shadow-lg"
+                                className={cn(
+                                  "mx-auto max-w-4xl w-full mb-6 p-4 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-lg border",
+                                  homologationBannerTone === 'warn'
+                                    ? "bg-amber-500/15 border-amber-500/40 text-amber-200"
+                                    : "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                                )}
                               >
                                 <div className="flex items-center gap-2.5">
-                                  <CheckCircle size={18} className="text-emerald-400 shrink-0" />
+                                  <CheckCircle size={18} className={homologationBannerTone === 'warn' ? "text-amber-300 shrink-0" : "text-emerald-400 shrink-0"} />
                                   <span>{homologationSuccessBanner}</span>
                                 </div>
-                                <button onClick={() => setHomologationSuccessBanner(null)} className="text-emerald-400 hover:text-white text-xs p-1 cursor-pointer">✕</button>
+                                <button onClick={() => setHomologationSuccessBanner(null)} className="hover:text-white text-xs p-1 cursor-pointer">✕</button>
                               </motion.div>
                             )}
 
