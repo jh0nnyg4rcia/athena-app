@@ -61,6 +61,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { emphasizeStudyMarkdown } from './lib/emphasizeStudyMarkdown';
 import { softenIncidenceMarkdown } from './lib/softenIncidenceMarkdown';
+import { cacheHoldsText } from './lib/officialCacheRestore';
 import { memo } from 'react';
 import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
@@ -1568,10 +1569,13 @@ const ChatMessage = memo(({
                         const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? lessonCtx.part);
                         const totalParts = (trilhaTotalMaterials && trilhaTotalMaterials > 0) ? trilhaTotalMaterials : (lessonCtx.total || 5);
                         const localApproved = effectiveDay !== undefined ? getLocalHomologatedLesson(effectiveDay, msgPartIdx) : null;
-                        const isThisPartApproved = Boolean(
-                          (localApproved && localApproved.status === 'approved') ||
-                          (homologatedLessonState && homologatedLessonState.day === effectiveDay && homologatedLessonState.part === msgPartIdx && homologatedLessonState.status === 'approved')
-                        );
+                        const cachedForPart =
+                          homologatedLessonState &&
+                          homologatedLessonState.day === effectiveDay &&
+                          homologatedLessonState.part === msgPartIdx
+                            ? homologatedLessonState
+                            : localApproved;
+                        const isThisPartApproved = cacheHoldsText(cachedForPart, msg.content);
 
                         return (
                           <div className="w-full flex flex-col items-center gap-3.5">
@@ -4356,7 +4360,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       });
       const republished = parseATHENAResponse(lesson.content);
       const saved = await saveHomologatedLesson(lesson);
-      if (saved.cloud) setHomologatedLessonState(lesson);
+      setHomologatedLessonState(saved.cloud ? { ...lesson, pendingCloud: false } : { ...lesson, pendingCloud: true });
       if (user) {
         const reviewText = extractReviewBlock(sanitizedContent, sanitizedBlocks);
         if (reviewText) {
@@ -4522,7 +4526,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         review: extractReviewBlock(mergedContent, parsed.blocks) || undefined
       });
       const saved = await saveHomologatedLesson(lesson);
-      if (saved.cloud) setHomologatedLessonState(lesson);
+      setHomologatedLessonState(saved.cloud ? { ...lesson, pendingCloud: false } : { ...lesson, pendingCloud: true });
       const updatedMessages = (messages || []).map((m) => {
         if (m !== targetMsg) return m;
         return {
@@ -7003,6 +7007,18 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                         const tDay = inferredTrilha.day;
                         const tMatIdx = inferredTrilha.part;
                         const tTotal = inferredTrilha.total || (tDay ? 5 : 0);
+                        const visibleLesson = (messages || []).slice().reverse().find((m) => m.role === 'model' && (m.content || m.blocks?.length));
+                        const cacheCurrent = Boolean(
+                          tDay !== undefined &&
+                          cacheHoldsText(
+                            homologatedLessonState &&
+                            homologatedLessonState.day === tDay &&
+                            homologatedLessonState.part === (tMatIdx ?? 0)
+                              ? homologatedLessonState
+                              : null,
+                            visibleLesson?.content
+                          )
+                        );
                         
                         const visibleMessages = (messages || []).filter(m => !getIsInstructionMessage(m));
                         
@@ -7153,20 +7169,20 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                         <span className="text-[10px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-2.5 py-0.5 rounded-full border border-brand-gold/25 font-mono">
                                           👑 Curadoria do CEO
                                         </span>
-                                        {homologatedLessonState?.status === 'approved' ? (
+                                        {cacheCurrent ? (
                                           <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
                                             <CheckCircle size={10} /> Homologado e Publicado
                                           </span>
                                         ) : (
                                           <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                            🟡 Rascunho / Aguardando Aprovação
+                                            🟡 Tema novo aguardando o cache
                                           </span>
                                         )}
                                       </div>
                                       <h4 className="text-sm font-bold text-slate-100 mt-1">
                                         Dia {tDay} • Parte {(tMatIdx ?? 0) + 1} de {tTotal} ({guidedSubject})
                                       </h4>
-                                      {homologatedLessonState?.status === 'approved' && homologatedLessonState.approvedAt && (
+                                      {cacheCurrent && homologatedLessonState?.approvedAt && (
                                         <p className="text-[11px] text-slate-400 mt-0.5">
                                           Aprovado por <span className="text-brand-gold font-mono font-bold">{homologatedLessonState.approvedBy}</span> em {new Date(homologatedLessonState.approvedAt).toLocaleDateString('pt-BR')} às {new Date(homologatedLessonState.approvedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.
                                         </p>
@@ -7205,7 +7221,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                       Editar Texto
                                     </button>
 
-                                    {homologatedLessonState?.status === 'approved' ? (
+                                    {cacheCurrent ? (
                                       <button
                                         onClick={handleCeoRevokeLesson}
                                         disabled={isSavingHomologation}

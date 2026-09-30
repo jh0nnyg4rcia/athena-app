@@ -156,6 +156,8 @@ export interface HomologatedLesson {
   modelUsed?: string;
   version?: number;
   review?: string;
+  /** Só no aparelho: o texto novo já está no cofre, mas o catálogo oficial ainda não. */
+  pendingCloud?: boolean;
 }
 
 export interface RegisteredStudent {

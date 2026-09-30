@@ -7,7 +7,7 @@ import {
   extractChallengeFromText,
   normalizeObjectiveChallenge
 } from '../lib/objectiveChallenge';
-import { catalogSaveFailureMessage, lessonHasBody, shouldAdoptCloudLesson } from '../lib/officialCacheRestore';
+import { catalogSaveFailureMessage, lessonHasBody, pickFresherLesson, shouldAdoptCloudLesson } from '../lib/officialCacheRestore';
 import {
   deleteVaultLesson,
   getRememberedLesson,
@@ -255,23 +255,41 @@ export function removeLocalHomologatedLesson(day: number, part: number): void {
 
 export async function getHomologatedLesson(day: number, part: number): Promise<HomologatedLesson | null> {
   await hydrateLessonVault();
-  const local = getLocalHomologatedLesson(day, part);
   const docId = getLessonDocId(day, part);
+  const local = getRememberedLesson(docId) || getLocalHomologatedLesson(day, part);
 
+  let cloud: HomologatedLesson | null = null;
   try {
     const snap = await getDoc(doc(db, 'homologated_lessons', docId));
     if (snap.exists()) {
       const data = ensureObjectiveChallenge(normalizeLesson(docId, snap.data() as HomologatedLesson));
-      if (data.content || data.blocks?.length) {
-        setLocalHomologatedLesson(data);
-        return data;
-      }
+      if (lessonHasBody(data)) cloud = data;
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `homologated_lessons/${docId}`);
   }
 
-  return local;
+  const chosen = pickFresherLesson(local, cloud);
+  if (!chosen) return null;
+
+  const memory = getRememberedLesson(docId);
+  const memoryIsNewer = Boolean(memory && lessonHasBody(memory) && lessonStamp(memory) > lessonStamp(chosen));
+  if (memoryIsNewer) return memory || chosen;
+
+  if (chosen === cloud) {
+    const published = { ...chosen, pendingCloud: false };
+    await setLocalHomologatedLesson(published);
+    return published;
+  }
+
+  if (cloud && lessonStamp(local) > lessonStamp(cloud)) {
+    return { ...chosen, pendingCloud: true };
+  }
+  return chosen;
+}
+
+function lessonStamp(lesson?: HomologatedLesson | null): number {
+  return lesson?.approvedAt || 0;
 }
 
 function normalizeLesson(docId: string, raw: HomologatedLesson): HomologatedLesson {
@@ -382,21 +400,27 @@ async function writeFirestoreWithRetry(lesson: HomologatedLesson): Promise<void>
 }
 
 /**
- * Publica no catálogo oficial e só então grava no cofre local.
- * Sem a confirmação da nuvem, a aula não conta como salva: desinstalar o app apagaria o texto.
+ * Grava o tema novo no cofre do aparelho e tenta publicar no catálogo.
+ * Se a nuvem recusar, o texto novo permanece no aparelho e o botão de publicar continua disponível.
  */
 export async function saveHomologatedLesson(lesson: HomologatedLesson): Promise<LessonSaveResult> {
   lesson = ensureObjectiveChallenge(lesson);
 
   try {
     await writeFirestoreWithRetry(lesson);
-    await setLocalHomologatedLesson(lesson);
+    const published = { ...lesson, pendingCloud: false };
+    await setLocalHomologatedLesson(published);
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: lesson }));
+      window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: published }));
     }
     return { cloud: true };
   } catch (error) {
     if (isQuotaExceededError(error)) setQuotaExhausted(true);
+    const kept = { ...lesson, pendingCloud: true };
+    await setLocalHomologatedLesson(kept);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('athena-lesson-homologated', { detail: kept }));
+    }
     const quota = isQuotaExceededError(error) || isQuotaExhausted();
     return {
       cloud: false,
