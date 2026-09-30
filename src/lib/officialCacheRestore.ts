@@ -1,4 +1,5 @@
 import type { HomologatedLesson } from '../types';
+import { extractChallengeFromText } from './objectiveChallenge';
 
 export function lessonHasBody(lesson?: HomologatedLesson | null): boolean {
   return Boolean(lesson && (lesson.content || lesson.blocks?.length));
@@ -30,4 +31,33 @@ export function shouldAdoptCloudLesson(
   if (cloud.status && cloud.status !== 'approved') return false;
   if (local && lessonHasBody(local)) return false;
   return true;
+}
+
+function lessonStamp(lesson?: HomologatedLesson | null): number {
+  return lesson?.approvedAt || 0;
+}
+
+/** A aula mais nova fica. Uma leitura antiga da nuvem não apaga o tema recém-salvo no aparelho. */
+export function pickFresherLesson(
+  local: HomologatedLesson | null | undefined,
+  cloud: HomologatedLesson | null | undefined
+): HomologatedLesson | null {
+  const localOk = Boolean(local && lessonHasBody(local) && (!local.status || local.status === 'approved'));
+  const cloudOk = Boolean(cloud && lessonHasBody(cloud) && (!cloud.status || cloud.status === 'approved'));
+  if (!localOk && !cloudOk) return null;
+  if (!localOk) return cloud || null;
+  if (!cloudOk) return local || null;
+  if (lessonStamp(local) > lessonStamp(cloud)) return local || null;
+  return cloud || null;
+}
+
+function lessonProse(text?: string): string {
+  return extractChallengeFromText(text || '').content.replace(/\s+/g, ' ').trim();
+}
+
+export function cacheHoldsText(lesson: HomologatedLesson | null | undefined, text?: string): boolean {
+  if (!lesson || lesson.status !== 'approved' || lesson.pendingCloud) return false;
+  const cached = lessonProse(lesson.content);
+  const shown = lessonProse(text);
+  return Boolean(cached && shown && cached === shown);
 }
