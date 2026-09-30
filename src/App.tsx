@@ -60,11 +60,12 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { emphasizeStudyMarkdown } from './lib/emphasizeStudyMarkdown';
+import { softenIncidenceMarkdown } from './lib/softenIncidenceMarkdown';
 import { memo } from 'react';
 import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
-import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
+import { calcularIncidenciaParaMaterias, FAIXA_LARGURA, FAIXA_ROTULO, instrucaoEnfase } from './utils/incidenciaUtils';
 import { type UserProfile, type HomologatedLesson } from './types';
 import { clearLocalAccountData, deleteCurrentAccount, loginWithEmail, loginWithGoogle, publicClientAuthError, registerAccount, requestNewPassword } from './services/authClient';
 import { getCachedTrilhaPart, setCachedTrilhaPart, sanitizeTrilhaCacheForObjectivePhase } from './services/trilhaCacheService';
@@ -297,7 +298,7 @@ interface FailedQuestion extends Question {
 }
 
 const MemoizedMarkdown = memo(({ content }: { content: string }) => (
-  <ReactMarkdown>{emphasizeStudyMarkdown(content)}</ReactMarkdown>
+  <ReactMarkdown>{emphasizeStudyMarkdown(softenIncidenceMarkdown(content))}</ReactMarkdown>
 ));
 
 MemoizedMarkdown.displayName = 'MemoizedMarkdown';
@@ -3586,21 +3587,7 @@ ${matList}
     
     let prep = '';
     if (style === 'automatico') {
-      prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (${ATHENA_CAREERS_LABEL}) indicam que o estudo deste tema (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
-Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
-- Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
-- Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
-- Jurisprudência (Precedentes/Súmulas STF e STJ): ${incidencia.porcentagens.jurisprudencia}%
-
-Justificativa Estatística e Metodológica:
-${incidencia.justificativa}
-Provas e Concursos de Referência Recente:
-${incidencia.concursoHistorico}
-
-Adote rigores condizentes com estes dados, concentrando a explanação guiada nesta prioridade definida e apresentando as porcentagens e referências logo após a sua saudação inicial para o aluno!
-------
-`;
+      prep = instrucaoEnfase(`o Dia ${dayNum}`, incidencia);
     }
     
     return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e em questões objetivas de ${ATHENA_CAREERS_LABEL}. Siga o fluxo de estudos em blocos!`;
@@ -3639,27 +3626,14 @@ Sua conduta como Presidente da Mesa Examinadora:
     
     let prep = '';
     if (style === 'automatico') {
-      prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (${ATHENA_CAREERS_LABEL}) indicam que o estudo de "${currentMat.nome}" (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
-Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
-- Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
-- Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
-- Jurisprudência (Precedentes/Súmulas STF e STJ): ${incidencia.porcentagens.jurisprudencia}%
-
-Justificativa Estatística e Metodológica:
-${incidencia.justificativa}
-Provas e Concursos de Referência Recente:
-${incidencia.concursoHistorico}
-
-Adote rigores condizentes com estes dados, concentrando a explanação guiada nesta prioridade definida e apresentando as porcentagens e referências logo após a sua saudação inicial para o aluno!
-------
-`;
+      prep = instrucaoEnfase(`"${currentMat.nome}" (Dia ${dayNum})`, incidencia);
     }
     
     let extraSource = `\n\n[DIRETRIZES DA BASE DE CONHECIMENTO E PERTINÊNCIA TEMÁTICA ABSOLUTA ATHENA]:
 1. BASE SOBERANA E CONFINAMENTO TEMÁTICO RESTRITO:
    - A sua base soberana de verdade é EXCLUSIVAMENTE o seguinte recorte: ${currentMat.nome} (${currentMat.conteudo}).
    - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo dos 6 blocos deve nascer e se esgotar no exame deste recorte!
+   - DIPLOMA NOMEADO É INSUBSTITUÍVEL: se o recorte nomear uma lei, um decreto ou uma resolução pelo número, a aula inteira trata só desse diploma. É proibido trocá-lo por outro, em especial pelos arts. 337-E a 337-P do Código Penal ou pela Lei nº 14.133/2021, salvo quando o próprio recorte programado for expressamente esses dispositivos. A palavra "crimes" no título não autoriza a troca.
 
 2. DIRETRIZES BLOCO A BLOCO (RIGOR ESTRITO):
    - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE a saudação institucional "Olá, ${ATHENA_AUDIENCE_TITLE}!". NUNCA diga Futuro Magistrado, Futuro Juiz ou nome pessoal, pois o conteúdo é homologado para todas as carreiras. Apresente o Raio-X deste recorte (${currentMat.conteudo}) para ${ATHENA_CAREERS_LABEL}. Proibido citar certame nominado (TJSP, MPRS, TRF4, DPU 2024 etc.). Proibido gerar tabelas Markdown.
@@ -6532,30 +6506,30 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                               <div className="space-y-1 w-full text-left">
                                 <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
                                   <span>Lei Seca</span>
-                                  <span className="text-emerald-400 font-bold">{incidencia.porcentagens.leiSeca}%</span>
+                                  <span className="text-emerald-400 font-bold">{FAIXA_ROTULO[incidencia.faixas.leiSeca]}</span>
                                 </div>
                                 <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-emerald-450 h-full rounded-full" style={{ width: `${incidencia.porcentagens.leiSeca}%` }} />
+                                  <div className="bg-emerald-450 h-full rounded-full" style={{ width: `${FAIXA_LARGURA[incidencia.faixas.leiSeca]}%` }} />
                                 </div>
                               </div>
                               
                               <div className="space-y-1 w-full text-left">
                                 <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
                                   <span>Doutrina</span>
-                                  <span className="text-brand-gold font-bold">{incidencia.porcentagens.doutrina}%</span>
+                                  <span className="text-brand-gold font-bold">{FAIXA_ROTULO[incidencia.faixas.doutrina]}</span>
                                 </div>
                                 <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-brand-gold h-full rounded-full" style={{ width: `${incidencia.porcentagens.doutrina}%` }} />
+                                  <div className="bg-brand-gold h-full rounded-full" style={{ width: `${FAIXA_LARGURA[incidencia.faixas.doutrina]}%` }} />
                                 </div>
                               </div>
                               
                               <div className="space-y-1 w-full text-left">
                                 <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
                                   <span>Jurisprudência</span>
-                                  <span className="text-sky-400 font-bold">{incidencia.porcentagens.jurisprudencia}%</span>
+                                  <span className="text-sky-400 font-bold">{FAIXA_ROTULO[incidencia.faixas.jurisprudencia]}</span>
                                 </div>
                                 <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-sky-400 h-full rounded-full" style={{ width: `${incidencia.porcentagens.jurisprudencia}%` }} />
+                                  <div className="bg-sky-400 h-full rounded-full" style={{ width: `${FAIXA_LARGURA[incidencia.faixas.jurisprudencia]}%` }} />
                                 </div>
                               </div>
                             </div>
@@ -6788,7 +6762,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 )}>
                                   Foco de Banca: {activeIncidencia.label}
                                 </span>
-                                <span className="text-[9px] font-bold font-mono text-slate-500">Mapeamento Estatístico</span>
+                                <span className="text-[9px] font-bold font-mono text-slate-500">Mapeamento de incidência</span>
                               </div>
                               <p className="text-[11px] text-slate-400 leading-normal">
                                 💡 <strong className="text-slate-300">Análise de Incidência:</strong> {activeIncidencia.justificativa}
@@ -6801,28 +6775,28 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 <div>
                                   <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
                                     <span>Lei Seca</span>
-                                    <span className="text-emerald-400 font-bold">{activeIncidencia.porcentagens.leiSeca}%</span>
+                                    <span className="text-emerald-400 font-bold">{FAIXA_ROTULO[activeIncidencia.faixas.leiSeca]}</span>
                                   </div>
                                   <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-emerald-400 h-full" style={{ width: `${activeIncidencia.porcentagens.leiSeca}%` }} />
+                                    <div className="bg-emerald-400 h-full" style={{ width: `${FAIXA_LARGURA[activeIncidencia.faixas.leiSeca]}%` }} />
                                   </div>
                                 </div>
                                 <div>
                                   <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
                                     <span>Doutrina</span>
-                                    <span className="text-brand-gold font-bold">{activeIncidencia.porcentagens.doutrina}%</span>
+                                    <span className="text-brand-gold font-bold">{FAIXA_ROTULO[activeIncidencia.faixas.doutrina]}</span>
                                   </div>
                                   <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-brand-gold h-full" style={{ width: `${activeIncidencia.porcentagens.doutrina}%` }} />
+                                    <div className="bg-brand-gold h-full" style={{ width: `${FAIXA_LARGURA[activeIncidencia.faixas.doutrina]}%` }} />
                                   </div>
                                 </div>
                                 <div>
                                   <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
                                     <span>Jurisprudência</span>
-                                    <span className="text-sky-450 font-bold">{activeIncidencia.porcentagens.jurisprudencia}%</span>
+                                    <span className="text-sky-450 font-bold">{FAIXA_ROTULO[activeIncidencia.faixas.jurisprudencia]}</span>
                                   </div>
                                   <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-sky-400 h-full" style={{ width: `${activeIncidencia.porcentagens.jurisprudencia}%` }} />
+                                    <div className="bg-sky-400 h-full" style={{ width: `${FAIXA_LARGURA[activeIncidencia.faixas.jurisprudencia]}%` }} />
                                   </div>
                                 </div>
                               </div>

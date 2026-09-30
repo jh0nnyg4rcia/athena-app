@@ -5,10 +5,11 @@
  * ao gerador de lições da Trilha Jurídica dos 100 Dias.
  */
 
-import { LITERAL_ARTICLES } from "./literalLegislation";
+import { LITERAL_ARTICLES, LegalArticle } from "./literalLegislation";
 import { DOCTRINAL_REPOSITORY, DoctrinalModule } from "./doctrinalRepository";
 import { TRILHA_JURIDICA_DATA } from "./trilhaData";
 import { normativeOverridePrompt } from "./trilhaNormativeOverrides";
+import { containsDiploma, diplomaConfinementPrompt, formatDiploma, namedStatuteDigits } from "../lib/statuteMatch";
 
 export interface TrilhaGroundingResult {
   hasGrounding: boolean;
@@ -167,6 +168,73 @@ function sourceMatchesNamedResolution(subject: string, source: string): boolean 
   return normalizeStr(source).includes(number);
 }
 
+function diplomaNumbersIn(text: string): Set<string> {
+  const compact = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/(\d)\.(\d{3})(?!\d)/g, "$1$2");
+  return new Set(
+    [...compact.matchAll(/(?<!\d)(\d{3,6})(?!\d)/g)]
+      .map((match) => match[1])
+      .filter((digits) => !/^(19|20)\d{2}$/.test(digits))
+  );
+}
+
+function excerptForNamedDiploma(item: LegalArticle, digits: string): string {
+  const numbers = diplomaNumbersIn(item.statute);
+  if (numbers.size <= 1) return item.literalText.trim();
+  return item.literalText
+    .split("\n")
+    .filter((line) => containsDiploma(line, digits))
+    .join("\n")
+    .trim();
+}
+
+function groundingForNamedDiploma(
+  subject: string,
+  content: string,
+  digits: string
+): TrilhaGroundingResult {
+  const confine = diplomaConfinementPrompt(subject, content);
+  const literalParts: string[] = [];
+
+  for (const item of LITERAL_ARTICLES) {
+    if (!containsDiploma(`${item.statute} ${item.article}`, digits)) continue;
+    const excerpt = excerptForNamedDiploma(item, digits);
+    if (!excerpt) continue;
+    literalParts.push(`### 📜 Lei nº ${formatDiploma(digits)}\n${excerpt}`);
+    if (literalParts.length >= 2) break;
+  }
+
+  const doctrine = DOCTRINAL_REPOSITORY.find((mod) => containsDiploma(mod.title, digits)) || null;
+  if (literalParts.length === 0 && !doctrine) {
+    return {
+      hasGrounding: true,
+      statuteText: "",
+      doctrinalCore: "",
+      formattedGroundingPrompt: confine
+    };
+  }
+
+  const sections: string[] = [];
+  if (literalParts.length > 0) {
+    sections.push(`### ⚖️ LEGISLAÇÃO DE REGÊNCIA (SOMENTE O DIPLOMA PROGRAMADO):\n${literalParts.join("\n\n---\n\n")}`);
+  }
+  if (doctrine) {
+    sections.push(`### 📚 DOUTRINA DE REFERÊNCIA (${doctrine.title}):\n${doctrine.coreDoctrine}`);
+  }
+
+  const prompt = `\n[FONTES MINERADAS DE REFERÊNCIA OFICIAL - GROUNDING SOBERANO]:\n${sections.join("\n\n---\n\n")}\n${confine}\n\nDIRETRIZES DE USO DO GROUNDING:\n- O diploma nomeado no recorte prevalece sobre qualquer outro número que apareça no mesmo arquivo.\n- Não complete a aula com os arts. 337-E a 337-P do Código Penal nem com a Lei nº 14.133/2021, salvo se o recorte desta parte for expressamente esse tema.\n- Decodifique com palavras analíticas. Não invente número de processo nem de súmula.`;
+
+  return {
+    hasGrounding: true,
+    statuteText: literalParts.join("\n\n"),
+    doctrinalCore: doctrine?.coreDoctrine || "",
+    formattedGroundingPrompt: prompt
+  };
+}
+
 export function getGroundingForTrilhaPart(
   dayNum: number,
   subject: string,
@@ -181,6 +249,11 @@ export function getGroundingForTrilhaPart(
       doctrinalCore: lock,
       formattedGroundingPrompt: prompt
     };
+  }
+
+  const diploma = namedStatuteDigits(subject) || namedStatuteDigits(content);
+  if (diploma) {
+    return groundingForNamedDiploma(subject, content, diploma);
   }
 
   // 1. Tentar fonte direta do dia se existir

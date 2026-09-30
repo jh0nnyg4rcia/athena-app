@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { Review } from '../types';
 import { reviewDay, reviewPart } from '../lib/compressedReviews';
 import { emphasizeStudyMarkdown } from '../lib/emphasizeStudyMarkdown';
+import { softenIncidenceMarkdown } from '../lib/softenIncidenceMarkdown';
 
 export function ReviewList({
   reviews,
@@ -132,7 +133,7 @@ export function ReviewList({
                   <div>
                     {open ? (
                       <div className="markdown-body text-sm text-slate-200">
-                        <ReactMarkdown>{emphasizeStudyMarkdown(review.content)}</ReactMarkdown>
+                        <ReactMarkdown>{emphasizeStudyMarkdown(softenIncidenceMarkdown(review.content))}</ReactMarkdown>
                       </div>
                     ) : (
                       <p className="text-sm font-serif font-bold text-slate-100 leading-relaxed line-clamp-3">
