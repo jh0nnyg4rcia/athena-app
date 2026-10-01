@@ -97,6 +97,14 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+export function postAthenaApi<T>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  timeoutMs: number
+): Promise<T> {
+  return fetchAthenaApi<T>(endpoint, body, timeoutMs);
+}
+
 async function fetchAthenaApi<T>(
   endpoint: string,
   body: Record<string, unknown>,

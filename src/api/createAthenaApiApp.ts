@@ -17,6 +17,7 @@ import {
 import firebaseConfig from "../../firebase-applet-config.json";
 import { isCeoEmail, parseContentProvider, type ContentProvider } from "../lib/contentProvider";
 import { rateLimit } from "./rateLimit";
+import { registerLegalReviewRoutes } from "./legalReviewRoutes";
 
 interface AthenaAuthUser {
   uid: string;
@@ -115,6 +116,27 @@ async function requireApiAuth(req: express.Request, res: express.Response, next:
   const user = await verifyFirebaseIdToken(token);
   if (!user) {
     res.status(401).json({ error: "Token de autenticação inválido." });
+    return;
+  }
+  req.athenaUser = user;
+  next();
+}
+
+/** A revisão jurídica exige CEO com Google mesmo quando o proxy Gemini aceita chamada sem Bearer. */
+async function requireCeo(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const header = String(req.headers.authorization || "");
+  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  if (!token) {
+    res.status(401).json({ error: "A revisão jurídica exige login do CEO com Google." });
+    return;
+  }
+  const user = await verifyFirebaseIdToken(token);
+  if (!user) {
+    res.status(401).json({ error: "Token de autenticação inválido." });
+    return;
+  }
+  if (!isCeoEmail(user.email)) {
+    res.status(403).json({ error: "Somente o CEO pode revisar aulas com a OpenAI." });
     return;
   }
   req.athenaUser = user;
@@ -335,6 +357,8 @@ export function createAthenaApiApp(): express.Express {
       res.status(500).json({ error: error?.message || "Erro interno ao avaliar resposta." });
     }
   });
+
+  registerLegalReviewRoutes(app, requireCeo);
 
   return app;
 }

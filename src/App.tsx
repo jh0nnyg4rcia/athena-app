@@ -56,7 +56,8 @@ import {
   RefreshCw,
   Mail,
   User as UserIcon,
-  Home
+  Home,
+  Search
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { emphasizeStudyMarkdown } from './lib/emphasizeStudyMarkdown';
@@ -79,7 +80,8 @@ import {
   getLessonDocId,
   syncOfficialCatalog,
   ensureObjectiveChallenge,
-  restoreOfficialLessonsFromCloud
+  restoreOfficialLessonsFromCloud,
+  setLocalHomologatedLesson
 } from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -111,6 +113,9 @@ import {
 } from './lib/firebase';
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
+import { LegalReviewPanel } from './components/LegalReviewPanel';
+import { approveLegalReview, rejectLegalReview, requestLegalReview, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { legalReviewButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
@@ -1161,6 +1166,7 @@ const ChatMessage = memo(({
   onApproveLesson,
   onApproveAndAdvance,
   onEditLesson,
+  onReviewLesson,
   isSavingHomologation,
   homologatedLessonState,
   onGoHome,
@@ -1192,6 +1198,7 @@ const ChatMessage = memo(({
   onApproveLesson?: (idx: number) => Promise<any>,
   onApproveAndAdvance?: (idx: number) => Promise<void>,
   onEditLesson?: (idx: number) => void,
+  onReviewLesson?: (day: number, part: number) => void,
   isSavingHomologation?: boolean,
   homologatedLessonState?: HomologatedLesson | null,
   onGoHome?: () => void,
@@ -1600,6 +1607,17 @@ const ChatMessage = memo(({
                                 </div>
 
                                 <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                  {legalReviewButtonVisible(Boolean(isCEO), isThisPartApproved) && effectiveDay !== undefined && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onReviewLesson?.(effectiveDay, msgPartIdx)}
+                                      className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                      title="Auditoria jurídica com fontes oficiais. A aula publicada só muda se você aprovar."
+                                    >
+                                      <Search size={13} />
+                                      <span>Revisar com IA</span>
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => onEditLesson?.(msgIdx)}
@@ -1991,9 +2009,35 @@ export default function App() {
   const [isEditingLesson, setIsEditingLesson] = useState(false);
   const [editingLessonContent, setEditingLessonContent] = useState('');
   const [editingLessonIndex, setEditingLessonIndex] = useState<number | undefined>(undefined);
+  const [legalReviewOpen, setLegalReviewOpen] = useState(false);
+  const [legalReviewPhase, setLegalReviewPhase] = useState<'confirm' | 'running' | 'notice' | 'result' | 'edit'>('confirm');
+  const [legalReviewStage, setLegalReviewStage] = useState('Analisando aula');
+  const [legalReviewError, setLegalReviewError] = useState<string | null>(null);
+  const [legalReviewNotice, setLegalReviewNotice] = useState<{ lastReviewDate: string } | null>(null);
+  const [legalReview, setLegalReview] = useState<LegalReviewView | null>(null);
+  const [legalReviewBusy, setLegalReviewBusy] = useState(false);
+  const [legalReviewDay, setLegalReviewDay] = useState<number | null>(null);
+  const [legalReviewPart, setLegalReviewPart] = useState<number | null>(null);
   const [homologationSuccessBanner, setHomologationSuccessBanner] = useState<string | null>(null);
   const [homologationBannerTone, setHomologationBannerTone] = useState<'ok' | 'warn'>('ok');
   const homologationBannerTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!legalReviewOpen || legalReviewPhase !== 'running') return;
+    const labels = [
+      'Analisando aula',
+      'Verificando legislação e jurisprudência',
+      'Consolidando correções',
+      'Preparando comparação'
+    ];
+    let index = 0;
+    setLegalReviewStage(labels[0]);
+    const timer = window.setInterval(() => {
+      index = (index + 1) % labels.length;
+      setLegalReviewStage(labels[index]);
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [legalReviewOpen, legalReviewPhase]);
 
   const showHomologationBanner = (text: string, tone: 'ok' | 'warn') => {
     if (homologationBannerTimer.current) {
@@ -4603,6 +4647,139 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setHomologatedLessonState(null);
   };
 
+  const openLegalReview = (day: number, part: number) => {
+    setLegalReviewDay(day);
+    setLegalReviewPart(part);
+    setLegalReviewError(null);
+    setLegalReviewNotice(null);
+    setLegalReview(null);
+    setLegalReviewPhase('confirm');
+    setLegalReviewOpen(true);
+  };
+
+  const applyApprovedReviewLesson = async (lesson: {
+    id: string;
+    day: number;
+    part: number;
+    subject: string;
+    topic?: string;
+    content: string;
+    challenge?: unknown;
+    approvedBy?: string;
+    approvedAt?: number;
+    modelUsed?: string;
+    version?: number;
+    review?: string;
+  }) => {
+    const published = ensureObjectiveChallenge({
+      id: lesson.id,
+      day: lesson.day,
+      part: lesson.part,
+      subject: lesson.subject,
+      topic: lesson.topic,
+      content: lesson.content,
+      challenge: normalizeObjectiveChallenge(lesson.challenge) || null,
+      status: 'approved',
+      approvedBy: lesson.approvedBy || 'jhonny.spider@gmail.com',
+      approvedAt: lesson.approvedAt || Date.now(),
+      modelUsed: lesson.modelUsed,
+      version: lesson.version,
+      review: lesson.review
+    });
+    await setLocalHomologatedLesson(published);
+    setHomologatedLessonState(published);
+    const parsed = parseATHENAResponse(published.content);
+    const updatedMessages = (messages || []).map((message) => {
+      if (message.role !== 'model') return message;
+      if (message.trilhaDay !== published.day) return message;
+      const part = message.trilhaMaterialIndex ?? 0;
+      if (part !== published.part) return message;
+      return {
+        ...message,
+        content: parsed.content,
+        blocks: parsed.blocks,
+        challenge: published.challenge || parsed.challenge || message.challenge
+      };
+    });
+    setMessages(updatedMessages);
+    saveSession({
+      messages: updatedMessages,
+      trilhaDay: published.day,
+      trilhaMaterialIndex: published.part
+    }, currentSessionId);
+  };
+
+  const runLegalReview = async (force: boolean) => {
+    if (legalReviewDay === null || legalReviewPart === null) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewPhase('running');
+    try {
+      const result = await requestLegalReview(legalReviewDay, legalReviewPart, force);
+      if (result.alreadyReviewed) {
+        setLegalReviewNotice({ lastReviewDate: result.lastReviewDate || '' });
+        setLegalReviewPhase('notice');
+        return;
+      }
+      if (!result.review) throw new Error('A auditoria não devolveu uma versão candidata. A aula publicada não foi alterada.');
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A auditoria falhou. A aula publicada não foi alterada.');
+      setLegalReviewPhase('confirm');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const approveOpenLegalReview = async () => {
+    if (!legalReview) return;
+    if (!confirm('Substituir a aula publicada por esta versão revisada? A versão anterior fica guardada no histórico da revisão.')) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      const result = await approveLegalReview(legalReview.id);
+      await applyApprovedReviewLesson(result.lesson);
+      setLegalReviewOpen(false);
+      showHomologationBanner(`Dia ${result.lesson.day} · Bloco ${result.lesson.part + 1} substituído pela revisão aprovada.`, 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A aprovação falhou. A aula publicada não foi alterada.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const rejectOpenLegalReview = async () => {
+    if (!legalReview) return;
+    if (!confirm('Rejeitar esta revisão? A aula publicada permanece como está.')) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      await rejectLegalReview(legalReview.id);
+      setLegalReviewOpen(false);
+      showHomologationBanner('Revisão rejeitada. A aula publicada permanece como está.', 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'Não foi possível rejeitar a revisão.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const saveOpenLegalReviewCandidate = async (markdown: string) => {
+    if (!legalReview) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      const result = await saveLegalReviewCandidate(legalReview.id, markdown);
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A candidata não foi salva. A aula publicada permanece como está.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
   const skipTrilhaLesson = async (msgIdx: number) => {
     const session = sessions.find(s => s.id === currentSessionId);
     const trilha = inferTrilhaContext(session, messages, messages[msgIdx]);
@@ -7072,6 +7249,17 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                   </div>
 
                                   <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
+                                    {legalReviewButtonVisible(Boolean(isCEO), cacheCurrent) && tDay !== undefined && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openLegalReview(tDay, tMatIdx ?? 0)}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                        title="Auditoria jurídica com fontes oficiais. A aula publicada só muda se você aprovar."
+                                      >
+                                        <Search size={14} />
+                                        Revisar com IA
+                                      </button>
+                                    )}
                                     <button
                                       onClick={handleCeoRegenerateQuestions}
                                       disabled={isLoading || isRegeneratingQuestions}
@@ -7158,6 +7346,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 onApproveLesson={handleCeoApproveLesson}
                                 onApproveAndAdvance={handleCeoApproveAndAdvance}
                                 onEditLesson={handleCeoEditOpen}
+                                onReviewLesson={openLegalReview}
                                 isSavingHomologation={isSavingHomologation}
                                 homologatedLessonState={homologatedLessonState}
                                 onGoHome={handleGoHome}
@@ -7718,6 +7907,23 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
     </AnimatePresence>
 
     {/* Modal de Edição de Curadoria do CEO */}
+    <LegalReviewPanel
+      open={legalReviewOpen}
+      phase={legalReviewPhase}
+      stageLabel={legalReviewStage}
+      error={legalReviewError}
+      notice={legalReviewNotice}
+      review={legalReview}
+      busy={legalReviewBusy}
+      onClose={() => setLegalReviewOpen(false)}
+      onStart={() => { void runLegalReview(false); }}
+      onForce={() => { void runLegalReview(true); }}
+      onApprove={() => { void approveOpenLegalReview(); }}
+      onReject={() => { void rejectOpenLegalReview(); }}
+      onEdit={() => setLegalReviewPhase('edit')}
+      onBack={() => setLegalReviewPhase('result')}
+      onSaveCandidate={(markdown) => { void saveOpenLegalReviewCandidate(markdown); }}
+    />
     <AnimatePresence>
       {isEditingLesson && (
         <motion.div
