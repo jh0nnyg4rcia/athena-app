@@ -114,7 +114,7 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { LegalReviewPanel } from './components/LegalReviewPanel';
-import { approveLegalReview, rejectLegalReview, requestLegalReview, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { approveLegalReview, reauditLegalReview, rejectLegalReview, requestLegalReview, saveLegalReviewCandidate } from './services/legalReviewClient';
 import { legalReviewButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
@@ -4680,7 +4680,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       content: lesson.content,
       challenge: normalizeObjectiveChallenge(lesson.challenge) || null,
       status: 'approved',
-      approvedBy: lesson.approvedBy || 'jhonny.spider@gmail.com',
+      approvedBy: lesson.approvedBy || ATHENA_CEO_EMAIL,
       approvedAt: lesson.approvedAt || Date.now(),
       modelUsed: lesson.modelUsed,
       version: lesson.version,
@@ -4760,6 +4760,24 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       showHomologationBanner('Revisão rejeitada. A aula publicada permanece como está.', 'ok');
     } catch (error) {
       setLegalReviewError(error instanceof Error ? error.message : 'Não foi possível rejeitar a revisão.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const reauditOpenLegalReview = async () => {
+    if (!legalReview) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewStage('Revisando novamente a versão editada');
+    setLegalReviewPhase('running');
+    try {
+      const result = await reauditLegalReview(legalReview.id);
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A auditoria falhou. A aula publicada não foi alterada.');
+      setLegalReviewPhase('result');
     } finally {
       setLegalReviewBusy(false);
     }
@@ -7923,6 +7941,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
       onEdit={() => setLegalReviewPhase('edit')}
       onBack={() => setLegalReviewPhase('result')}
       onSaveCandidate={(markdown) => { void saveOpenLegalReviewCandidate(markdown); }}
+      onReaudit={() => { void reauditOpenLegalReview(); }}
     />
     <AnimatePresence>
       {isEditingLesson && (

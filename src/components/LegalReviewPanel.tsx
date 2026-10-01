@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Search, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { diffLines } from "../lib/legalReviewDiff";
-import type { LegalReviewChange, LegalReviewView } from "../lib/legalReviewTypes";
-import { safeHttpUrl } from "../lib/legalReviewValidate";
+import type { LegalReviewChange, LegalReviewEvidence, LegalReviewView, LegalSourceType } from "../lib/legalReviewTypes";
+import { evidenceMayBeShownAsProof, safeHttpsUrl } from "../lib/legalReviewValidate";
 
 type Phase = "confirm" | "running" | "notice" | "result" | "edit";
 
@@ -22,19 +22,50 @@ const SEVERITY_LABEL: Record<LegalReviewChange["severity"], string> = {
   BAIXA: "baixa relevância",
 };
 
-function verificationCopy(level: LegalReviewView["verificationLevel"]): string {
-  if (level === "VERIFICADO_COM_FONTES") return "Auditoria jurídica com fontes oficiais";
-  if (level === "VERIFICACAO_PARCIAL") return "Verificação parcial — há pontos sem confirmação em fonte oficial";
+const SOURCE_TYPE_LABEL: Record<LegalSourceType, string> = {
+  LEI: "Lei",
+  CONSTITUICAO: "Constituição",
+  DECRETO: "Decreto",
+  RESOLUCAO: "Resolução",
+  SUMULA: "Súmula",
+  ACORDAO: "Acórdão",
+  REPERCUSSAO_GERAL: "Repercussão geral",
+  REPETITIVO: "Repetitivo",
+  INFORMATIVO: "Informativo",
+  ATO_NORMATIVO: "Ato normativo",
+  OUTRO_OFICIAL: "Documento oficial",
+};
+
+function verificationCopy(review: LegalReviewView): string {
+  if (review.manuallyEdited) return "Verificação parcial — o texto foi modificado após a auditoria jurídica.";
+  if (review.verificationLevel === "VERIFICADO_COM_FONTES") return "Auditoria jurídica com fontes oficiais";
+  if (review.verificationLevel === "VERIFICACAO_PARCIAL") return "Verificação parcial — há pontos sem confirmação em fonte oficial";
   return "A pesquisa em fontes oficiais não pôde ser concluída. Esta versão não está verificada.";
 }
 
 function SourceLink({ url, title }: { url: string; title: string }) {
-  const href = safeHttpUrl(url);
+  const href = safeHttpsUrl(url);
   if (!href) return <span>{title}</span>;
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" className="text-sky-300 underline underline-offset-2 break-all">
       {title}
     </a>
+  );
+}
+
+function EvidenceBlock({ evidence, confirmed }: { evidence: LegalReviewEvidence; confirmed: boolean }) {
+  const proof = evidenceMayBeShownAsProof(evidence);
+  return (
+    <div className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 space-y-1">
+      <p className="font-bold text-slate-100">Evidência oficial</p>
+      <p><span className="font-bold text-slate-100">Instituição: </span>{evidence.institution}</p>
+      <p><span className="font-bold text-slate-100">Documento: </span>{proof ? <SourceLink url={evidence.url} title={evidence.title} /> : evidence.title}</p>
+      <p><span className="font-bold text-slate-100">Tipo: </span>{SOURCE_TYPE_LABEL[evidence.sourceType] || evidence.sourceType}</p>
+      <p><span className="font-bold text-slate-100">Fonte consultada: </span>{evidence.consulted ? "Sim" : "Não"}</p>
+      <p><span className="font-bold text-slate-100">Status: </span>{confirmed && evidence.supportsChange ? "Confirmado" : "Não confirmado"}</p>
+      {!proof && <p className="text-amber-100">Esta URL não foi validada como fonte consultada.</p>}
+      {evidence.supportExplanation && <p className="text-slate-400">{evidence.supportExplanation}</p>}
+    </div>
   );
 }
 
@@ -54,6 +85,7 @@ export function LegalReviewPanel({
   onEdit,
   onBack,
   onSaveCandidate,
+  onReaudit,
 }: {
   open: boolean;
   phase: Phase;
@@ -70,6 +102,7 @@ export function LegalReviewPanel({
   onEdit: () => void;
   onBack: () => void;
   onSaveCandidate: (markdown: string) => void;
+  onReaudit: () => void;
 }) {
   const [view, setView] = useState<"side" | "diff">("side");
   const [draft, setDraft] = useState("");
@@ -84,11 +117,7 @@ export function LegalReviewPanel({
   if (!open) return null;
 
   const summary = review?.summary;
-  const sources = review
-    ? review.changes.flatMap((change) =>
-        change.sources.map((source) => ({ ...source, changeId: change.id, reason: change.reason }))
-      )
-    : [];
+  const consulted = review?.consultedSources || [];
 
   return (
     <div className="fixed inset-0 z-[170] flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md">
@@ -138,7 +167,12 @@ export function LegalReviewPanel({
 
           {phase === "result" && review && summary && (
             <div className="space-y-5">
-              <p className="text-sm text-slate-200">{verificationCopy(review.verificationLevel)}</p>
+              <p className="text-sm text-slate-200">{verificationCopy(review)}</p>
+              {review.manuallyEdited && (
+                <p className="text-sm text-amber-100 bg-amber-500/10 border border-amber-500/40 rounded-2xl px-4 py-3">
+                  ⚠️ Esta versão foi editada após a auditoria jurídica. As fontes abaixo correspondem à revisão anterior.
+                </p>
+              )}
               <p className="text-sm font-semibold text-slate-100">{summary.totalChanges} alterações identificadas</p>
               <ul className="text-sm text-slate-200 space-y-1">
                 <li>Correções jurídicas: {summary.corrections}</li>
@@ -204,34 +238,31 @@ export function LegalReviewPanel({
                     {change.revisedExcerpt && (
                       <p className="text-sm text-slate-300"><span className="font-bold text-slate-100">Trecho revisado: </span>{change.revisedExcerpt}</p>
                     )}
-                    <p className="text-sm text-slate-300"><span className="font-bold text-slate-100">Motivo: </span>{change.reason}</p>
-                    {change.sources.length > 0 && (
-                      <div className="text-sm text-slate-300">
-                        <p className="font-bold text-slate-100">Fontes verificadas</p>
-                        <ul className="list-disc pl-5">
-                          {change.sources.map((source) => (
-                            <li key={source.url}>
-                              {source.institution} — {source.official ? "oficial" : "não oficial"} — <SourceLink url={source.url} title={source.title} />
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                    <h6 className="text-sm font-bold text-slate-100">Alteração</h6>
+                    <p className="text-sm text-slate-300">{change.revisedExcerpt || change.originalExcerpt}</p>
+                    <h6 className="text-sm font-bold text-slate-100">Motivo</h6>
+                    <p className="text-sm text-slate-300">{change.reason}</p>
+                    {(change.evidence || []).length === 0 && (
+                      <p className="text-sm text-amber-100">Não confirmado. Esta alteração não tem evidência validada.</p>
                     )}
+                    {(change.evidence || []).map((evidence) => (
+                      <EvidenceBlock key={`${change.id}-${evidence.url}-${evidence.sourceType}`} evidence={evidence} confirmed={change.confirmation === "CONFIRMADO"} />
+                    ))}
                   </article>
                 ))}
               </section>
 
               <section className="space-y-2">
-                <h4 className="text-sm font-bold text-slate-100">Fontes oficiais consultadas</h4>
-                {sources.filter((source) => source.official).length === 0 && (
-                  <p className="text-sm text-slate-400">Nenhuma fonte oficial ficou vinculada a uma alteração.</p>
+                <h4 className="text-sm font-bold text-slate-100">Fonte oficial consultada</h4>
+                <p className="text-xs text-slate-400">Endereços recuperados pela pesquisa. Consultar uma página não significa que ela comprova uma alteração.</p>
+                {consulted.length === 0 && (
+                  <p className="text-sm text-slate-400">A ferramenta não devolveu fontes consultadas.</p>
                 )}
                 <ul className="space-y-2 text-sm text-slate-300">
-                  {sources.filter((source) => source.official).map((source) => (
-                    <li key={`${source.changeId}-${source.url}`} className="rounded-xl border border-white/10 px-3 py-2">
-                      <p>{source.institution}</p>
-                      <p><SourceLink url={source.url} title={source.title} /></p>
-                      <p className="text-slate-400">Relacionada a {source.changeId}. {source.reason}</p>
+                  {consulted.map((source) => (
+                    <li key={source.url} className="rounded-xl border border-white/10 px-3 py-2">
+                      <p>{source.official ? source.institution : "Fonte consultada, sem instituição oficial reconhecida"}</p>
+                      {source.official ? <SourceLink url={source.url} title={source.url} /> : <p className="break-all text-slate-400">{source.url}</p>}
                     </li>
                   ))}
                 </ul>
@@ -282,6 +313,9 @@ export function LegalReviewPanel({
             <>
               <button type="button" onClick={onReject} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer">Rejeitar revisão</button>
               <button type="button" onClick={() => onEdit()} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold cursor-pointer">Editar versão revisada</button>
+              {review.manuallyEdited && (
+                <button type="button" onClick={onReaudit} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-sky-200 text-xs font-bold cursor-pointer">Revisar novamente esta versão</button>
+              )}
               <button type="button" onClick={onApprove} disabled={busy} className="px-4 py-2.5 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase cursor-pointer flex items-center gap-1.5">
                 <Check size={14} /> Aprovar e substituir
               </button>

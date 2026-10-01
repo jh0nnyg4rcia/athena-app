@@ -1,7 +1,8 @@
 import { embedChallengeInContent, extractChallengeFromText, normalizeObjectiveChallenge } from "../lib/objectiveChallenge";
 import type { ChallengeData } from "../types";
-import type { StoredCatalogLesson } from "../lib/legalReviewTypes";
+import type { LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
 import { containsHtmlMarkup, markersPreserved } from "../lib/legalReviewValidate";
+import { hashLessonContent } from "./legalReviewRepository";
 
 export function blockSixExcerpt(content: string): string {
   const match = /\[BLOCK_6\]([\s\S]*)$/i.exec(content || "");
@@ -19,10 +20,32 @@ export function candidateMarkdownAccepted(original: string, revised: string): bo
 }
 
 /** Monta a aula que substituirá a publicada, preservando id, dia, bloco e disciplina. */
+export function reviewAfterManualEdit(review: LegalReviewView, markdown: string, now: number): LegalReviewView {
+  if (markdown === review.reviewedMarkdown) return review;
+  return {
+    ...review,
+    reviewedMarkdown: markdown,
+    manuallyEdited: true,
+    manuallyEditedAt: now,
+    candidateHash: hashLessonContent(markdown),
+    verificationLevel: "VERIFICACAO_PARCIAL",
+    sourceHistory: [
+      ...(review.sourceHistory || []),
+      {
+        at: now,
+        verificationLevel: review.verificationLevel,
+        consultedSources: review.consultedSources || [],
+        note: "Fontes da auditoria anterior à edição manual.",
+      },
+    ].slice(-6),
+  };
+}
+
 export function nextPublishedLesson(
   lesson: StoredCatalogLesson,
   reviewedMarkdown: string,
-  now: number
+  now: number,
+  approvedBy: string
 ): StoredCatalogLesson {
   const extracted = extractChallengeFromText(reviewedMarkdown);
   const challenge = extracted.challenge || normalizeObjectiveChallenge(lesson.challenge);
@@ -33,7 +56,7 @@ export function nextPublishedLesson(
     content,
     challenge: challenge || lesson.challenge,
     status: "approved",
-    approvedBy: "jhonny.spider@gmail.com",
+    approvedBy,
     approvedAt: now,
     version: (lesson.version || 1) + 1,
     review: review || lesson.review,

@@ -26,3 +26,7 @@ export function rejectLegalReview(reviewId: string): Promise<{ review: LegalRevi
 export function approveLegalReview(reviewId: string): Promise<{ reviewId: string; lesson: StoredCatalogLesson }> {
   return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/approve`, {}, 60_000);
 }
+
+export function reauditLegalReview(reviewId: string): Promise<{ review: LegalReviewView }> {
+  return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/reaudit`, {}, REVIEW_TIMEOUT_MS);
+}

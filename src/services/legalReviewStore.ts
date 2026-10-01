@@ -6,10 +6,10 @@ import {
   type LegalReviewView,
   type StoredCatalogLesson,
 } from "../lib/legalReviewTypes";
-import { candidateMarkdownAccepted, nextPublishedLesson } from "./legalReviewPublish";
+import { candidateMarkdownAccepted, nextPublishedLesson, reviewAfterManualEdit } from "./legalReviewPublish";
 import {
   LegalReviewError,
-  hashLessonContent,
+  hashCatalogSnapshot,
   processingLockFresh,
   type LegalReviewRepository,
 } from "./legalReviewRepository";
@@ -216,7 +216,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
         throw unavailable();
       }
     },
-    async saveCandidate(reviewId, markdown) {
+    async saveCandidate(reviewId, markdown, now) {
       try {
         const db = await loadDb();
         return await db.runTransaction(async (tx) => {
@@ -232,8 +232,16 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
           const challenge = extractChallengeFromText(markdown).challenge
             || extractChallengeFromText(review.originalContent).challenge;
           const nextMarkdown = challenge ? embedChallengeInContent(markdown, challenge) : markdown;
-          tx.set(ref, { reviewedMarkdown: nextMarkdown }, { merge: true });
-          return { ...review, reviewedMarkdown: nextMarkdown };
+          const edited = reviewAfterManualEdit(review, nextMarkdown, now);
+          tx.set(ref, {
+            reviewedMarkdown: edited.reviewedMarkdown,
+            manuallyEdited: edited.manuallyEdited,
+            manuallyEditedAt: edited.manuallyEditedAt ?? null,
+            candidateHash: edited.candidateHash,
+            verificationLevel: edited.verificationLevel,
+            sourceHistory: edited.sourceHistory,
+          }, { merge: true });
+          return edited;
         });
       } catch (error) {
         if (error instanceof LegalReviewError) throw error;
@@ -264,7 +272,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
         throw unavailable();
       }
     },
-    async approve(reviewId, uid, now) {
+    async approve(reviewId, uid, email, now) {
       try {
         const db = await loadDb();
         return await db.runTransaction(async (tx) => {
@@ -280,10 +288,10 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
           if (!lesson) {
             throw new LegalReviewError("A aula publicada não foi encontrada. Nada foi substituído.", 404);
           }
-          const sameHash = hashLessonContent(lesson.content) === review.originalHash;
-          const sameTime = (lesson.approvedAt ?? null) === (review.originalApprovedAt ?? null);
-          if (!sameHash || !sameTime) return { ok: false as const, conflict: true as const };
-          const published = nextPublishedLesson(lesson, review.reviewedMarkdown, now);
+          if (hashCatalogSnapshot(lesson) !== review.originalHash) {
+            return { ok: false as const, conflict: true as const };
+          }
+          const published = nextPublishedLesson(lesson, review.reviewedMarkdown, now, email);
           tx.set(lessonRef, definedRecord({
             id: published.id,
             day: published.day,
@@ -293,7 +301,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             content: published.content,
             challenge: published.challenge,
             status: "approved",
-            approvedBy: "jhonny.spider@gmail.com",
+            approvedBy: email,
             approvedAt: published.approvedAt,
             modelUsed: published.modelUsed,
             version: published.version,
@@ -305,7 +313,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             part: published.part,
             subject: (published.subject || "Trilha Jurídica").slice(0, 200),
             status: "approved",
-            approvedBy: "jhonny.spider@gmail.com",
+            approvedBy: email,
             approvedAt: published.approvedAt,
             review: (published.review || "").slice(0, 20_000),
           }, { merge: true });
@@ -314,7 +322,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             lessonId: review.lessonId,
             processingReviewId: null,
             processingStartedAt: null,
-            approvedHash: hashLessonContent(published.content),
+            approvedHash: hashCatalogSnapshot(published),
             approvedReviewId: review.id,
             approvedReviewDate: review.reviewDate,
             latestReviewId: review.id,

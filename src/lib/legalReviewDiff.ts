@@ -43,11 +43,10 @@ function fallbackDiff(before: string[], after: string[]): DiffLine[] {
       out.push({ kind: "add", text: line });
     }
   }
-  return collapseSame(out);
+  return out;
 }
 
-/** Diff por linha, sem dependência externa. */
-export function diffLines(before: string, after: string): DiffLine[] {
+function buildDiff(before: string, after: string): DiffLine[] {
   const a = (before || "").split("\n");
   const b = (after || "").split("\n");
   if (a.length * b.length > 1_200_000) return fallbackDiff(a, b);
@@ -87,5 +86,15 @@ export function diffLines(before: string, after: string): DiffLine[] {
     out.push({ kind: "add", text: b[j] });
     j += 1;
   }
-  return collapseSame(out);
+  return out;
+}
+
+/** Diff completo, sem colapsar trechos iguais. Serve para cobrir alterações. */
+export function diffOperations(before: string, after: string): DiffLine[] {
+  return buildDiff(before, after);
+}
+
+/** Diff por linha para a tela, com trechos iguais longos resumidos. */
+export function diffLines(before: string, after: string): DiffLine[] {
+  return collapseSame(buildDiff(before, after));
 }

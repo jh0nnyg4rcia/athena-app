@@ -45,11 +45,49 @@ export type LegalSeverity = "ALTA" | "MEDIA" | "BAIXA";
 
 export type LegalConfirmation = "CONFIRMADO" | "NAO_CONFIRMADO";
 
+export type LegalSourceType =
+  | "LEI"
+  | "CONSTITUICAO"
+  | "DECRETO"
+  | "RESOLUCAO"
+  | "SUMULA"
+  | "ACORDAO"
+  | "REPERCUSSAO_GERAL"
+  | "REPETITIVO"
+  | "INFORMATIVO"
+  | "ATO_NORMATIVO"
+  | "OUTRO_OFICIAL";
+
 export interface LegalReviewSource {
   title: string;
   url: string;
   official: boolean;
   institution: string;
+}
+
+/** Fonte devolvida pela ferramenta. Consultada não significa que comprova a alteração. */
+export interface ConsultedLegalSource {
+  url: string;
+  official: boolean;
+  institution: string;
+}
+
+export interface LegalReviewEvidence {
+  institution: string;
+  title: string;
+  url: string;
+  official: boolean;
+  consulted: boolean;
+  supportsChange: boolean;
+  supportExplanation: string;
+  sourceType: LegalSourceType;
+}
+
+export interface LegalSourceHistoryEntry {
+  at: number;
+  verificationLevel: LegalVerificationLevel;
+  consultedSources: ConsultedLegalSource[];
+  note: string;
 }
 
 export interface LegalReviewChange {
@@ -63,6 +101,7 @@ export interface LegalReviewChange {
   verified: boolean;
   confirmation: LegalConfirmation;
   sources: LegalReviewSource[];
+  evidence: LegalReviewEvidence[];
 }
 
 export interface LegalUnverifiedClaim {
@@ -115,6 +154,12 @@ export interface LegalReviewView {
   rejectedAt?: number;
   webSearchUsed: boolean;
   usage?: LegalReviewUsage;
+  consultedSources: ConsultedLegalSource[];
+  manuallyEdited: boolean;
+  manuallyEditedAt?: number;
+  candidateHash: string;
+  auditedCandidateHash: string;
+  sourceHistory: LegalSourceHistoryEntry[];
 }
 
 export interface StoredCatalogLesson {

@@ -5,6 +5,38 @@ export function hashLessonContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+function stableValue(value: unknown): unknown {
+  if (value === undefined) return null;
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(stableValue);
+  const record = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(record).sort()) {
+    if (record[key] !== undefined) sorted[key] = stableValue(record[key]);
+  }
+  return sorted;
+}
+
+/** Hash do snapshot que a aprovação compara. Inclui os campos que a revisão não pode sobrescrever em silêncio. */
+export function hashCatalogSnapshot(lesson: {
+  content: string;
+  subject: string;
+  topic?: string;
+  challenge?: unknown;
+  approvedAt?: number | null;
+  version?: number | null;
+}): string {
+  const canonical = JSON.stringify(stableValue({
+    content: lesson.content,
+    subject: lesson.subject,
+    topic: lesson.topic ?? "",
+    challenge: lesson.challenge ?? null,
+    approvedAt: lesson.approvedAt ?? null,
+    version: typeof lesson.version === "number" ? lesson.version : null,
+  }));
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
 export function newReviewId(): string {
   return `rev_${randomUUID()}`;
 }
@@ -37,9 +69,9 @@ export interface LegalReviewRepository {
   complete(review: LegalReviewView): Promise<void>;
   fail(reviewId: string, lessonId: string, message: string): Promise<void>;
   get(reviewId: string): Promise<LegalReviewView | null>;
-  saveCandidate(reviewId: string, markdown: string): Promise<LegalReviewView>;
+  saveCandidate(reviewId: string, markdown: string, now: number): Promise<LegalReviewView>;
   reject(reviewId: string, uid: string, now: number): Promise<LegalReviewView>;
-  approve(reviewId: string, uid: string, now: number): Promise<
+  approve(reviewId: string, uid: string, email: string, now: number): Promise<
     | { ok: true; lesson: StoredCatalogLesson }
     | { ok: false; conflict: true }
   >;
@@ -89,5 +121,11 @@ export function publicReview(review: LegalReviewView): LegalReviewView {
     rejectedAt: review.rejectedAt,
     webSearchUsed: review.webSearchUsed,
     usage: review.usage,
+    consultedSources: review.consultedSources || [],
+    manuallyEdited: Boolean(review.manuallyEdited),
+    manuallyEditedAt: review.manuallyEditedAt,
+    candidateHash: review.candidateHash || "",
+    auditedCandidateHash: review.auditedCandidateHash || "",
+    sourceHistory: review.sourceHistory || [],
   };
 }

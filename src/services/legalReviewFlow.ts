@@ -7,10 +7,12 @@ import {
   type LegalReviewView,
   type StoredCatalogLesson,
 } from "../lib/legalReviewTypes";
+import { isCeoEmail } from "../lib/contentProvider";
 import type { AuditLessonResult } from "./legalReviewServer";
 import { candidateMarkdownAccepted } from "./legalReviewPublish";
 import {
   LegalReviewError,
+  hashCatalogSnapshot,
   hashLessonContent,
   lessonDocId,
   newReviewId,
@@ -28,6 +30,7 @@ export interface LegalReviewAuditor {
     subject: string;
     topic: string;
     content: string;
+    publishedContent?: string;
   }): Promise<AuditLessonResult>;
 }
 
@@ -43,7 +46,7 @@ function blankReview(lesson: StoredCatalogLesson, uid: string, now: number, revi
     part: lesson.part,
     subject: lesson.subject,
     topic: lesson.topic || lesson.subject,
-    originalHash: hashLessonContent(lesson.content),
+    originalHash: hashCatalogSnapshot(lesson),
     originalApprovedAt: lesson.approvedAt ?? null,
     originalContent: lesson.content,
     reviewedMarkdown: "",
@@ -68,6 +71,11 @@ function blankReview(lesson: StoredCatalogLesson, uid: string, now: number, revi
     requestedByUid: uid,
     requestedAt: now,
     webSearchUsed: false,
+    consultedSources: [],
+    manuallyEdited: false,
+    candidateHash: "",
+    auditedCandidateHash: "",
+    sourceHistory: [],
   };
 }
 
@@ -92,7 +100,7 @@ export async function startLegalReview(
     );
   }
   const index = (await repo.getIndex(lessonId)) || emptyReviewIndex(lessonId);
-  const hash = hashLessonContent(lesson.content);
+  const hash = hashCatalogSnapshot(lesson);
   if (!input.force && index.approvedHash && index.approvedHash === hash && index.approvedReviewDate) {
     return {
       alreadyReviewed: true,
@@ -136,6 +144,11 @@ export async function startLegalReview(
       model: audit.model,
       webSearchUsed: audit.webSearchUsed,
       usage: audit.usage,
+      consultedSources: audit.consultedSources,
+      manuallyEdited: false,
+      candidateHash: hashLessonContent(audit.reviewedMarkdown),
+      auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
+      sourceHistory: [],
     };
     await repo.complete(pending);
     return { alreadyReviewed: false, review: publicReview(pending) };
@@ -161,7 +174,73 @@ export async function saveLegalReviewCandidate(
   if (!candidateMarkdownAccepted(current.originalContent, markdown)) {
     throw new LegalReviewError("O Markdown revisado quebrou a estrutura da aula. A candidata não foi salva.", 400);
   }
-  return publicReview(await repo.saveCandidate(reviewId, markdown));
+  return publicReview(await repo.saveCandidate(reviewId, markdown, Date.now()));
+}
+
+export async function reauditLegalReview(
+  repo: LegalReviewRepository,
+  auditor: LegalReviewAuditor,
+  reviewId: string,
+  now = Date.now()
+): Promise<LegalReviewView> {
+  const current = await repo.get(reviewId);
+  if (!current || current.status !== "pending_approval") {
+    throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+  }
+  if (!candidateMarkdownAccepted(current.originalContent, current.reviewedMarkdown)) {
+    throw new LegalReviewError("O Markdown revisado quebrou a estrutura da aula. A aula publicada não foi alterada.", 400);
+  }
+  try {
+    const audit = await auditor.audit({
+      reviewDate: formatReviewDate(new Date(now)),
+      lessonId: current.lessonId,
+      day: current.day,
+      part: current.part,
+      subject: current.subject,
+      topic: current.topic,
+      content: current.reviewedMarkdown,
+      publishedContent: current.originalContent,
+    });
+    const pending: LegalReviewView = {
+      ...current,
+      reviewedMarkdown: audit.reviewedMarkdown,
+      changes: audit.changes,
+      unverifiedClaims: audit.unverifiedClaims,
+      summary: audit.summary,
+      reviewNotes: audit.reviewNotes,
+      verificationLevel: audit.verificationLevel,
+      confidence: audit.confidence,
+      outcome: audit.outcome,
+      status: "pending_approval",
+      model: audit.model,
+      reviewDate: formatReviewDate(new Date(now)),
+      webSearchUsed: audit.webSearchUsed,
+      usage: audit.usage,
+      consultedSources: audit.consultedSources,
+      manuallyEdited: false,
+      candidateHash: hashLessonContent(audit.reviewedMarkdown),
+      auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
+      sourceHistory: [
+        ...(current.sourceHistory || []),
+        {
+          at: now,
+          verificationLevel: current.verificationLevel,
+          consultedSources: current.consultedSources || [],
+          note: "Fontes da auditoria anterior à nova revisão da candidata.",
+        },
+      ].slice(-6),
+    };
+    await repo.complete(pending);
+    return publicReview(pending);
+  } catch (error) {
+    const message = error instanceof LegalReviewError
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : "A auditoria falhou. A aula publicada não foi alterada.";
+    if (error instanceof LegalReviewError) throw error;
+    throw new LegalReviewError(message, 502);
+  }
 }
 
 export async function rejectLegalReview(
@@ -177,9 +256,13 @@ export async function approveLegalReview(
   repo: LegalReviewRepository,
   reviewId: string,
   uid: string,
+  email: string,
   now = Date.now()
 ): Promise<{ reviewId: string; lesson: StoredCatalogLesson }> {
-  const result = await repo.approve(reviewId, uid, now);
+  if (!isCeoEmail(email)) {
+    throw new LegalReviewError("A aprovação exige a identidade autenticada do CEO.", 403);
+  }
+  const result = await repo.approve(reviewId, uid, email, now);
   if (!result.ok) {
     throw new LegalReviewError(LEGAL_REVIEW_CONFLICT_MESSAGE, 409);
   }

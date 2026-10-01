@@ -4,6 +4,7 @@ import { createFirestoreLegalReviewRepository } from "../services/legalReviewSto
 import { auditLessonWithOpenAI } from "../services/legalReviewServer";
 import {
   approveLegalReview,
+  reauditLegalReview,
   rejectLegalReview,
   saveLegalReviewCandidate,
   startLegalReview,
@@ -79,8 +80,26 @@ export function registerLegalReviewRoutes(
       return;
     }
     try {
-      const result = await approveLegalReview(repo, req.params.reviewId, req.athenaUser?.uid || "");
+      const result = await approveLegalReview(
+        repo,
+        req.params.reviewId,
+        req.athenaUser?.uid || "",
+        req.athenaUser?.email || ""
+      );
       res.json(result);
+    } catch (error) {
+      sendReviewError(res, error);
+    }
+  });
+
+  app.post("/api/legal-review/:reviewId/reaudit", rateLimit(6, 60 * 60_000), requireCeo, async (req, res) => {
+    if (!isReviewId(req.params.reviewId)) {
+      res.status(400).json({ error: "Identificador de revisão inválido." });
+      return;
+    }
+    try {
+      const review = await reauditLegalReview(repo, auditor, req.params.reviewId);
+      res.json({ review });
     } catch (error) {
       sendReviewError(res, error);
     }
