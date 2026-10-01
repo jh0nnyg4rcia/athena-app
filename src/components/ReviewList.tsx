@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { Review } from '../types';
 import { reviewDay, reviewPart } from '../lib/compressedReviews';
 import { emphasizeStudyMarkdown } from '../lib/emphasizeStudyMarkdown';
-import { softenIncidenceMarkdown } from '../lib/softenIncidenceMarkdown';
+import { presentSavedLesson } from '../lib/presentSavedLesson';
 
 export function ReviewList({
   reviews,
@@ -78,7 +78,7 @@ export function ReviewList({
                       className="text-[10px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-2 py-0.5 rounded-full max-w-[80%] truncate"
                       title={review.subject}
                     >
-                      {part !== undefined ? `Parte ${part + 1} · ${review.subject.replace(/^Parte\s+\d+\s*·\s*/i, '')}` : review.subject}
+                      {part !== undefined ? `Bloco ${part + 1} · ${review.subject.replace(/^(?:Parte|Bloco)\s+\d+\s*·\s*/i, '')}` : review.subject}
                     </span>
                     <div className="relative flex items-center gap-1">
                       <AnimatePresence mode="wait">
@@ -133,7 +133,7 @@ export function ReviewList({
                   <div>
                     {open ? (
                       <div className="markdown-body text-sm text-slate-200">
-                        <ReactMarkdown>{emphasizeStudyMarkdown(softenIncidenceMarkdown(review.content))}</ReactMarkdown>
+                        <ReactMarkdown>{emphasizeStudyMarkdown(presentSavedLesson(review.content))}</ReactMarkdown>
                       </div>
                     ) : (
                       <p className="text-sm font-serif font-bold text-slate-100 leading-relaxed line-clamp-3">

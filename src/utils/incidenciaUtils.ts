@@ -191,17 +191,22 @@ export function calcularIncidenciaParaMaterias(
 }
 
 export function instrucaoEnfase(rotulo: string, incidencia: IncidenciaData): string {
-  return `[INSTRUÇÃO DE ÊNFASE DE ESTUDO]
-No recorte ${rotulo}, concentre a aula em: ${incidencia.label}.
-Use apenas faixa qualitativa. É proibido inventar percentual de cobrança, de questões históricas ou de banca. Não escreva número seguido de % para dizer o quanto o tema cai em prova.
-- Lei Seca (Texto da Lei): ${textoFaixa(incidencia.faixas.leiSeca)}
-- Doutrina (Teoria Densa): ${textoFaixa(incidencia.faixas.doutrina)}
-- Jurisprudência (Precedentes/Súmulas STF e STJ): ${textoFaixa(incidencia.faixas.jurisprudencia)}
-
-${incidencia.justificativa}
-${incidencia.concursoHistorico}
-
-Na saudação, apresente somente o ícone e a faixa (alta, média ou menor). Não apresente porcentagem.
+  const lei = incidencia.prioridade === 'lei_seca' ? 'prioridade máxima' : 'leitura complementar indispensável';
+  const juris = incidencia.prioridade === 'jurisprudencia' ? 'prioridade máxima' : 'atenção especial às distinções do STF/STJ';
+  const doutrina = incidencia.prioridade === 'doutrina' ? 'prioridade máxima' : 'compreensão dos conceitos estruturantes';
+  const foco = incidencia.prioridade === 'lei_seca'
+    ? 'LEI SECA (Literalidade Decodificada)'
+    : incidencia.prioridade === 'jurisprudencia'
+      ? 'JURISPRUDÊNCIA dos tribunais superiores'
+      : 'DOUTRINA dos conceitos estruturantes';
+  return `[INSTRUÇÃO DE FOCO DE LEITURA]
+No recorte ${rotulo}, o foco será ${foco}, complementado pelos outros eixos.
+É proibido atribuir percentual a banca, prova ou cobrança. É proibido escrever nível de incidência (alta, média, baixa ou menor). Não invente estatística.
+Na saudação, apresente o foco somente assim, sem números e sem a palavra incidência:
+Lei Seca: ${lei}
+Jurisprudência: ${juris}
+Doutrina: ${doutrina}
+As carreiras citadas são apenas Magistratura, Ministério Público e Defensoria Pública.
 ------
 `;
 }
