@@ -1,7 +1,8 @@
 /**
- * Cliente ATHENA: inferência Gemini somente via proxy Express.
- * Nenhuma chave de API é lida, armazenada ou enviada a partir do app (web ou Capacitor).
+ * Cliente ATHENA: inferência somente via proxy Express.
+ * Nenhuma chave (Gemini ou OpenAI) é lida, armazenada ou enviada a partir do app.
  */
+import { getContentProvider, type ContentProvider } from "../lib/contentProvider";
 
 try {
   localStorage.removeItem("athena_gemini_api_key");
@@ -31,6 +32,18 @@ export const setSelectedModel = (model: string) => {
     console.warn("[ATHENA] Não foi possível salvar o modelo no armazenamento local:", e);
   }
 };
+
+/** Só o CEO envia ChatGPT. Aluno permanece no Gemini mesmo se o aparelho tiver outra escolha salva. */
+let allowChatGptChoice = false;
+
+export function setAllowChatGptChoice(allowed: boolean): void {
+  allowChatGptChoice = allowed;
+}
+
+function providerForRequest(): ContentProvider {
+  if (!allowChatGptChoice) return "gemini";
+  return getContentProvider();
+}
 
 export const isNativeMobile = (): boolean => {
   if (typeof window === "undefined") return false;
@@ -136,7 +149,7 @@ export async function testGeminiConnection(): Promise<GeminiConnectionTestResult
       success: boolean;
       model?: string;
       message?: string;
-    }>("/api/test-gemini", { preferredModel: getSelectedModel() }, 20000);
+    }>("/api/test-gemini", { preferredModel: getSelectedModel(), contentProvider: providerForRequest() }, 20000);
     return {
       success: Boolean(data.success),
       model: data.model || getSelectedModel(),
@@ -173,6 +186,7 @@ export async function askATHENA(
       mentorshipStyle,
       mentorshipPhase,
       preferredModel: getSelectedModel(),
+      contentProvider: providerForRequest(),
     },
     90000
   );
@@ -187,7 +201,7 @@ export async function askATHENA(
 export async function regenerateObjectiveChallenge(brief: string): Promise<AthenaResult> {
   const data = await fetchAthenaApi<{ responseText?: string; model?: string }>(
     "/api/regenerate-challenge",
-    { brief },
+    { brief, contentProvider: providerForRequest() },
     90000
   );
   const text = (data.responseText || "").trim();
@@ -211,5 +225,6 @@ export async function evaluateAnswer(
     phase,
     userName,
     preferredModel: getSelectedModel(),
+    contentProvider: providerForRequest(),
   }, 90000);
 }

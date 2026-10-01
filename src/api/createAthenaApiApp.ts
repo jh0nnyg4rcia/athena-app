@@ -1,6 +1,12 @@
 import express from "express";
 import { askATHENA, evaluateAnswer, generateObjectiveChallenge, testGeminiPing } from "../services/geminiServerService";
 import {
+  askChatGPT,
+  evaluateAnswerChatGPT,
+  generateObjectiveChallengeChatGPT,
+  testChatGptPing
+} from "../services/openaiServerService";
+import {
   deleteOwnedAccount,
   loginEmailAccount,
   publicAuthMessage,
@@ -9,10 +15,12 @@ import {
   verifyGoogleSession
 } from "../services/authServerService";
 import firebaseConfig from "../../firebase-applet-config.json";
+import { isCeoEmail, parseContentProvider, type ContentProvider } from "../lib/contentProvider";
 import { rateLimit } from "./rateLimit";
 
 interface AthenaAuthUser {
   uid: string;
+  email?: string;
 }
 
 declare global {
@@ -47,9 +55,11 @@ async function verifyFirebaseIdToken(idToken: string): Promise<AthenaAuthUser | 
     );
     if (!response.ok) return null;
     const data = await response.json();
-    const uid = data?.users?.[0]?.localId;
+    const user = data?.users?.[0];
+    const uid = user?.localId;
     if (!uid || typeof uid !== "string") return null;
-    return { uid };
+    const email = typeof user?.email === "string" ? user.email : undefined;
+    return { uid, email };
   } catch (error) {
     console.warn("[Server API] Falha ao validar token Firebase.");
     return null;
@@ -229,32 +239,55 @@ export function createAthenaApiApp(): express.Express {
     }
   });
 
+  function contentProviderOf(req: express.Request): ContentProvider {
+    return parseContentProvider(req.body?.contentProvider);
+  }
+
+  function chatGptAllowed(req: express.Request, res: express.Response, provider: ContentProvider): boolean {
+    if (provider !== "chatgpt") return true;
+    if (!isCeoEmail(req.athenaUser?.email)) {
+      res.status(403).json({
+        error: "O ChatGPT só pode ser usado pelo CEO logado com Google."
+      });
+      return false;
+    }
+    return true;
+  }
+
   app.post("/api/test-gemini", rateLimit(10, 60_000), requireApiAuth, async (req, res) => {
+    const provider = contentProviderOf(req);
+    if (!chatGptAllowed(req, res, provider)) return;
     try {
-      const result = await testGeminiPing(req.body?.preferredModel);
+      const result = provider === "chatgpt"
+        ? await testChatGptPing()
+        : await testGeminiPing(req.body?.preferredModel);
       res.json(result);
     } catch (error: any) {
-      console.error("[Server API Error] testGeminiPing falhou.");
+      console.error("[Server API Error] teste de conexão falhou.");
       res.status(500).json({
         success: false,
-        error: error?.message || "Erro interno ao testar Gemini."
+        error: error?.message || "Erro interno ao testar a conexão."
       });
     }
   });
 
   app.post("/api/ask-athena", rateLimit(20, 60_000), requireApiAuth, async (req, res) => {
+    const provider = contentProviderOf(req);
+    if (!chatGptAllowed(req, res, provider)) return;
     try {
       const { message, history, userName, file, mentorshipStyle, mentorshipPhase, preferredModel } = req.body;
       const safeName = typeof userName === "string" && userName.trim() ? userName.trim().slice(0, 80) : "Mestre";
-      const result = await askATHENA(
-        message,
-        history || [],
-        safeName,
-        file,
-        mentorshipStyle,
-        mentorshipPhase,
-        preferredModel
-      );
+      const result = provider === "chatgpt"
+        ? await askChatGPT(message, history || [], safeName, file, mentorshipStyle, mentorshipPhase)
+        : await askATHENA(
+            message,
+            history || [],
+            safeName,
+            file,
+            mentorshipStyle,
+            mentorshipPhase,
+            preferredModel
+          );
       res.json({ responseText: result.text, model: result.model });
     } catch (error: any) {
       console.error("[Server API Error] askATHENA falhou.");
@@ -263,13 +296,17 @@ export function createAthenaApiApp(): express.Express {
   });
 
   app.post("/api/regenerate-challenge", rateLimit(12, 60_000), requireApiAuth, async (req, res) => {
+    const provider = contentProviderOf(req);
+    if (!chatGptAllowed(req, res, provider)) return;
     try {
       const brief = typeof req.body?.brief === "string" ? req.body.brief : "";
       if (brief.trim().length < 40) {
         res.status(400).json({ error: "Falta o recorte da aula para regerar só as questões." });
         return;
       }
-      const result = await generateObjectiveChallenge(brief);
+      const result = provider === "chatgpt"
+        ? await generateObjectiveChallengeChatGPT(brief)
+        : await generateObjectiveChallenge(brief);
       res.json({ responseText: result.text, model: result.model });
     } catch (error: any) {
       console.error("[Server API Error] generateObjectiveChallenge falhou.");
@@ -278,16 +315,20 @@ export function createAthenaApiApp(): express.Express {
   });
 
   app.post("/api/evaluate-answer", rateLimit(20, 60_000), requireApiAuth, async (req, res) => {
+    const provider = contentProviderOf(req);
+    if (!chatGptAllowed(req, res, provider)) return;
     try {
       const { questionText, userAnswer, referenceResponse, phase, userName } = req.body;
       const safeName = typeof userName === "string" && userName.trim() ? userName.trim().slice(0, 80) : "Mestre";
-      const evalResult = await evaluateAnswer(
-        questionText,
-        userAnswer,
-        referenceResponse,
-        phase,
-        safeName
-      );
+      const evalResult = provider === "chatgpt"
+        ? await evaluateAnswerChatGPT(questionText, userAnswer, referenceResponse, phase, safeName)
+        : await evaluateAnswer(
+            questionText,
+            userAnswer,
+            referenceResponse,
+            phase,
+            safeName
+          );
       res.json(evalResult);
     } catch (error: any) {
       console.error("[Server API Error] evaluateAnswer falhou.");

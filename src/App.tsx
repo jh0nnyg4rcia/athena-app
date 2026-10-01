@@ -63,7 +63,8 @@ import { emphasizeStudyMarkdown } from './lib/emphasizeStudyMarkdown';
 import { softenIncidenceMarkdown } from './lib/softenIncidenceMarkdown';
 import { cacheHoldsText } from './lib/officialCacheRestore';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
+import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, setAllowChatGptChoice, type GeminiConnectionTestResult } from './services/geminiService';
+import { contentEngineLabel, getContentProvider, setContentProvider, type ContentProvider } from './lib/contentProvider';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias, FAIXA_LARGURA, FAIXA_ROTULO, instrucaoEnfase } from './utils/incidenciaUtils';
@@ -1288,7 +1289,7 @@ const ChatMessage = memo(({
               ) : (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-mono text-emerald-400 shadow-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Gerado via IA Gemini ({msg.modelName || 'gemini-3.5-flash-lite'})</span>
+                  <span>Gerado via {contentEngineLabel(msg.modelName)} ({msg.modelName || 'gemini-3.8-flash'})</span>
                 </div>
               )}
             </div>
@@ -2091,6 +2092,11 @@ export default function App() {
   const [testAiLoading, setTestAiLoading] = useState(false);
   const [testAiResult, setTestAiResult] = useState<GeminiConnectionTestResult | null>(null);
   const [selectedAiModel, setSelectedAiModel] = useState<string>(() => getSelectedModel());
+  const [contentProvider, setContentProviderState] = useState<ContentProvider>(() => getContentProvider());
+
+  useEffect(() => {
+    setAllowChatGptChoice(isCEO);
+  }, [isCEO]);
 
   const handleTestGeminiConnection = async () => {
     setTestAiLoading(true);
@@ -4963,10 +4969,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               <button
                 onClick={() => setIsAiSettingsOpen(true)}
                 className="px-2.5 py-1.5 text-brand-gold hover:text-white transition-all rounded-xl bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/25 flex items-center gap-1.5 active:scale-95 text-[10px] font-bold cursor-pointer shadow-sm"
-                title="Status e Diagnóstico da IA Gemini"
+                title="Escolher Gemini ou ChatGPT"
               >
                 <Cpu size={14} className="animate-pulse text-brand-gold shrink-0" />
-                <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">IA Status</span>
+                <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">
+                  {contentProvider === 'chatgpt' ? 'ChatGPT' : 'Gemini'}
+                </span>
               </button>
             )}
 
@@ -7593,7 +7601,9 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                 </div>
                 <div>
                   <h3 className="text-base font-serif font-bold text-slate-100">Cérebro IA ATHENA</h3>
-                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">Google Gemini 2026</p>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">
+                    {contentProvider === 'chatgpt' ? 'ChatGPT' : 'Google Gemini'}
+                  </p>
                 </div>
               </div>
               <button
@@ -7605,15 +7615,62 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
             </div>
 
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContentProvider('gemini');
+                    setContentProviderState('gemini');
+                    setTestAiResult(null);
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    contentProvider === 'gemini'
+                      ? 'bg-brand-gold/15 border-brand-gold/60 text-white shadow-lg'
+                      : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold">Gemini</span>
+                    {contentProvider === 'gemini' && <Check size={12} className="text-brand-gold" />}
+                  </div>
+                  <p className="text-[9px] text-slate-400 leading-tight">Cérebro atual das aulas</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContentProvider('chatgpt');
+                    setContentProviderState('chatgpt');
+                    setTestAiResult(null);
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    contentProvider === 'chatgpt'
+                      ? 'bg-brand-gold/15 border-brand-gold/60 text-white shadow-lg'
+                      : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold">ChatGPT</span>
+                    {contentProvider === 'chatgpt' && <Check size={12} className="text-brand-gold" />}
+                  </div>
+                  <p className="text-[9px] text-slate-400 leading-tight">Próximas aulas e o Regerar</p>
+                </button>
+              </div>
+
               <div className="p-3.5 bg-slate-950/60 rounded-2xl border border-white/5 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cérebro IA Oficial</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    {contentProvider === 'chatgpt' ? 'ChatGPT no servidor' : 'Cérebro IA Oficial'}
+                  </span>
                   <span className="text-[9px] font-mono uppercase bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-bold">
                     Temp: 0.10 (Anti-Alucinação)
                   </span>
                 </div>
-                
-                {/* Seletor Visual de Modelo Oficial 2026 */}
+
+                {contentProvider === 'chatgpt' ? (
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    As aulas novas, o Regerar e as questões passam a ser escritos pelo ChatGPT. O Gemini continua disponível neste seletor. A chave da OpenAI não entra no aplicativo.
+                  </p>
+                ) : (
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <button
                     type="button"
@@ -7653,6 +7710,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                     <p className="text-[9px] text-slate-400 leading-tight">Raciocínio Profundo • Nível Banca / 2ª Fase</p>
                   </button>
                 </div>
+                )}
 
                 <div className="flex items-center justify-between pt-1 border-t border-white/5">
                   <span className="text-[9px] text-slate-500">Modo de Execução:</span>
@@ -7687,7 +7745,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                       : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
                   }`}>
                     <div className="flex items-center justify-between font-bold text-[11px] mb-1">
-                      <span>{testAiResult.success ? "✓ Conectado ao Google Gemini" : "✕ Falha na Comunicação"}</span>
+                      <span>{testAiResult.success ? `✓ Conectado ao ${contentEngineLabel(testAiResult.model)}` : "✕ Falha na Comunicação"}</span>
                       {testAiResult.latencyMs > 0 && (
                         <span className="text-[10px] text-slate-400 font-normal">{testAiResult.latencyMs}ms</span>
                       )}
@@ -7702,7 +7760,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
               </div>
 
               <p className="text-[10px] text-slate-400 leading-relaxed">
-                A chave da API Gemini permanece exclusivamente no servidor (variável de ambiente). O aplicativo móvel e o navegador nunca recebem nem armazenam essa credencial.
+                As chaves do Gemini e do ChatGPT ficam só no servidor. O aplicativo não recebe nem guarda essas credenciais. Alunos continuam no Gemini.
               </p>
             </div>
           </motion.div>
