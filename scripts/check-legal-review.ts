@@ -405,6 +405,11 @@ async function main() {
   });
   assert(params.model === "gpt-5.6", "a chamada pede gpt-5.6");
   assert(params.reasoning.effort === "high", "o raciocínio inicial é high");
+  assert(params.tools[0].type === "web_search", "web_search está presente");
+  assert(params.tool_choice === "required", "Web Search é obrigatório");
+  const toolChoice: string = params.tool_choice;
+  assert(toolChoice !== "auto", "tool_choice não é auto");
+  assert(params.tools[0].external_web_access === true, "external_web_access permanece habilitado");
   assert(params.include.includes("web_search_call.action.sources"), "a resposta inclui as fontes da ferramenta");
   assert(params.text.format.strict === true, "structured output permanece estrito");
   const domains = params.tools[0].filters.allowed_domains;
@@ -417,6 +422,8 @@ async function main() {
   if (previousModel === undefined) delete process.env.OPENAI_REVIEW_MODEL;
   else process.env.OPENAI_REVIEW_MODEL = previousModel;
 
+  const toolChoiceError = reviewFailureForOpenAIError({ status: 400, message: "Invalid parameter: tool_choice" });
+  assert(toolChoiceError.message === OFFICIAL_FILTER_REJECTED_MESSAGE, "tool_choice obrigatório rejeitado falha fechado");
   const filterError = reviewFailureForOpenAIError({ status: 400, message: "Invalid filters.allowed_domains" });
   assert(filterError.message === OFFICIAL_FILTER_REJECTED_MESSAGE, "filtro rejeitado falha fechado");
   const modelError = reviewFailureForOpenAIError({ status: 404, message: "The model does not exist" });
@@ -610,6 +617,7 @@ async function main() {
   assert(!clientSource.includes("api.openai.com") && !appSource.includes("api.openai.com"), "o frontend não chama a OpenAI");
   assert(serverSource.includes("process.env.OPENAI_API_KEY") && !serverSource.includes("sk-"), "chave só por variável de ambiente");
   assert(!serverSource.includes("gpt-5.4") && !serverSource.includes("domainFilter"), "não há fallback de modelo nem de filtro");
+  assert(!serverSource.includes('tool_choice: "auto"') && !serverSource.includes("tool_choice: 'auto'"), "não há fallback para tool_choice auto");
   assert(routeSource.includes("req.athenaUser?.email") && !routeSource.includes("req.body?.email") && !routeSource.includes("approvedBy"), "aprovação não lê identidade do corpo");
   assert(panelSource.includes("Esta versão foi editada após a auditoria jurídica"), "aviso de edição manual");
   assert(panelSource.includes("Revisar novamente esta versão"), "botão de nova auditoria");

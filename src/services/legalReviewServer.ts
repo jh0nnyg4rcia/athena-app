@@ -90,6 +90,9 @@ export function reviewFailureForOpenAIError(error: unknown): Error {
   if (/reasoning|effort/i.test(message)) {
     return new Error(REASONING_REJECTED_MESSAGE);
   }
+  if (/tool_choice/i.test(message)) {
+    return new Error(OFFICIAL_FILTER_REJECTED_MESSAGE);
+  }
   return new Error(redactProviderError(error, "A OpenAI não concluiu a auditoria. A aula publicada não foi alterada."));
 }
 
@@ -146,6 +149,7 @@ export function buildReviewCreateParams(input: {
         filters: { allowed_domains: searchDomainsForLesson(input.lessonText) },
       },
     ],
+    tool_choice: "required" as const,
     reasoning: { effort: "high" as const },
     max_output_tokens: 32000,
     text: {
