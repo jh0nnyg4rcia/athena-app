@@ -411,20 +411,36 @@ export function buildRejectedPatchFollowUp(input: {
     "Se não houver comprovação, use NAO_CONFIRMADO.",
     "Preserve os marcadores [BLOCK_n].",
   ];
+  if (input.repairable.some((patch) => patch.reason === "court_family" || patch.reason === "diploma_evidence")) {
+    lines.push(
+      "Para patch de evidência, conserve originalExcerpt e revisedExcerpt byte a byte.",
+      "Não retire tribunal, súmula, tema ou diploma para contornar a validação.",
+      "Não troque órgão, prazo ou quórum específico por fórmula genérica.",
+      "A evidência nova precisa estar no evidence[] deste change.",
+      "Não aproveite sources[] de outro change nem a lista geral de fontes.",
+      "A fonte precisa ser oficial e ter sido consultada nesta pesquisa.",
+      "Se a fonte não comprovar este change, devolva NAO_CONFIRMADO."
+    );
+  }
   if (input.acceptedIds.length) {
     lines.push(`Patches já validados, que não devem ser reenviados: ${input.acceptedIds.join(", ")}.`);
   }
   for (const patch of input.repairable) {
-    lines.push(
-      [
-        `Patch recusado ${patch.id}.`,
-        `Motivo: ${patch.reason}.`,
-        `originalExcerpt: ${JSON.stringify(patch.originalExcerpt)}`,
-        `revisedExcerpt: ${JSON.stringify(patch.revisedExcerpt)}`,
-        `beforeContext: ${JSON.stringify(patch.beforeContext)}`,
-        `afterContext: ${JSON.stringify(patch.afterContext)}`,
-      ].join(" ")
-    );
+    const parts = [
+      `Patch recusado ${patch.id}.`,
+      `Motivo: ${patch.reason}.`,
+      `originalExcerpt: ${JSON.stringify(patch.originalExcerpt)}`,
+      `revisedExcerpt: ${JSON.stringify(patch.revisedExcerpt)}`,
+      `beforeContext: ${JSON.stringify(patch.beforeContext)}`,
+      `afterContext: ${JSON.stringify(patch.afterContext)}`,
+    ];
+    if (patch.reason === "court_family" && patch.missingFamilies?.length) {
+      parts.push(`Famílias sem evidência oficial neste change: ${patch.missingFamilies.join(", ")}.`);
+    }
+    if (patch.reason === "diploma_evidence" && patch.statuteTypes?.length) {
+      parts.push(`Tipos de diploma ainda sem vínculo inequívoco neste change: ${patch.statuteTypes.join(", ")}.`);
+    }
+    lines.push(parts.join(" "));
   }
   return lines.join("\n");
 }

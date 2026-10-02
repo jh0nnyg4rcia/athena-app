@@ -412,10 +412,16 @@ export function newlyIntroducedStatutes(
   return extractSpecificStatutes(revised).filter((s) => !origStatutes.has(s.number));
 }
 
+/** O número precisa estar isolado de outros dígitos. `l10522` conta; `l15358` não cobre `1535`. */
+export function urlContainsStatuteNumber(url: string, statuteNumber: string): boolean {
+  if (!/^\d{1,12}$/.test(statuteNumber)) return false;
+  const compact = String(url || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  return new RegExp(`(?:^|[^0-9])${statuteNumber}(?:[^0-9]|$)`).test(compact);
+}
+
 export function evidenceSupportsStatute(evidence: LegalReviewEvidence, statuteNumber: string): boolean {
   if (!evidence.official || !evidence.consulted || !evidence.supportsChange) return false;
-  const cleanUrl = evidence.url.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-  if (cleanUrl.includes(statuteNumber)) return true;
+  if (urlContainsStatuteNumber(evidence.url, statuteNumber)) return true;
   const cleanTitle = (evidence.title || "").replace(/\./g, "");
   if (new RegExp(`\\b${statuteNumber}\\b`).test(cleanTitle)) return true;
   const cleanExplanation = (evidence.supportExplanation || "").replace(/\./g, "");
@@ -1375,11 +1381,14 @@ export interface LiteralPatchApplication {
 
 export interface RepairablePatch {
   id: string;
-  reason: "excerpt_missing" | "ambiguous" | "overlap";
+  reason: "excerpt_missing" | "ambiguous" | "overlap" | "court_family" | "diploma_evidence";
   originalExcerpt: string;
   revisedExcerpt: string;
   beforeContext: string;
   afterContext: string;
+  /** Só enum fechado. Não leva número de diploma, URL nem texto de fonte. */
+  missingFamilies?: DiagnosticSourceFamily[];
+  statuteTypes?: DiagnosticStatuteType[];
 }
 
 export interface AppliedPatchInput {
@@ -1388,7 +1397,7 @@ export interface AppliedPatchInput {
   afterContext: string;
 }
 
-function isRepairableReason(reason: LiteralRejectReason): reason is RepairablePatch["reason"] {
+function isRepairableReason(reason: LiteralRejectReason): reason is "excerpt_missing" | "ambiguous" | "overlap" {
   return reason === "excerpt_missing" || reason === "ambiguous" || reason === "overlap";
 }
 
@@ -1778,8 +1787,7 @@ function statuteTextMatch(
   statuteNumber: string
 ): { url: boolean; title: boolean; explanation: boolean } {
   try {
-    const cleanUrl = String(evidence.url || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-    const url = Boolean(statuteNumber) && cleanUrl.includes(statuteNumber);
+    const url = urlContainsStatuteNumber(evidence.url, statuteNumber);
     const cleanTitle = String(evidence.title || "").replace(/\./g, "");
     const title = Boolean(statuteNumber) && new RegExp(`\\b${statuteNumber}\\b`).test(cleanTitle);
     const cleanExplanation = String(evidence.supportExplanation || "").replace(/\./g, "");
@@ -1873,6 +1881,32 @@ function safePredicateMetadata(
   }
 }
 
+function evidenceRepairFromDraft(draft: PatchDraft): RepairablePatch | undefined {
+  if (draft.refusalCodes.length !== 1) return undefined;
+  const code = draft.refusalCodes[0];
+  if (code !== "COURT_FAMILY_FAILED" && code !== "DIPLOMA_EVIDENCE_FAILED") return undefined;
+  const metadata = safePredicateMetadata(draft.change, draft.refusalCodes);
+  if (!metadata) return undefined;
+  const base = {
+    id: draft.change.id,
+    originalExcerpt: draft.change.originalExcerpt,
+    revisedExcerpt: draft.change.revisedExcerpt,
+    beforeContext: draft.beforeContext,
+    afterContext: draft.afterContext,
+  };
+  if (code === "COURT_FAMILY_FAILED") {
+    const missingFamilies = metadata.missingFamilies ?? [];
+    if (!missingFamilies.length) return undefined;
+    return { ...base, reason: "court_family", missingFamilies };
+  }
+  const introduced = metadata.introducedStatuteCount ?? 0;
+  const covered = metadata.coveredStatuteCount ?? 0;
+  if (introduced <= covered) return undefined;
+  const statuteTypes = (metadata.missingStatutes ?? []).map((item) => item.statuteType);
+  if (!statuteTypes.length) return undefined;
+  return { ...base, reason: "diploma_evidence", statuteTypes };
+}
+
 function finalizePatchAudit(input: {
   original: string;
   drafts: PatchDraft[];
@@ -1907,18 +1941,25 @@ function finalizePatchAudit(input: {
     };
   });
   const changes = [...input.held, ...resolved];
-  const repairablePatches: RepairablePatch[] = input.drafts.flatMap((draft) => {
-    const reason = rejectedByKey.get(draft.key);
-    if (!reason || !isRepairableReason(reason)) return [];
-    return [{
-      id: draft.change.id,
-      reason,
-      originalExcerpt: draft.change.originalExcerpt,
-      revisedExcerpt: draft.change.revisedExcerpt,
-      beforeContext: draft.beforeContext,
-      afterContext: draft.afterContext,
-    }];
-  });
+  const repairablePatches: RepairablePatch[] = [
+    ...input.drafts.flatMap((draft) => {
+      const reason = rejectedByKey.get(draft.key);
+      if (!reason || !isRepairableReason(reason)) return [];
+      return [{
+        id: draft.change.id,
+        reason,
+        originalExcerpt: draft.change.originalExcerpt,
+        revisedExcerpt: draft.change.revisedExcerpt,
+        beforeContext: draft.beforeContext,
+        afterContext: draft.afterContext,
+      }];
+    }),
+    ...input.drafts.flatMap((draft) => {
+      if (rejectedByKey.has(draft.key)) return [];
+      const repair = evidenceRepairFromDraft(draft);
+      return repair ? [repair] : [];
+    }),
+  ];
   const appliedPatchInputs: AppliedPatchInput[] = input.drafts.flatMap((draft) => {
     if (!appliedByKey.has(draft.key)) return [];
     return [{
@@ -2094,6 +2135,15 @@ export function mergePatchAudits(
     }
     const replacement = repairableIds.has(change.id) ? followById.get(change.id) : undefined;
     if (replacement) {
+      const repair = (current.repairablePatches || []).find((item) => item.id === change.id);
+      const evidenceRepair = repair?.reason === "court_family" || repair?.reason === "diploma_evidence";
+      if (evidenceRepair && (
+        replacement.originalExcerpt !== repair?.originalExcerpt
+        || replacement.revisedExcerpt !== repair?.revisedExcerpt
+      )) {
+        held.push(change);
+        continue;
+      }
       const context = followContext.get(replacement.id);
       pushDraft(replacement, context?.beforeContext || "", context?.afterContext || "", `repair:${replacement.id}`);
       continue;

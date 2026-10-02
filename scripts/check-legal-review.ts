@@ -3806,6 +3806,216 @@ async function main() {
     assert(!/"prompt"\s*:/.test(dump), "log diagnóstico não contém a chave prompt");
   }
 
+  {
+    const stjClaim = normalizeLegalAudit(auditBody(original, [change({
+      category: "JURISPRUDENCIA",
+      reason: "O STJ entende que a pena é de reclusão.",
+      evidence: [evidence(STF, "ACORDAO")],
+    })]), original, { webSearchExecuted: true, consultedUrls: [STF] });
+    assert(stjClaim?.changes[0]?.confirmation === "NAO_CONFIRMADO", "alegação do STJ sem evidência do STJ continua não confirmada");
+    const stfClaim = normalizeLegalAudit(auditBody(original, [change({
+      category: "JURISPRUDENCIA",
+      reason: "O STF decidiu que a pena é de reclusão.",
+      evidence: [evidence(STJ, "ACORDAO")],
+    })]), original, { webSearchExecuted: true, consultedUrls: [STJ] });
+    assert(stfClaim?.changes[0]?.confirmation === "NAO_CONFIRMADO", "alegação do STF sem evidência do STF continua não confirmada");
+
+    const keptOriginal = "Art. 1º O processo penal reger-se-á por este Código, ressalvadas as prerrogativas do STF e do STJ.";
+    const keptRevised = "Art. 1º O processo penal reger-se-á, em todo o território brasileiro, por este Código, ressalvadas as prerrogativas do STF e do STJ.";
+    const keptLesson = original.replace("O conceito permanece.", keptOriginal);
+    const kept = normalizeLegalAudit(auditBody(keptLesson, [change({
+      id: "contextual",
+      category: "LEGISLACAO",
+      reason: "Restaurar a literalidade do art. 1º.",
+      originalExcerpt: keptOriginal,
+      revisedExcerpt: keptRevised,
+      evidence: [evidence(PLANALTO, "LEI")],
+    })]), keptLesson, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+    assert(kept?.changes[0]?.confirmation === "NAO_CONFIRMADO", "menção preservada de STF e STJ continua exigindo as famílias");
+    assert(JSON.stringify(kept?.validationLog?.rejectedPatches?.[0]?.requiredFamilies) === JSON.stringify(["STF", "STJ", "LEGISLACAO_FEDERAL"]), "menção preservada gera as três famílias");
+    assert(JSON.stringify(kept?.validationLog?.rejectedPatches?.[0]?.missingFamilies) === JSON.stringify(["STF", "STJ"]), "a legislação cobre só a família federal");
+    assert(kept?.repairablePatches?.[0]?.reason === "court_family", "a família ausente pode ir ao follow-up");
+
+    const mixedLesson = original.replace("O conceito permanece.", "A pena do art. 1º é de detenção.");
+    const mixedThesis = normalizeLegalAudit(auditBody(mixedLesson, [change({
+      category: "LEGISLACAO",
+      reason: "Corrigir a literalidade e registrar o tribunal.",
+      originalExcerpt: "A pena do art. 1º é de detenção.",
+      revisedExcerpt: "A pena do art. 1º é de detenção em todo o território. O STF decidiu que a regra é territorial.",
+      evidence: [evidence(PLANALTO, "LEI")],
+    })]), mixedLesson, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+    assert(mixedThesis?.changes[0]?.confirmation === "NAO_CONFIRMADO", "tese nova do STF continua exigindo a família STF");
+    assert(mixedThesis?.validationLog?.rejectedPatches?.[0]?.missingFamilies?.includes("STF") === true, "tese nova do STF fica ausente");
+
+    const formattedUrl = "https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2026/lei/l15358.htm";
+    const formattedTitle = "LEI Nº 15.358, DE 5 DE MAIO DE 2026";
+    const byTitleAgain = normalizeLegalAudit(auditBody(original, [change({
+      category: "LEGISLACAO",
+      reason: "Incluir o diploma federal.",
+      revisedExcerpt: "reclusão prevista na Lei nº 15.358/2026",
+      evidence: [{
+        ...evidence("https://www.planalto.gov.br/ccivil_03/decreto-lei/del3689compilado.htm", "LEI"),
+        title: formattedTitle,
+      }],
+    })]), original, { webSearchExecuted: true, consultedUrls: ["https://www.planalto.gov.br/ccivil_03/decreto-lei/del3689compilado.htm"] });
+    assert(byTitleAgain?.changes[0]?.confirmation === "CONFIRMADO", "título com Lei nº 15.358 vincula o diploma");
+    const byUrl = normalizeLegalAudit(auditBody(original, [change({
+      category: "LEGISLACAO",
+      reason: "Incluir o diploma federal.",
+      revisedExcerpt: "reclusão prevista na Lei 15.358/2026",
+      evidence: [evidence(formattedUrl, "LEI")],
+    })]), original, { webSearchExecuted: true, consultedUrls: [formattedUrl] });
+    assert(byUrl?.changes[0]?.confirmation === "CONFIRMADO", "URL com o número inteiro vincula o diploma");
+    assert(!JSON.stringify(byUrl?.validationLog ?? {}).includes("15358"), "o log não recebe o número do diploma coberto");
+
+    const otherDiploma = normalizeLegalAudit(auditBody(original, [change({
+      category: "LEGISLACAO",
+      reason: "Incluir o diploma federal.",
+      revisedExcerpt: "reclusão prevista na Lei nº 15.358/2026",
+      evidence: [evidence("https://www.planalto.gov.br/ccivil_03/leis/l1535.htm", "LEI")],
+    })]), original, { webSearchExecuted: true, consultedUrls: ["https://www.planalto.gov.br/ccivil_03/leis/l1535.htm"] });
+    assert(otherDiploma?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Lei 1.535 não cobre Lei 15.358");
+    const prefixTrap = normalizeLegalAudit(auditBody(original, [change({
+      category: "LEGISLACAO",
+      reason: "Incluir outro diploma.",
+      revisedExcerpt: "reclusão prevista na Lei 1.535/2026",
+      evidence: [evidence(formattedUrl, "LEI")],
+    })]), original, { webSearchExecuted: true, consultedUrls: [formattedUrl] });
+    assert(prefixTrap?.changes[0]?.confirmation === "NAO_CONFIRMADO", "o número 15358 não cobre o diploma 1535");
+
+    const dilutedLesson = original.replace("O conceito permanece.", "caberá ao Supremo Tribunal Federal apreciar o caráter da infração");
+    const diluted = normalizeLegalAudit(auditBody(dilutedLesson, [change({
+      category: "CONCEITO",
+      reason: "Definir competência para apreciar o caráter da infração com base no STF.",
+      originalExcerpt: "caberá ao Supremo Tribunal Federal apreciar o caráter da infração",
+      revisedExcerpt: "caberá à autoridade judiciária competente apreciar o caráter da infração",
+      evidence: [evidence(STF, "ACORDAO")],
+    })]), dilutedLesson, { webSearchExecuted: true, consultedUrls: [STF] });
+    assert(diluted?.changes[0]?.confirmation === "NAO_CONFIRMADO", "perda de especificidade continua recusada");
+    assert((diluted?.repairablePatches || []).length === 0, "perda de especificidade não vai ao follow-up");
+
+    async function auditSequence(responses: ReviewModelResponse[], lessonText: string, elapsedMs: number) {
+      const lines: string[] = [];
+      const trace = createLegalReviewTrace({
+        testMode: false,
+        requestedModel: "gpt-5.6",
+        write: (line) => lines.push(line),
+      });
+      const originalNow = Date.now;
+      let now = 8_000_000;
+      Date.now = () => now;
+      const inputs: string[] = [];
+      let calls = 0;
+      let result: AuditLessonResult | undefined;
+      try {
+        result = await auditLessonWithOpenAI({
+          reviewDate: "2026-10-02",
+          lessonId: "day_1_part_0",
+          day: 1,
+          part: 0,
+          subject: "Direito Penal",
+          topic: "Lei 1.521/1951",
+          content: lessonText,
+          trace,
+          callModel: async (input) => {
+            inputs.push(input.userInput);
+            const response = responses[Math.min(calls, responses.length - 1)];
+            calls += 1;
+            now += elapsedMs;
+            return response;
+          },
+        });
+      } finally {
+        Date.now = originalNow;
+      }
+      return { result, calls, inputs, lines };
+    }
+
+    const courtBody = change({
+      id: "court-repair",
+      category: "JURISPRUDENCIA",
+      reason: "O STJ entende que a pena é de reclusão.",
+      evidence: [evidence(STF, "ACORDAO")],
+    });
+    const courtFixed = change({
+      id: "court-repair",
+      category: "JURISPRUDENCIA",
+      reason: "O STJ entende que a pena é de reclusão.",
+      evidence: [evidence(STJ, "ACORDAO")],
+    });
+    const courtRun = await auditSequence([
+      searchedBody(auditBody(original, [courtBody]), [STF]),
+      searchedBody(auditBody(original, [courtFixed]), [STJ]),
+    ], original, 1_000);
+    assert(courtRun.calls === 2, "família ausente dispara um follow-up");
+    assert(courtRun.inputs[1]?.includes("court_family") === true, "o follow-up nomeia a recusa de família");
+    assert(courtRun.inputs[1]?.includes("STJ") === true, "o follow-up indica a família ausente");
+    assert(courtRun.inputs[1]?.includes("conserve originalExcerpt e revisedExcerpt byte a byte") === true, "o follow-up proíbe reescrever a tese");
+    assert(courtRun.result?.changes[0]?.confirmation === "CONFIRMADO", "follow-up com evidência do STJ confirma depois da revalidação");
+    assert(courtRun.result?.reviewedMarkdown.includes("reclusão") === true, "follow-up revalidado aplica o patch");
+
+    const courtStillWrong = await auditSequence([
+      searchedBody(auditBody(original, [courtBody]), [STF]),
+      searchedBody(auditBody(original, [courtBody]), [STF]),
+    ], original, 1_000);
+    assert(courtStillWrong.calls === 2, "follow-up sem evidência nova ainda é chamado");
+    assert(courtStillWrong.result?.changes[0]?.confirmation === "NAO_CONFIRMADO", "follow-up sem a família continua não confirmado");
+    assert(courtStillWrong.result?.reviewedMarkdown === original, "follow-up sem evidência não altera o Markdown");
+    assert(courtStillWrong.result?.verificationLevel === "VERIFICACAO_PARCIAL", "follow-up sem evidência permanece parcial");
+
+    const rewritten = change({
+      id: "court-repair",
+      category: "LEGISLACAO",
+      reason: "Corrigir a redação do art. 1º da lei.",
+      revisedExcerpt: "reclusão",
+      evidence: [evidence(PLANALTO, "LEI")],
+    });
+    const bypass = await auditSequence([
+      searchedBody(auditBody(original, [change({
+        id: "court-repair",
+        category: "JURISPRUDENCIA",
+        reason: "O STJ entende que a pena é de reclusão.",
+        revisedExcerpt: "reclusão, conforme o STJ",
+        evidence: [evidence(STF, "ACORDAO")],
+      })]), [STF]),
+      searchedBody(auditBody(original, [rewritten]), [PLANALTO]),
+    ], original, 1_000);
+    assert(bypass.result?.changes[0]?.confirmation === "NAO_CONFIRMADO", "follow-up que reescreve a tese não é aceito");
+    assert(bypass.result?.reviewedMarkdown === original, "tese reescrita não é aplicada");
+
+    const diplomaBody = change({
+      id: "diploma-repair",
+      category: "LEGISLACAO",
+      reason: "Incluir o diploma federal.",
+      revisedExcerpt: "reclusão prevista na Lei 10.522/2002",
+      evidence: [evidence(STJ, "REPETITIVO")],
+    });
+    const diplomaFixed = change({
+      id: "diploma-repair",
+      category: "LEGISLACAO",
+      reason: "Incluir o diploma federal.",
+      revisedExcerpt: "reclusão prevista na Lei 10.522/2002",
+      evidence: [evidence("https://www.planalto.gov.br/ccivil_03/leis/l10522.htm", "LEI")],
+    });
+    const diplomaRun = await auditSequence([
+      searchedBody(auditBody(original, [diplomaBody]), [STJ]),
+      searchedBody(auditBody(original, [diplomaFixed]), ["https://www.planalto.gov.br/ccivil_03/leis/l10522.htm"]),
+    ], original, 1_000);
+    assert(diplomaRun.calls === 2, "diploma sem vínculo dispara um follow-up");
+    assert(diplomaRun.inputs[1]?.includes("diploma_evidence") === true, "o follow-up nomeia a recusa de diploma");
+    assert(diplomaRun.inputs[1]?.includes("LEI") === true, "o follow-up indica o tipo do diploma");
+    assert(diplomaRun.result?.changes[0]?.confirmation === "CONFIRMADO", "follow-up que vincula o diploma passa pela revalidação");
+    assert(!diplomaRun.lines.join("\n").includes("10522"), "o log do follow-up não recebe o número do diploma");
+
+    const lateBudget = await auditSequence([
+      searchedBody(auditBody(original, [courtBody]), [STF]),
+    ], original, 200_000);
+    const lateValidation = endValidation(lateBudget.lines);
+    assert(lateBudget.calls === 1, "sem orçamento o follow-up de família não parte");
+    assert(lateValidation.repairablePatchCount === 1, "a família ausente conta como reparável");
+    assert(lateValidation.followUpEligible === false, "o piso de 90s do follow-up permanece");
+  }
+
   if (failed) {
     console.error(`${failed} verificações falharam.`);
     process.exit(1);
