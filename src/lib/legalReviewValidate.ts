@@ -20,7 +20,17 @@ import type {
   LegalUnverifiedClaim,
   LegalVerificationLevel,
 } from "./legalReviewTypes";
-import type { LegalAuditValidationLog, ValidationReasonCode } from "./legalReviewDiagnostics";
+import type {
+  DiagnosticHostFamily,
+  DiagnosticSourceFamily,
+  DiagnosticSourceType,
+  DiagnosticStatuteType,
+  EvidenceRefusalDiagnostic,
+  LegalAuditValidationLog,
+  MissingStatuteDiagnostic,
+  RefusalPredicateDiagnostic,
+  ValidationReasonCode,
+} from "./legalReviewDiagnostics";
 
 const CHANGE_TYPES: LegalChangeType[] = [
   "CORRECAO",
@@ -229,6 +239,9 @@ function sourceTypeFits(sourceType: LegalSourceType, family: string): boolean {
   return true;
 }
 
+const evidenceModelSupport = new WeakMap<LegalReviewEvidence, boolean>();
+const evidenceRawSourceType = new WeakMap<LegalReviewEvidence, string>();
+
 function readEvidence(value: unknown, consulted: Set<string>): LegalReviewEvidence | null {
   const record = asRecord(value);
   if (!record) return null;
@@ -236,6 +249,7 @@ function readEvidence(value: unknown, consulted: Set<string>): LegalReviewEviden
   if (!url) return null;
   const host = matchOfficialHost(url);
   const canonical = canonicalSourceUrl(url);
+  const rawSourceType = typeof record.sourceType === "string" ? record.sourceType.trim().slice(0, 64) : "";
   const sourceType = oneOf(record.sourceType, SOURCE_TYPES, "OUTRO_OFICIAL");
   const wasConsulted = Boolean(canonical && consulted.has(canonical));
   const official = Boolean(host);
@@ -243,7 +257,7 @@ function readEvidence(value: unknown, consulted: Set<string>): LegalReviewEviden
   const supportsChange = Boolean(
     modelSupports && official && wasConsulted && host && sourceTypeFits(sourceType, host.family)
   );
-  return {
+  const evidence: LegalReviewEvidence = {
     institution: host?.label || clip(record.institution, 160) || "Fonte",
     title: clip(record.title, 300) || host?.label || "Documento",
     url,
@@ -253,6 +267,9 @@ function readEvidence(value: unknown, consulted: Set<string>): LegalReviewEviden
     supportExplanation: clip(record.supportExplanation, 2000),
     sourceType,
   };
+  evidenceModelSupport.set(evidence, modelSupports);
+  evidenceRawSourceType.set(evidence, rawSourceType);
+  return evidence;
 }
 
 function readSource(value: unknown): LegalReviewSource | null {
@@ -1708,6 +1725,154 @@ function declaredDraftIndex(key: string, fallback: number): number {
   return Number.isInteger(index) ? index : fallback;
 }
 
+const DIAGNOSTIC_FAMILIES = new Set<string>([
+  "LEGISLACAO_FEDERAL", "STF", "STJ", "CNJ", "TSE", "TST", "STM", "DIARIO_OFICIAL",
+  "TJAC", "TJAL", "TJAM", "TJAP", "TJBA", "TJCE", "TJDFT", "TJES", "TJGO", "TJMA",
+  "TJMG", "TJMS", "TJMT", "TJPA", "TJPB", "TJPE", "TJPI", "TJPR", "TJRJ", "TJRN",
+  "TJRO", "TJRR", "TJRS", "TJSC", "TJSE", "TJSP", "TJTO",
+  ...Array.from({ length: 6 }, (_, index) => `TRF${index + 1}`),
+  ...Array.from({ length: 24 }, (_, index) => `TRT${index + 1}`),
+]);
+
+function closedFamily(value: string): DiagnosticSourceFamily | undefined {
+  if (!DIAGNOSTIC_FAMILIES.has(value)) return undefined;
+  return value as DiagnosticSourceFamily;
+}
+
+function closedHostFamily(url: string): DiagnosticHostFamily {
+  try {
+    const family = matchOfficialHost(url)?.family;
+    if (typeof family === "string") {
+      const closed = closedFamily(family);
+      if (closed) return closed;
+    }
+  } catch {
+    // host inesperado não entra no log
+  }
+  return "OTHER";
+}
+
+function closedLoggedSourceType(evidence: LegalReviewEvidence): DiagnosticSourceType {
+  const raw = evidenceRawSourceType.get(evidence) ?? "";
+  if ((SOURCE_TYPES as readonly string[]).includes(raw)) return raw as DiagnosticSourceType;
+  return "OTHER";
+}
+
+function closedStatuteType(raw: string): DiagnosticStatuteType {
+  const text = String(raw || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text === "lc" || text === "lei complementar") return "LC";
+  if (text === "lei" || text === "lei federal") return "LEI";
+  if (text === "decreto-lei" || text === "decreto lei") return "DECRETO_LEI";
+  if (text === "decreto") return "DECRETO";
+  if (text === "mp" || text === "medida provisoria") return "MP";
+  return "OTHER";
+}
+
+function statuteTextMatch(
+  evidence: LegalReviewEvidence,
+  statuteNumber: string
+): { url: boolean; title: boolean; explanation: boolean } {
+  try {
+    const cleanUrl = String(evidence.url || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    const url = Boolean(statuteNumber) && cleanUrl.includes(statuteNumber);
+    const cleanTitle = String(evidence.title || "").replace(/\./g, "");
+    const title = Boolean(statuteNumber) && new RegExp(`\\b${statuteNumber}\\b`).test(cleanTitle);
+    const cleanExplanation = String(evidence.supportExplanation || "").replace(/\./g, "");
+    const explanation = Boolean(statuteNumber) && new RegExp(`\\b${statuteNumber}\\b`).test(cleanExplanation);
+    return { url, title, explanation };
+  } catch {
+    return { url: false, title: false, explanation: false };
+  }
+}
+
+function earlierLegalBlock(codes: ValidationReasonCode[]): boolean {
+  return codes.includes("MODEL_UNCONFIRMED")
+    || codes.includes("SOURCE_SPECIFICITY_FAILED")
+    || codes.includes("NORMATIVE_INVENTION");
+}
+
+function predicateMetadata(
+  change: LegalReviewChange,
+  codes: ValidationReasonCode[]
+): Omit<RefusalPredicateDiagnostic, "changeId"> | undefined {
+  if (earlierLegalBlock(codes)) return undefined;
+  const evidence = Array.isArray(change.evidence) ? change.evidence : [];
+  const meta: Omit<RefusalPredicateDiagnostic, "changeId"> = {};
+  let any = false;
+  const introduced = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
+  if (introduced.length > 0) {
+    const coveredNumbers = new Set(
+      introduced
+        .filter((statute) => evidence.some((item) => evidenceSupportsStatute(item, statute.number)))
+        .map((statute) => statute.number)
+    );
+    meta.introducedStatuteCount = introduced.length;
+    meta.coveredStatuteCount = coveredNumbers.size;
+    meta.missingStatutes = introduced
+      .filter((statute) => !coveredNumbers.has(statute.number))
+      .slice(0, 24)
+      .map((statute): MissingStatuteDiagnostic => {
+        const hits = evidence.map((item) => ({
+          ...statuteTextMatch(item, statute.number),
+          effectiveSupportsChange: item.supportsChange === true,
+        }));
+        const stringHits = hits.filter((hit) => hit.url || hit.title || hit.explanation);
+        const pool = stringHits.length > 0 ? stringHits : hits;
+        return {
+          statuteType: closedStatuteType(statute.type),
+          evidenceMatch: {
+            url: hits.some((hit) => hit.url),
+            title: hits.some((hit) => hit.title),
+            explanation: hits.some((hit) => hit.explanation),
+            effectiveSupportsChange: pool.some((hit) => hit.effectiveSupportsChange),
+          },
+        };
+      });
+    any = true;
+  }
+  if (!codes.includes("DIPLOMA_EVIDENCE_FAILED")) {
+    const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
+    const requiredFamilies = institutionsNamedInClaim(claim, change.category)
+      .map((family) => closedFamily(String(family)))
+      .filter((family): family is DiagnosticSourceFamily => Boolean(family));
+    if (requiredFamilies.length > 0) {
+      const missingFamilies = requiredFamilies.filter((family) => (
+        !evidence.some((item) => evidenceSupportsFamily(item, family))
+      ));
+      const evidenceDiagnostics: EvidenceRefusalDiagnostic[] = evidence.slice(0, 6).map((item, evidenceIndex) => ({
+        evidenceIndex,
+        hostFamily: closedHostFamily(item.url),
+        sourceType: closedLoggedSourceType(item),
+        official: item.official === true,
+        consulted: item.consulted === true,
+        modelSupportsChange: evidenceModelSupport.get(item) === true,
+        effectiveSupportsChange: item.supportsChange === true,
+      }));
+      meta.requiredFamilies = requiredFamilies;
+      meta.missingFamilies = missingFamilies;
+      meta.evidenceDiagnostics = evidenceDiagnostics;
+      any = true;
+    }
+  }
+  return any ? meta : undefined;
+}
+
+function safePredicateMetadata(
+  change: LegalReviewChange,
+  codes: ValidationReasonCode[]
+): Omit<RefusalPredicateDiagnostic, "changeId"> | undefined {
+  try {
+    return predicateMetadata(change, codes);
+  } catch {
+    return undefined;
+  }
+}
+
 function finalizePatchAudit(input: {
   original: string;
   drafts: PatchDraft[];
@@ -1808,16 +1973,40 @@ function finalizePatchAudit(input: {
     manuallyEdited: false,
   });
   const limitedClaims = unverifiedClaims.slice(0, 40);
+  const predicateDiagnostics: RefusalPredicateDiagnostic[] = [];
+  for (let position = 0; position < input.drafts.length && predicateDiagnostics.length < 40; position += 1) {
+    const draft = input.drafts[position];
+    const metadata = safePredicateMetadata(draft.change, draft.refusalCodes);
+    if (!metadata) continue;
+    predicateDiagnostics.push({
+      changeId: safeDiagnosticChangeId(draft.change.id, declaredDraftIndex(draft.key, position)),
+      ...metadata,
+    });
+  }
   const rejectedPatches = [
     ...input.unreadable,
     ...input.drafts.flatMap((draft, position) => {
       const location = rejectedByKey.get(draft.key);
       const reasonCodes = location ? [LOCATION_REASON_CODES[location]] : draft.refusalCodes;
       if (!reasonCodes.length) return [];
-      return [{
+      const diagnostic: LegalAuditValidationLog["rejectedPatches"][number] = {
         changeId: safeDiagnosticChangeId(draft.change.id, declaredDraftIndex(draft.key, position)),
         reasonCodes,
-      }];
+      };
+      if (!location) {
+        const metadata = safePredicateMetadata(draft.change, reasonCodes);
+        if (metadata && reasonCodes.includes("COURT_FAMILY_FAILED")) {
+          diagnostic.requiredFamilies = metadata.requiredFamilies;
+          diagnostic.missingFamilies = metadata.missingFamilies;
+          diagnostic.evidenceDiagnostics = metadata.evidenceDiagnostics;
+        }
+        if (metadata && reasonCodes.includes("DIPLOMA_EVIDENCE_FAILED")) {
+          diagnostic.introducedStatuteCount = metadata.introducedStatuteCount;
+          diagnostic.coveredStatuteCount = metadata.coveredStatuteCount;
+          diagnostic.missingStatutes = metadata.missingStatutes;
+        }
+      }
+      return [diagnostic];
     }),
   ];
   const validationReasonCodes: ValidationReasonCode[] = [];
@@ -1856,6 +2045,7 @@ function finalizePatchAudit(input: {
       repairablePatchCount: repairablePatches.length,
       followUpEligible: false,
       rejectedPatches,
+      ...(predicateDiagnostics.length ? { predicateDiagnostics } : {}),
     },
   };
 }

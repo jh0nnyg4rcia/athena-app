@@ -3470,6 +3470,341 @@ async function main() {
     assert(lines.some((line) => line.includes("LEGAL_REVIEW_ERROR") && line.includes("JSON_PARSE_FAILED")), "ERROR publica o mesmo diagnóstico");
   }
 
+  {
+    const REASON_SENTINEL = "REASON_SENTINELA_NAO_LOGAR";
+    const TITLE_SENTINEL = "TITLE_SENTINELA_NAO_LOGAR";
+    const EXPLAIN_SENTINEL = "EXPLICACAO_SENTINELA_NAO_LOGAR";
+    const DIPLOMA_URL = "https://www.planalto.gov.br/ccivil_03/leis/l10522.htm";
+    const STJ_TEMA = "https://processo.stj.jus.br/repetitivos/temas_repetitivos/pesquisa.jsp?novaConsulta=true&tipo_pesquisa=T&cod_tema=157";
+    const tracedLines: string[] = [];
+
+    function tracedEvidence(url: string, sourceType: string, supportsChange = true) {
+      return {
+        ...evidence(url, sourceType, supportsChange),
+        title: TITLE_SENTINEL,
+        supportExplanation: EXPLAIN_SENTINEL,
+      };
+    }
+
+    type EvidenceDiag = {
+      evidenceIndex?: number;
+      hostFamily?: string;
+      sourceType?: string;
+      official?: boolean;
+      consulted?: boolean;
+      modelSupportsChange?: boolean;
+      effectiveSupportsChange?: boolean;
+    };
+    type StatuteDiag = {
+      statuteType?: string;
+      number?: string;
+      evidenceMatch?: { url?: boolean; title?: boolean; explanation?: boolean; effectiveSupportsChange?: boolean };
+    };
+    type PredicateDiag = {
+      changeId?: string;
+      requiredFamilies?: string[];
+      missingFamilies?: string[];
+      evidenceDiagnostics?: EvidenceDiag[];
+      introducedStatuteCount?: number;
+      coveredStatuteCount?: number;
+      missingStatutes?: StatuteDiag[];
+    };
+    type RefusalDiag = PredicateDiag & { reasonCodes?: string[] };
+
+    function loggedValidation(lines: string[]) {
+      const validation = endValidation(lines) as ReturnType<typeof endValidation> & {
+        predicateDiagnostics?: PredicateDiag[];
+        rejectedPatches?: RefusalDiag[];
+      };
+      tracedLines.push(...lines);
+      return validation;
+    }
+
+    function predicate(validation: { predicateDiagnostics?: PredicateDiag[] }, changeId: string) {
+      return validation.predicateDiagnostics?.find((item) => item.changeId === changeId);
+    }
+
+    function refusal(validation: { rejectedPatches?: RefusalDiag[] }, code: string) {
+      return validation.rejectedPatches?.find((item) => item.reasonCodes?.includes(code));
+    }
+
+    function assertDecision(
+      seen: Awaited<ReturnType<typeof captureDiagnostic>>,
+      confirmation: "CONFIRMADO" | "NAO_CONFIRMADO",
+      label: string
+    ) {
+      const change = seen.result?.changes?.[0];
+      assert(change?.confirmation === confirmation, `${label} conserva a confirmação ${confirmation}`);
+      assert(seen.result ? !("validationLog" in seen.result) : false, `${label} não devolve validationLog`);
+      const domain = change as unknown as Record<string, unknown> | undefined;
+      for (const key of ["requiredFamilies", "missingFamilies", "evidenceDiagnostics", "introducedStatuteCount", "coveredStatuteCount", "missingStatutes", "modelSupportsChange"]) {
+        assert(domain ? !(key in domain) : false, `${label} não grava ${key} na alteração`);
+      }
+      const storedEvidence = change?.evidence?.[0] as unknown as Record<string, unknown> | undefined;
+      assert(!storedEvidence || !("modelSupportsChange" in storedEvidence), `${label} não grava modelSupportsChange na evidência`);
+      if (confirmation === "NAO_CONFIRMADO") {
+        assert(seen.result?.reviewedMarkdown === original, `${label} não altera o Markdown`);
+      }
+    }
+
+    const stjOk = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: "stj-ok",
+      category: "SUMULA",
+      reason: `Súmula 599 do STJ. ${REASON_SENTINEL}`,
+      evidence: [tracedEvidence(STJ, "SUMULA")],
+    })]), [STJ]));
+    const stjOkLog = loggedValidation(stjOk.lines);
+    const stjOkPredicate = predicate(stjOkLog, "stj-ok");
+    assert(JSON.stringify(stjOkPredicate?.missingFamilies) === "[]", "STJ válido não aponta família ausente");
+    assert(JSON.stringify(stjOkPredicate?.requiredFamilies) === JSON.stringify(["STJ"]), "STJ válido exige a família STJ");
+    assert(stjOkPredicate?.evidenceDiagnostics?.[0]?.hostFamily === "STJ", "STJ válido identifica a família do host");
+    assert(stjOkPredicate?.evidenceDiagnostics?.[0]?.effectiveSupportsChange === true, "STJ válido fica efetivamente apto");
+    assert(stjOkLog.validationReasonCodes?.includes("COURT_FAMILY_FAILED") !== true, "STJ válido não recusa a família");
+    assertDecision(stjOk, "CONFIRMADO", "STJ válido");
+
+    const stjStf = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: "stj-stf",
+      category: "JURISPRUDENCIA",
+      reason: `O STJ decidiu. ${REASON_SENTINEL}`,
+      evidence: [tracedEvidence(STF, "ACORDAO")],
+    })]), [STF]));
+    const stjStfLog = loggedValidation(stjStf.lines);
+    const stjStfRefusal = refusal(stjStfLog, "COURT_FAMILY_FAILED");
+    assert(stjStfRefusal?.missingFamilies?.includes("STJ") === true, "evidência do STF deixa STJ ausente");
+    assert(stjStfRefusal?.evidenceDiagnostics?.[0]?.hostFamily === "STF", "evidência do STF registra a família STF");
+    assert(stjStfRefusal?.evidenceDiagnostics?.[0]?.effectiveSupportsChange === true, "evidência do STF pode apoiar o próprio tribunal");
+    assertDecision(stjStf, "NAO_CONFIRMADO", "STJ com evidência do STF");
+
+    const incompatible = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: "stj-tipo",
+      category: "SUMULA",
+      reason: `Súmula do STJ. ${REASON_SENTINEL}`,
+      evidence: [tracedEvidence(STJ, "LEI")],
+    })]), [STJ]));
+    const incompatibleLog = loggedValidation(incompatible.lines);
+    const incompatibleRefusal = refusal(incompatibleLog, "COURT_FAMILY_FAILED");
+    const incompatibleEvidence = incompatibleRefusal?.evidenceDiagnostics?.[0];
+    assert(incompatibleEvidence?.hostFamily === "STJ", "host STJ permanece reconhecido");
+    assert(incompatibleEvidence?.sourceType === "LEI", "sourceType incompatível permanece no enum permitido");
+    assert(incompatibleEvidence?.official === true && incompatibleEvidence?.consulted === true, "host oficial consultado continua visível");
+    assert(incompatibleEvidence?.modelSupportsChange === true, "o modelo afirmou apoio");
+    assert(incompatibleEvidence?.effectiveSupportsChange === false, "sourceType incompatível não fica efetivamente apto");
+    assert(incompatibleRefusal?.missingFamilies?.includes("STJ") === true, "sourceType incompatível deixa a família ausente");
+    assertDecision(incompatible, "NAO_CONFIRMADO", "sourceType incompatível");
+
+    const legislation = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: "lei-stj",
+      category: "LEGISLACAO",
+      reason: `O STJ orienta a leitura. ${REASON_SENTINEL}`,
+      evidence: [tracedEvidence(STJ, "SUMULA")],
+    })]), [STJ]));
+    const legislationLog = loggedValidation(legislation.lines);
+    const legislationRefusal = refusal(legislationLog, "COURT_FAMILY_FAILED");
+    assert(JSON.stringify(legislationRefusal?.requiredFamilies) === JSON.stringify(["STJ", "LEGISLACAO_FEDERAL"]), "legislação exige tribunal e legislação federal");
+    assert(JSON.stringify(legislationRefusal?.missingFamilies) === JSON.stringify(["LEGISLACAO_FEDERAL"]), "só a família federal fica ausente");
+    assertDecision(legislation, "NAO_CONFIRMADO", "legislação sem diploma federal");
+
+    const coveredLesson = original;
+    const covered = await captureDiagnostic(searchedBody(auditBody(coveredLesson, [change({
+      id: "diploma-coberto",
+      category: "LEGISLACAO",
+      reason: `Incluir o diploma. ${REASON_SENTINEL}`,
+      revisedExcerpt: "reclusão prevista na Lei 10.522/2002",
+      evidence: [tracedEvidence(DIPLOMA_URL, "LEI")],
+    })]), [DIPLOMA_URL]), coveredLesson);
+    const coveredLog = loggedValidation(covered.lines);
+    const coveredPredicate = predicate(coveredLog, "diploma-coberto");
+    assert(coveredPredicate?.introducedStatuteCount === 1 && coveredPredicate?.coveredStatuteCount === 1, "diploma coberto conta introduzido e coberto");
+    assert(JSON.stringify(coveredPredicate?.missingStatutes) === "[]", "diploma coberto não fica sem cobertura");
+    assert(coveredLog.validationReasonCodes?.includes("DIPLOMA_EVIDENCE_FAILED") !== true, "diploma coberto não gera a recusa");
+    assertDecision(covered, "CONFIRMADO", "diploma coberto");
+    assert(covered.result?.reviewedMarkdown.includes("Lei 10.522/2002") === true, "diploma coberto continua aplicado no domínio");
+
+    const uncovered = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: "diploma-sem-numero",
+      category: "LEGISLACAO",
+      reason: `Incluir o diploma. ${REASON_SENTINEL}`,
+      revisedExcerpt: "reclusão prevista na Lei 10.522/2002",
+      evidence: [tracedEvidence(STJ_TEMA, "REPETITIVO")],
+    })]), [STJ_TEMA]));
+    const uncoveredLog = loggedValidation(uncovered.lines);
+    const uncoveredRefusal = refusal(uncoveredLog, "DIPLOMA_EVIDENCE_FAILED");
+    assert(uncoveredRefusal?.introducedStatuteCount === 1 && uncoveredRefusal?.coveredStatuteCount === 0, "diploma sem número fica descoberto");
+    assert(uncoveredRefusal?.missingStatutes?.length === 1, "diploma sem número gera um item de cobertura");
+    assert(uncoveredRefusal?.missingStatutes?.[0]?.statuteType === "LEI", "diploma sem número conserva só o tipo");
+    assert(JSON.stringify(uncoveredRefusal?.missingStatutes?.[0]?.evidenceMatch) === JSON.stringify({
+      url: false,
+      title: false,
+      explanation: false,
+      effectiveSupportsChange: true,
+    }), "diploma sem número separa a ausência do texto do apoio efetivo");
+    assertDecision(uncovered, "NAO_CONFIRMADO", "diploma sem número");
+
+    const repeated = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: "diplomas-iguais",
+      category: "LEGISLACAO",
+      reason: `Incluir dois diplomas. ${REASON_SENTINEL}`,
+      revisedExcerpt: "reclusão prevista na Lei 10.522/2002 e na Lei 8.112/1990",
+      evidence: [tracedEvidence(STJ_TEMA, "REPETITIVO")],
+    })]), [STJ_TEMA]));
+    const repeatedLog = loggedValidation(repeated.lines);
+    const repeatedRefusal = refusal(repeatedLog, "DIPLOMA_EVIDENCE_FAILED");
+    assert(repeatedRefusal?.introducedStatuteCount === 2 && repeatedRefusal?.coveredStatuteCount === 0, "dois diplomas do mesmo tipo preservam as contagens");
+    assert(repeatedRefusal?.missingStatutes?.length === 2, "dois diplomas do mesmo tipo geram duas entradas");
+    assert(repeatedRefusal?.missingStatutes?.every((item) => item.statuteType === "LEI") === true, "dois diplomas do mesmo tipo não distinguem número");
+    assertDecision(repeated, "NAO_CONFIRMADO", "dois diplomas iguais");
+
+    const unsupported = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: "diploma-sem-apoio",
+      category: "LEGISLACAO",
+      reason: `Incluir o diploma. ${REASON_SENTINEL}`,
+      revisedExcerpt: "reclusão prevista na Lei 10.522/2002",
+      evidence: [tracedEvidence(DIPLOMA_URL, "LEI", false)],
+    })]), [DIPLOMA_URL]));
+    const unsupportedLog = loggedValidation(unsupported.lines);
+    const unsupportedRefusal = refusal(unsupportedLog, "DIPLOMA_EVIDENCE_FAILED");
+    assert(unsupportedRefusal?.introducedStatuteCount === 1 && unsupportedRefusal?.coveredStatuteCount === 0, "apoio efetivo falso não cobre o diploma");
+    assert(JSON.stringify(unsupportedRefusal?.missingStatutes?.[0]?.evidenceMatch) === JSON.stringify({
+      url: true,
+      title: false,
+      explanation: false,
+      effectiveSupportsChange: false,
+    }), "número reconhecido com apoio efetivo falso fica distinto da ausência do número");
+    assertDecision(unsupported, "NAO_CONFIRMADO", "diploma com apoio efetivo falso");
+
+    const courtUnsupported = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: "stj-sem-apoio",
+      category: "SUMULA",
+      reason: `Súmula do STJ. ${REASON_SENTINEL}`,
+      evidence: [tracedEvidence(STJ, "SUMULA", false)],
+    })]), [STJ]));
+    const courtUnsupportedLog = loggedValidation(courtUnsupported.lines);
+    const courtUnsupportedEvidence = refusal(courtUnsupportedLog, "COURT_FAMILY_FAILED")?.evidenceDiagnostics?.[0];
+    assert(courtUnsupportedEvidence?.hostFamily === "STJ" && courtUnsupportedEvidence?.sourceType === "SUMULA", "evidência correta conserva host e tipo");
+    assert(courtUnsupportedEvidence?.official === true && courtUnsupportedEvidence?.consulted === true, "evidência correta permanece oficial e consultada");
+    assert(courtUnsupportedEvidence?.modelSupportsChange === false && courtUnsupportedEvidence?.effectiveSupportsChange === false, "apoio efetivo falso fica distinto do host");
+    assertDecision(courtUnsupported, "NAO_CONFIRMADO", "tribunal com apoio efetivo falso");
+
+    const poisonedPredicate = sanitizeValidationLog({
+      validationOutcome: "accepted",
+      validationReasonCodes: ["COURT_FAMILY_FAILED", "DIPLOMA_EVIDENCE_FAILED"],
+      rawChangeCount: 2,
+      hasConsultedSources: true,
+      consultedSourceCount: 1,
+      rejectedPatches: [
+        {
+          changeId: "court-poison",
+          reasonCodes: ["COURT_FAMILY_FAILED"],
+          requiredFamilies: ["STJ", DIPLOMA_URL, "TRIBUNAL_LIVRE"],
+          missingFamilies: ["STJ", "STF", REASON_SENTINEL],
+          evidenceDiagnostics: [{
+            evidenceIndex: 0,
+            hostFamily: "processo.stj.jus.br",
+            sourceType: TITLE_SENTINEL,
+            official: true,
+            consulted: true,
+            modelSupportsChange: true,
+            effectiveSupportsChange: false,
+            url: DIPLOMA_URL,
+            title: TITLE_SENTINEL,
+            supportExplanation: EXPLAIN_SENTINEL,
+            originalExcerpt: SECRET,
+          }],
+          originalExcerpt: SECRET,
+          revisedExcerpt: SENSITIVE,
+          reason: REASON_SENTINEL,
+          prompt: "PROMPT_SENTINELA",
+          output_text: "OUTPUT_SENTINELA",
+        },
+        {
+          changeId: "diploma-poison",
+          reasonCodes: ["DIPLOMA_EVIDENCE_FAILED"],
+          introducedStatuteCount: 1,
+          coveredStatuteCount: 0,
+          missingStatutes: [{
+            statuteType: "Lei 10.522/2002",
+            number: "10522",
+            raw: "Lei 10.522/2002",
+            evidenceMatch: {
+              url: false,
+              title: false,
+              explanation: false,
+              effectiveSupportsChange: true,
+              supportExplanation: EXPLAIN_SENTINEL,
+            },
+          }],
+          url: STJ_TEMA,
+          title: TITLE_SENTINEL,
+        },
+      ],
+      predicateDiagnostics: [{
+        changeId: "ok-poison",
+        requiredFamilies: ["STJ"],
+        missingFamilies: [],
+        evidenceDiagnostics: [{
+          evidenceIndex: 0,
+          hostFamily: "STJ",
+          sourceType: "SUMULA",
+          official: true,
+          consulted: true,
+          modelSupportsChange: true,
+          effectiveSupportsChange: true,
+          url: STJ,
+          title: TITLE_SENTINEL,
+        }],
+        introducedStatuteCount: 1,
+        coveredStatuteCount: 1,
+        missingStatutes: [],
+        originalExcerpt: SECRET,
+        reason: REASON_SENTINEL,
+        supportExplanation: EXPLAIN_SENTINEL,
+      }],
+    });
+    const poisonedDump = JSON.stringify(poisonedPredicate);
+    tracedLines.push(poisonedDump);
+    assert(JSON.stringify(poisonedPredicate?.rejectedPatches?.[0]?.requiredFamilies) === JSON.stringify(["STJ"]), "sanitizador só conserva família fechada");
+    assert(JSON.stringify(poisonedPredicate?.rejectedPatches?.[0]?.missingFamilies) === JSON.stringify(["STJ"]), "família fora das exigidas não entra em missingFamilies");
+    assert(poisonedPredicate?.rejectedPatches?.[0]?.evidenceDiagnostics?.[0]?.hostFamily === "OTHER", "host livre vira OTHER");
+    assert(poisonedPredicate?.rejectedPatches?.[0]?.evidenceDiagnostics?.[0]?.sourceType === "OTHER", "sourceType livre vira OTHER");
+    assert(poisonedPredicate?.rejectedPatches?.[1]?.missingStatutes?.[0]?.statuteType === "OTHER", "tipo de diploma livre vira OTHER");
+    assert(!poisonedDump.includes("10522") && !poisonedDump.includes("10.522"), "sanitizador não conserva o número do diploma");
+    assert(!poisonedDump.includes(DIPLOMA_URL) && !poisonedDump.includes(TITLE_SENTINEL), "sanitizador não conserva URL nem título");
+    assert(!poisonedDump.includes("originalExcerpt") && !poisonedDump.includes("supportExplanation"), "sanitizador não conserva excerpt nem explicação");
+    assert(!/"reason"\s*:/.test(poisonedDump) && !poisonedDump.includes("PROMPT_SENTINELA") && !poisonedDump.includes("OUTPUT_SENTINELA"), "sanitizador não conserva reason, prompt ou output_text");
+
+    const dump = tracedLines.join("\n");
+    for (const banned of [
+      REASON_SENTINEL,
+      TITLE_SENTINEL,
+      EXPLAIN_SENTINEL,
+      DIPLOMA_URL,
+      STJ_TEMA,
+      STJ,
+      STF,
+      "10522",
+      "10.522",
+      "8112",
+      "8.112",
+      "stj.jus.br",
+      "stf.jus.br",
+      "planalto.gov.br",
+      "originalExcerpt",
+      "revisedExcerpt",
+      "beforeContext",
+      "afterContext",
+      "supportExplanation",
+      "output_text",
+      "PROMPT_SENTINELA",
+      "OUTPUT_SENTINELA",
+      SECRET,
+      SENSITIVE,
+    ]) {
+      assert(!dump.includes(banned), `log diagnóstico não contém ${banned}`);
+    }
+    assert(!/"reason"\s*:/.test(dump), "log diagnóstico não contém a chave reason");
+    assert(!/"prompt"\s*:/.test(dump), "log diagnóstico não contém a chave prompt");
+  }
+
   if (failed) {
     console.error(`${failed} verificações falharam.`);
     process.exit(1);
