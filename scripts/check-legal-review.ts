@@ -1598,7 +1598,16 @@ async function main() {
     lessonText: "Direito Penal. STF e STJ.",
   });
   assert(params.model === "gpt-5.6", "a chamada pede gpt-5.6");
-  assert(params.reasoning.effort === "high", "o raciocínio inicial é high");
+  assert(params.reasoning.effort === "medium", "a chamada principal usa raciocínio medium");
+  assert(params.max_output_tokens === 12000, "a chamada principal mantém max_output_tokens em 12000");
+  const followUpParams = buildReviewCreateParams({
+    model: reviewModelName(),
+    instructions: "instrucao",
+    userInput: "aula",
+    lessonText: "Direito Penal. STF e STJ.",
+    reasoningEffort: "high",
+  });
+  assert(followUpParams.reasoning.effort === "high" && followUpParams.max_output_tokens === 12000, "o follow-up conserva effort high e o teto de 12000");
   assert(params.tools[0].type === "web_search", "web_search está presente");
   assert(params.tool_choice === "required", "Web Search é obrigatório");
   const toolChoice: string = params.tool_choice;
