@@ -236,6 +236,8 @@ export function buildReviewCreateParams(input: {
   lessonText: string;
   /** Só o follow-up informa "high". A chamada principal permanece em medium. */
   reasoningEffort?: "medium" | "high";
+  /** Só o follow-up informa 12000. A chamada principal permanece em 16000. */
+  maxOutputTokens?: number;
 }) {
   return {
     model: input.model,
@@ -258,7 +260,7 @@ export function buildReviewCreateParams(input: {
     ],
     tool_choice: "required" as const,
     reasoning: { effort: input.reasoningEffort ?? "medium" },
-    max_output_tokens: 12000,
+    max_output_tokens: input.maxOutputTokens ?? 16000,
     text: {
       format: {
         type: "json_schema" as const,
@@ -329,10 +331,11 @@ async function createResponse(
   userInput: string,
   lessonText: string,
   timeoutMs: number,
-  reasoningEffort: "medium" | "high" = "medium"
+  reasoningEffort: "medium" | "high" = "medium",
+  maxOutputTokens = 16000
 ) {
   return client.responses.create(
-    buildReviewCreateParams({ model, instructions, userInput, lessonText, reasoningEffort }),
+    buildReviewCreateParams({ model, instructions, userInput, lessonText, reasoningEffort, maxOutputTokens }),
     { timeout: timeoutMs, maxRetries: OPENAI_REVIEW_SDK_MAX_RETRIES }
   );
 }
@@ -545,7 +548,8 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
         followUser,
         input.content,
         followUpTimeoutMs,
-        "high"
+        "high",
+        12000
       );
       trace.openaiEnd(response.model);
       const followParsed = read(response);

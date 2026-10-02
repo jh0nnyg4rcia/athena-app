@@ -1599,13 +1599,14 @@ async function main() {
   });
   assert(params.model === "gpt-5.6", "a chamada pede gpt-5.6");
   assert(params.reasoning.effort === "medium", "a chamada principal usa raciocínio medium");
-  assert(params.max_output_tokens === 12000, "a chamada principal mantém max_output_tokens em 12000");
+  assert(params.max_output_tokens === 16000, "a chamada principal usa max_output_tokens em 16000");
   const followUpParams = buildReviewCreateParams({
     model: reviewModelName(),
     instructions: "instrucao",
     userInput: "aula",
     lessonText: "Direito Penal. STF e STJ.",
     reasoningEffort: "high",
+    maxOutputTokens: 12000,
   });
   assert(followUpParams.reasoning.effort === "high" && followUpParams.max_output_tokens === 12000, "o follow-up conserva effort high e o teto de 12000");
   assert(params.tools[0].type === "web_search", "web_search está presente");
@@ -1946,7 +1947,7 @@ async function main() {
   assert(!serverSource.includes("OPENAI_FOLLOW_UP_TIMEOUT_MS"), "o teto fixo de 90s do follow-up foi removido do servidor");
   assert(MIN_GENERATION_RETRY_REMAINING_MS === 200_000 && MIN_FOLLOW_UP_REMAINING_MS === 90_000, "retry exige 200s restantes e follow-up exige 90s");
   assert(serverSource.includes("MIN_GENERATION_RETRY_REMAINING_MS") && serverSource.includes("MIN_FOLLOW_UP_REMAINING_MS"), "os pisos novos estão no servidor");
-  assert(serverSource.includes("max_output_tokens: 12000") && !serverSource.includes("max_output_tokens: 32000"), "o teto de saída acompanha o patch");
+  assert(serverSource.includes("input.maxOutputTokens ?? 16000") && /"high",\s*12000/.test(serverSource) && !serverSource.includes("max_output_tokens: 32000"), "a chamada principal usa 16000 e o follow-up passa 12000");
 
   const secret = "sk-test-secret-value-1234567890";
   const bearer = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
