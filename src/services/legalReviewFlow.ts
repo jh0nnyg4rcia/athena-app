@@ -4,6 +4,7 @@ import {
   MAX_REVIEWABLE_CHARS,
   emptyReviewIndex,
   formatReviewDate,
+  type LegalReviewIndex,
   type LegalReviewView,
   type StoredCatalogLesson,
 } from "../lib/legalReviewTypes";
@@ -25,7 +26,8 @@ import {
   LEGAL_REVIEW_TEST_PUBLISH_MESSAGE,
   lessonDocId,
   newReviewId,
-  processingLockFresh,
+  PROCESSING_HEARTBEAT_MS,
+  processingLockBlocks,
   publicReview,
   reviewCannotBePublished,
   type LegalReviewRepository,
@@ -68,6 +70,40 @@ function failureMessage(error: unknown): string {
     return "A auditoria falhou. A aula publicada não foi alterada.";
   }
   return safe;
+}
+
+function retainProcessingLease(repo: LegalReviewRepository, lessonId: string, reviewId: string): () => void {
+  const timer = setInterval(() => {
+    void renewProcessingLease(repo, lessonId, reviewId);
+  }, PROCESSING_HEARTBEAT_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
+/** Renova só o cadeado desta execução. Falha de rede não derruba a auditoria nem gera rejeição solta. */
+export async function renewProcessingLease(
+  repo: LegalReviewRepository,
+  lessonId: string,
+  reviewId: string,
+  now = Date.now()
+): Promise<void> {
+  try {
+    await repo.touchProcessing(lessonId, reviewId, now);
+  } catch {
+    return;
+  }
+}
+
+async function reserveProcessingSlot(
+  repo: LegalReviewRepository,
+  index: LegalReviewIndex,
+  now: number,
+  activeMessage: string
+): Promise<void> {
+  const current = index.processingReviewId ? await repo.get(index.processingReviewId) : null;
+  if (processingLockBlocks(index, current, now)) {
+    throw new LegalReviewError(activeMessage, 409);
+  }
 }
 
 async function tracedFirestore(
@@ -164,12 +200,12 @@ export async function startLegalReview(
       reviewId: index.approvedReviewId || "",
     };
   }
-  if (processingLockFresh(index, now)) {
-    throw new LegalReviewError(
-      "Já existe uma revisão em andamento para esta aula. Aguarde a conclusão antes de iniciar outra.",
-      409
-    );
-  }
+  await reserveProcessingSlot(
+    repo,
+    index,
+    now,
+    "Já existe uma revisão em andamento para esta aula. Aguarde a conclusão antes de iniciar outra."
+  );
 
   const reviewDate = formatReviewDate(new Date(now));
   const processing = blankReview(lesson, input.uid, now, reviewDate);
@@ -183,6 +219,7 @@ export async function startLegalReview(
     throw new LegalReviewError(failureMessage(error), 502);
   }
 
+  const stopLease = retainProcessingLease(repo, lesson.id, processing.id);
   try {
     const audit = await auditor.audit({
       reviewDate,
@@ -224,6 +261,8 @@ export async function startLegalReview(
     await tracedFirestore(trace, "fail", () => repo.fail(processing.id, lesson.id, message)).catch(() => undefined);
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(message, 502);
+  } finally {
+    stopLease();
   }
 }
 
@@ -266,12 +305,12 @@ export async function startLegalReviewSection(
       reviewId: index.approvedReviewId || "",
     };
   }
-  if (processingLockFresh(index, now)) {
-    throw new LegalReviewError(
-      "Já existe uma revisão em andamento para esta parte. Aguarde a conclusão antes de iniciar outra.",
-      409
-    );
-  }
+  await reserveProcessingSlot(
+    repo,
+    index,
+    now,
+    "Já existe uma revisão em andamento para esta parte. Aguarde a conclusão antes de iniciar outra."
+  );
 
   const reviewDate = formatReviewDate(new Date(now));
   const processing: LegalReviewView = {
@@ -295,6 +334,7 @@ export async function startLegalReviewSection(
     throw new LegalReviewError(failureMessage(error), 502);
   }
 
+  const stopLease = retainProcessingLease(repo, scopeId, processing.id);
   try {
     const audit = await auditor.audit({
       reviewDate,
@@ -338,6 +378,8 @@ export async function startLegalReviewSection(
     await tracedFirestore(trace, "fail", () => repo.fail(processing.id, scopeId, message)).catch(() => undefined);
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(message, 502);
+  } finally {
+    stopLease();
   }
 }
 
@@ -355,6 +397,13 @@ export async function startLegalReviewTest(
   }
   const now = input.now ?? Date.now();
   const reviewDate = formatReviewDate(new Date(now));
+  const index = (await repo.getIndex(LEGAL_REVIEW_TEST_LESSON_ID)) || emptyReviewIndex(LEGAL_REVIEW_TEST_LESSON_ID);
+  await reserveProcessingSlot(
+    repo,
+    index,
+    now,
+    "Já existe uma revisão em andamento para esta aula. Aguarde a conclusão antes de iniciar outra."
+  );
   const processing = blankReview({
     id: LEGAL_REVIEW_TEST_LESSON_ID,
     day: 0,
@@ -372,6 +421,7 @@ export async function startLegalReviewTest(
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(failureMessage(error), 502);
   }
+  const stopLease = retainProcessingLease(repo, LEGAL_REVIEW_TEST_LESSON_ID, processing.id);
   try {
     const audit = await auditor.audit({
       reviewDate,
@@ -413,6 +463,8 @@ export async function startLegalReviewTest(
     await tracedFirestore(trace, "fail", () => repo.fail(processing.id, LEGAL_REVIEW_TEST_LESSON_ID, message)).catch(() => undefined);
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(message, 502);
+  } finally {
+    stopLease();
   }
 }
 

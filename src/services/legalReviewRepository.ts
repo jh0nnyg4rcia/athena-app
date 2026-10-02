@@ -46,11 +46,28 @@ export function isReviewId(value: unknown): value is string {
   return typeof value === "string" && /^rev_[0-9a-f-]{36}$/i.test(value);
 }
 
-const PROCESSING_TTL_MS = 15 * 60 * 1000;
+/** Tempo máximo sem renovação em que a revisão ainda pode estar executando. */
+export const PROCESSING_LEASE_MS = 2 * 60 * 1000;
+
+/** Renovação do cadeado enquanto o processo da auditoria continua vivo. */
+export const PROCESSING_HEARTBEAT_MS = 20 * 1000;
+
+export const INTERRUPTED_PROCESSING_MESSAGE =
+  "A revisão anterior foi interrompida antes de concluir. A aula publicada não foi alterada.";
 
 export function processingLockFresh(index: LegalReviewIndex | null, now: number): boolean {
   if (!index?.processingReviewId || !index.processingStartedAt) return false;
-  return now - index.processingStartedAt < PROCESSING_TTL_MS;
+  return now - index.processingStartedAt < PROCESSING_LEASE_MS;
+}
+
+/** Bloqueia só uma revisão cujo registro ainda está em processamento e cujo cadeado foi renovado. */
+export function processingLockBlocks(
+  index: LegalReviewIndex | null,
+  review: { id: string; status: string } | null,
+  now: number
+): boolean {
+  if (!processingLockFresh(index, now) || !review || !index?.processingReviewId) return false;
+  return review.id === index.processingReviewId && review.status === "processing";
 }
 
 export class LegalReviewError extends Error {
@@ -69,6 +86,7 @@ export interface LegalReviewRepository {
   begin(review: LegalReviewView): Promise<void>;
   complete(review: LegalReviewView): Promise<void>;
   fail(reviewId: string, lessonId: string, message: string): Promise<void>;
+  touchProcessing(lessonId: string, reviewId: string, now: number): Promise<boolean>;
   get(reviewId: string): Promise<LegalReviewView | null>;
   saveCandidate(reviewId: string, markdown: string, now: number): Promise<LegalReviewView>;
   reject(reviewId: string, uid: string, now: number): Promise<LegalReviewView>;

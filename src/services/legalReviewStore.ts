@@ -11,6 +11,8 @@ import {
   LegalReviewError,
   LEGAL_REVIEW_TEST_PUBLISH_MESSAGE,
   hashCatalogSnapshot,
+  INTERRUPTED_PROCESSING_MESSAGE,
+  processingLockBlocks,
   processingLockFresh,
   reviewCannotBePublished,
   type LegalReviewRepository,
@@ -138,11 +140,23 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
           const indexRef = db.collection(INDEX).doc(review.lessonId);
           const currentSnap = await tx.get(indexRef);
           const current = asIndex(review.lessonId, currentSnap.exists ? currentSnap.data() : undefined);
-          if (processingLockFresh(current, review.requestedAt) && current.processingReviewId !== review.id) {
+          const previousId = current.processingReviewId && current.processingReviewId !== review.id
+            ? current.processingReviewId
+            : null;
+          const previousRef = previousId ? db.collection(REVIEWS).doc(previousId) : null;
+          const previousSnap = previousRef ? await tx.get(previousRef) : null;
+          const previous = previousSnap?.exists ? asReview(previousSnap.data()) : null;
+          if (processingLockBlocks(current, previous, review.requestedAt)) {
             throw new LegalReviewError(
               "Já existe uma revisão em andamento para esta aula. Aguarde a conclusão antes de iniciar outra.",
               409
             );
+          }
+          if (previousRef && previous?.status === "processing" && !processingLockFresh(current, review.requestedAt)) {
+            tx.set(previousRef, {
+              status: "failed",
+              errorMessage: INTERRUPTED_PROCESSING_MESSAGE.slice(0, 280),
+            }, { merge: true });
           }
           tx.set(db.collection(REVIEWS).doc(review.id), definedRecord({ ...review }));
           tx.set(indexRef, {
@@ -161,6 +175,22 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
         throw unavailable();
       }
     },
+    async touchProcessing(lessonId, reviewId, now) {
+      try {
+        const db = await loadDb();
+        return await db.runTransaction(async (tx) => {
+          const indexRef = db.collection(INDEX).doc(lessonId);
+          const currentSnap = await tx.get(indexRef);
+          const current = asIndex(lessonId, currentSnap.exists ? currentSnap.data() : undefined);
+          if (current.processingReviewId !== reviewId) return false;
+          tx.set(indexRef, { processingStartedAt: now }, { merge: true });
+          return true;
+        });
+      } catch (error) {
+        if (error instanceof LegalReviewError) throw error;
+        throw unavailable();
+      }
+    },
     async complete(review) {
       try {
         if (JSON.stringify(review).length > 1_000_000) {
@@ -171,14 +201,20 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
         }
         const db = await loadDb();
         await db.runTransaction(async (tx) => {
-          tx.set(db.collection(REVIEWS).doc(review.id), definedRecord({ ...review }), { merge: true });
-          tx.set(db.collection(INDEX).doc(review.lessonId), {
-            lessonId: review.lessonId,
-            processingReviewId: null,
-            processingStartedAt: null,
-            latestReviewId: review.id,
-            latestStatus: review.status,
-          }, { merge: true });
+          const reviewRef = db.collection(REVIEWS).doc(review.id);
+          const indexRef = db.collection(INDEX).doc(review.lessonId);
+          const indexSnap = await tx.get(indexRef);
+          const index = asIndex(review.lessonId, indexSnap.exists ? indexSnap.data() : undefined);
+          tx.set(reviewRef, definedRecord({ ...review }), { merge: true });
+          if (!index.processingReviewId || index.processingReviewId === review.id) {
+            tx.set(indexRef, {
+              lessonId: review.lessonId,
+              processingReviewId: null,
+              processingStartedAt: null,
+              latestReviewId: review.id,
+              latestStatus: review.status,
+            }, { merge: true });
+          }
         });
       } catch (error) {
         if (error instanceof LegalReviewError) throw error;
@@ -190,18 +226,24 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
         const db = await loadDb();
         await db.runTransaction(async (tx) => {
           const reviewRef = db.collection(REVIEWS).doc(reviewId);
+          const indexRef = db.collection(INDEX).doc(lessonId);
           const snap = await tx.get(reviewRef);
-          if (!snap.exists) return;
+          const indexSnap = await tx.get(indexRef);
+          const review = asReview(snap.exists ? snap.data() : undefined);
+          if (!review || review.status !== "processing") return;
+          const index = asIndex(lessonId, indexSnap.exists ? indexSnap.data() : undefined);
           tx.set(reviewRef, {
             status: "failed",
             errorMessage: message.slice(0, 280),
           }, { merge: true });
-          tx.set(db.collection(INDEX).doc(lessonId), {
-            processingReviewId: null,
-            processingStartedAt: null,
-            latestReviewId: reviewId,
-            latestStatus: "failed",
-          }, { merge: true });
+          if (index.processingReviewId === reviewId) {
+            tx.set(indexRef, {
+              processingReviewId: null,
+              processingStartedAt: null,
+              latestReviewId: reviewId,
+              latestStatus: "failed",
+            }, { merge: true });
+          }
         });
       } catch {
         console.warn("[legal-review] Não foi possível arquivar a falha. A aula publicada permanece intacta.");
@@ -260,13 +302,18 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
           if (!review || (review.status !== "pending_approval" && review.status !== "processing")) {
             throw new LegalReviewError("Esta revisão não pode mais ser rejeitada.", 409);
           }
+          const indexRef = db.collection(INDEX).doc(review.lessonId);
+          const indexSnap = await tx.get(indexRef);
+          const index = asIndex(review.lessonId, indexSnap.exists ? indexSnap.data() : undefined);
           tx.set(ref, { status: "rejected", rejectedByUid: uid, rejectedAt: now }, { merge: true });
-          tx.set(db.collection(INDEX).doc(review.lessonId), {
-            processingReviewId: null,
-            processingStartedAt: null,
-            latestReviewId: review.id,
-            latestStatus: "rejected",
-          }, { merge: true });
+          if (!index.processingReviewId || index.processingReviewId === review.id) {
+            tx.set(indexRef, {
+              processingReviewId: null,
+              processingStartedAt: null,
+              latestReviewId: review.id,
+              latestStatus: "rejected",
+            }, { merge: true });
+          }
           return { ...review, status: "rejected" as const, rejectedByUid: uid, rejectedAt: now };
         });
       } catch (error) {
@@ -288,7 +335,9 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             throw new LegalReviewError(LEGAL_REVIEW_TEST_PUBLISH_MESSAGE, 403);
           }
           const lessonRef = db.collection(LESSONS).doc(review.lessonId);
+          const indexRef = db.collection(INDEX).doc(review.lessonId);
           const lessonSnap = await tx.get(lessonRef);
+          const indexSnap = await tx.get(indexRef);
           const lesson = asLesson(review.lessonId, lessonSnap.exists ? lessonSnap.data() : undefined);
           if (!lesson) {
             throw new LegalReviewError("A aula publicada não foi encontrada. Nada foi substituído.", 404);
@@ -296,6 +345,8 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
           if (hashCatalogSnapshot(lesson) !== review.originalHash) {
             return { ok: false as const, conflict: true as const };
           }
+          const index = asIndex(review.lessonId, indexSnap.exists ? indexSnap.data() : undefined);
+          const ownsLock = !index.processingReviewId || index.processingReviewId === review.id;
           const published = nextPublishedLesson(lesson, review.reviewedMarkdown, now, email);
           tx.set(lessonRef, definedRecord({
             id: published.id,
@@ -323,15 +374,17 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             review: (published.review || "").slice(0, 20_000),
           }, { merge: true });
           tx.set(reviewRef, { status: "approved", approvedByUid: uid, approvedAt: now }, { merge: true });
-          tx.set(db.collection(INDEX).doc(review.lessonId), {
+          tx.set(indexRef, {
             lessonId: review.lessonId,
-            processingReviewId: null,
-            processingStartedAt: null,
             approvedHash: hashCatalogSnapshot(published),
             approvedReviewId: review.id,
             approvedReviewDate: review.reviewDate,
-            latestReviewId: review.id,
-            latestStatus: "approved",
+            ...(ownsLock ? {
+              processingReviewId: null,
+              processingStartedAt: null,
+              latestReviewId: review.id,
+              latestStatus: "approved",
+            } : {}),
           }, { merge: true });
           return { ok: true as const, lesson: published };
         });
