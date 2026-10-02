@@ -1118,7 +1118,7 @@ async function main() {
   assert(routeSource.includes("req.athenaUser?.email") && !routeSource.includes("req.body?.email") && !routeSource.includes("approvedBy"), "aprovação não lê identidade do corpo");
   assert(panelSource.includes("Esta versão foi editada após a auditoria jurídica"), "aviso de edição manual");
   assert(panelSource.includes("Revisar novamente esta versão"), "botão de nova auditoria");
-  assert(panelSource.includes("Evidência oficial") && panelSource.includes("Fonte oficial consultada"), "painel separa evidência e fonte consultada");
+  assert(panelSource.includes("Evidência oficial") && !panelSource.includes("Fonte oficial consultada"), "painel mostra a evidência da alteração e omite a lista geral de URLs");
   assert(panelSource.includes("MODO DE TESTE — este conteúdo não será publicado.") && panelSource.includes("Encerrar teste"), "painel de teste não oferece publicação");
   assert(appSource.includes("Testar Revisor Jurídico") && appSource.includes("requestLegalReviewTest"), "entrada de teste fica no painel do CEO");
   assert(!promptSource.includes("999.999") && !promptSource.includes("888.888") && !serverSource.includes("legalReviewTestMaterial"), "prompt e servidor não conhecem o gabarito do teste");

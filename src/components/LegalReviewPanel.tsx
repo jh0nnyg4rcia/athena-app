@@ -125,7 +125,6 @@ export function LegalReviewPanel({
   if (!open) return null;
 
   const summary = review?.summary;
-  const consulted = review?.consultedSources || [];
   const testing = testMode || review?.testMode === true;
 
   return (
@@ -274,22 +273,6 @@ export function LegalReviewPanel({
                     ))}
                   </article>
                 ))}
-              </section>
-
-              <section className="space-y-2">
-                <h4 className="text-sm font-bold text-slate-100">Fonte oficial consultada</h4>
-                <p className="text-xs text-slate-400">Endereços recuperados pela pesquisa. Consultar uma página não significa que ela comprova uma alteração.</p>
-                {consulted.length === 0 && (
-                  <p className="text-sm text-slate-400">A ferramenta não devolveu fontes consultadas.</p>
-                )}
-                <ul className="space-y-2 text-sm text-slate-300">
-                  {consulted.map((source) => (
-                    <li key={source.url} className="rounded-xl border border-white/10 px-3 py-2">
-                      <p>{source.official ? source.institution : "Fonte consultada, sem instituição oficial reconhecida"}</p>
-                      {source.official ? <SourceLink url={source.url} title={source.url} /> : <p className="break-all text-slate-400">{source.url}</p>}
-                    </li>
-                  ))}
-                </ul>
               </section>
 
               {review.unverifiedClaims.length > 0 && (
