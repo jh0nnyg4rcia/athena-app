@@ -32,6 +32,15 @@ export const MODEL_UNAVAILABLE_MESSAGE =
 export const REASONING_REJECTED_MESSAGE =
   "A auditoria jurídica não pôde manter o raciocínio exigido. A revisão não foi concluída. A aula publicada não foi alterada.";
 
+export const OPENAI_TIMEOUT_MESSAGE =
+  "A revisão jurídica excedeu o tempo disponível para esta tentativa. Tente novamente.";
+
+/** Segunda chamada de geração, depois que a primeira também estourou o tempo. */
+export const OPENAI_TIMEOUT_GENERATION_RETRY = "openai_timeout_generation_retry";
+
+/** Único follow-up de reparo ou de fonte ausente. */
+export const OPENAI_TIMEOUT_FOLLOW_UP = "openai_timeout_follow_up";
+
 export function reviewModelName(): string {
   const configured = (process.env.OPENAI_REVIEW_MODEL || "").trim();
   return configured || DEFAULT_OPENAI_REVIEW_MODEL;
@@ -99,8 +108,16 @@ function providerMessage(error: unknown): string {
   return String(error || "");
 }
 
+function openAiTimeoutDiagnostic(code: string): Error {
+  return Object.assign(new Error(code), {
+    name: "APIConnectionTimeoutError",
+    code,
+  });
+}
+
 /** Falha fechada. Não troca o modelo nem remove o filtro de domínio. */
 export function reviewFailureForOpenAIError(error: unknown): Error {
+  if (isTimeout(error)) return new Error(OPENAI_TIMEOUT_MESSAGE);
   const message = redactProviderError(new Error(providerMessage(error)), "");
   const status = errorStatus(error);
   if (/allowed_domains|filters|domain/i.test(message)) {
@@ -377,11 +394,13 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
       trace.openaiEnd(response.model);
       break;
     } catch (error) {
-      trace.noteFailure(error, "openai");
       if (tryNumber === 0 && isTimeout(error)) {
+        trace.noteFailure(error, "openai");
         trace.retry("timeout");
         continue;
       }
+      if (isTimeout(error)) trace.noteFailure(openAiTimeoutDiagnostic(OPENAI_TIMEOUT_GENERATION_RETRY), "openai");
+      else trace.noteFailure(error, "openai");
       throw reviewFailureForOpenAIError(error);
     }
   }
@@ -420,7 +439,8 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
         trace.openaiEnd(response.model);
         parsed = read(response);
       } catch (error) {
-        trace.noteFailure(error, "openai");
+        if (isTimeout(error)) trace.noteFailure(openAiTimeoutDiagnostic(OPENAI_TIMEOUT_FOLLOW_UP), "openai");
+        else trace.noteFailure(error, "openai");
         throw reviewFailureForOpenAIError(error);
       }
     }

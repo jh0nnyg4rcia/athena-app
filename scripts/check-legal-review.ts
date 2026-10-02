@@ -49,6 +49,9 @@ import {
   interpretReviewResponse,
   OPENAI_ATTEMPT_TIMEOUT_MS,
   OPENAI_AUDIT_BUDGET_MS,
+  OPENAI_TIMEOUT_FOLLOW_UP,
+  OPENAI_TIMEOUT_GENERATION_RETRY,
+  OPENAI_TIMEOUT_MESSAGE,
   OPENAI_REVIEW_SDK_MAX_RETRIES,
   auditLessonWithOpenAI,
   isCoverageFailure,
@@ -1573,6 +1576,9 @@ async function main() {
   assert(filterError.message === OFFICIAL_FILTER_REJECTED_MESSAGE, "filtro rejeitado falha fechado");
   const modelError = reviewFailureForOpenAIError({ status: 404, message: "The model does not exist" });
   assert(modelError.message === MODEL_UNAVAILABLE_MESSAGE, "modelo indisponível falha de forma clara");
+  const timeoutError = reviewFailureForOpenAIError(Object.assign(new Error("Request timed out."), { name: "APIConnectionTimeoutError" }));
+  assert(timeoutError.message === OPENAI_TIMEOUT_MESSAGE, "timeout da OpenAI não chega em inglês");
+  assert(!isCoverageFailure(timeoutError), "timeout da OpenAI não é erro de validação");
   const retrieved = extractConsultedSourceUrls([
     { type: "web_search_call", status: "completed", action: { type: "search", sources: [{ type: "url", url: PLANALTO }] } },
   ]);
@@ -2177,11 +2183,21 @@ async function main() {
     }
     assert(timeoutsReceived.length === 2, "4. follow-up foi iniciado antes do timeout");
     assert(!isCoverageFailure(terminalError), "4. causa terminal NÃO é falha de cobertura da primeira resposta");
-    assert(isTimeout(terminalError), "4. causa terminal é erro da OpenAI por timeout");
+    assert(
+      terminalError instanceof Error && terminalError.message === OPENAI_TIMEOUT_MESSAGE,
+      "4. timeout do follow-up vira mensagem pública em português"
+    );
+    assert(
+      terminalError instanceof Error && !/request timed out/i.test(terminalError.message),
+      "4. a mensagem pública não repete o texto bruto do SDK"
+    );
     const errorLogLine = traceLines.find((line) => line.includes("LEGAL_REVIEW_ERROR"));
     assert(Boolean(errorLogLine), "4. há log de erro no trace");
-    const parsedLog = JSON.parse(errorLogLine || "{}") as { error?: { stage?: string } };
+    const parsedLog = JSON.parse(errorLogLine || "{}") as { error?: { stage?: string; code?: string; message?: string } };
     assert(parsedLog.error?.stage === "openai", "4. etapa terminal registrada no trace é 'openai', não 'validation'");
+    assert(parsedLog.error?.code === OPENAI_TIMEOUT_FOLLOW_UP, "4. log identifica o timeout do follow-up");
+    assert(parsedLog.error?.message === OPENAI_TIMEOUT_FOLLOW_UP, "4. o identificador interno não é a mensagem pública");
+    assert(Boolean(errorLogLine && !errorLogLine.includes(OPENAI_TIMEOUT_MESSAGE)), "4. o log não depende da mensagem pública");
 
     // Validar via startLegalReview completo: status failed e nenhuma publicação
     const repoTimeout = memoryRepo(lesson());
@@ -2210,7 +2226,11 @@ async function main() {
     } catch (err) {
       flowError = err;
     }
-    assert(flowError instanceof LegalReviewError && flowError.status === 502, "4. startLegalReview falha com status 502");
+    assert(
+      flowError instanceof LegalReviewError && flowError.status === 502 && flowError.message === OPENAI_TIMEOUT_MESSAGE,
+      "4. startLegalReview falha com status 502 e mensagem em português"
+    );
+    assert(!isCoverageFailure(flowError), "4. timeout do follow-up não é erro de validação jurídica");
     assert(
       repoTimeout.lessons.get("day_1_part_0")!.content === original,
       "4. timeout do follow-up mantém a aula publicada inalterada"
@@ -2218,6 +2238,103 @@ async function main() {
     assert(
       [...repoTimeout.reviews.values()].every((r) => r.status === "failed"),
       "4. revisão permanece como status failed"
+    );
+    const followUpIndex = await repoTimeout.getIndex("day_1_part_0");
+    assert(
+      followUpIndex.processingReviewId === null && followUpIndex.processingStartedAt === null && followUpIndex.latestStatus === "failed",
+      "4. timeout do follow-up libera o lease"
+    );
+  }
+
+  // 4b. timeout da repetição da geração → mensagem pública em português, status failed e lease liberado;
+  {
+    const traceLines: string[] = [];
+    const customTrace = createLegalReviewTrace({
+      testMode: false,
+      requestedModel: "gpt-5.6",
+      write: (line) => traceLines.push(line),
+    });
+    let calls = 0;
+    let terminalError: unknown;
+    try {
+      await auditLessonWithOpenAI({
+        reviewDate: "2026-10-02",
+        lessonId: "day_1_part_0",
+        day: 1,
+        part: 0,
+        subject: "Direito Penal",
+        topic: "Lei 1.521/1951",
+        content: original,
+        trace: customTrace,
+        callModel: async () => {
+          calls += 1;
+          throw Object.assign(new Error("Request timed out."), {
+            name: "APIConnectionTimeoutError",
+            code: "timeout",
+          });
+        },
+      });
+    } catch (err) {
+      terminalError = err;
+      customTrace.error(err);
+    }
+    assert(calls === 2, "4b. a geração inicial estourada é repetida uma vez");
+    assert(
+      terminalError instanceof Error && terminalError.message === OPENAI_TIMEOUT_MESSAGE,
+      "4b. timeout da repetição vira mensagem pública em português"
+    );
+    assert(!isCoverageFailure(terminalError), "4b. timeout da repetição não é erro de validação jurídica");
+    const retryLine = traceLines.find((line) => line.includes("LEGAL_REVIEW_RETRY"));
+    const retryLog = JSON.parse(retryLine || "{}") as { retryReason?: string };
+    assert(retryLog.retryReason === "timeout", "4b. a primeira chamada registra retry de timeout");
+    const errorLogLine = traceLines.find((line) => line.includes("LEGAL_REVIEW_ERROR"));
+    const parsedLog = JSON.parse(errorLogLine || "{}") as { error?: { stage?: string; code?: string; message?: string } };
+    assert(parsedLog.error?.stage === "openai" && parsedLog.error?.code === OPENAI_TIMEOUT_GENERATION_RETRY, "4b. log identifica o timeout da repetição da geração");
+    assert(parsedLog.error?.message === OPENAI_TIMEOUT_GENERATION_RETRY, "4b. o identificador interno não é a mensagem pública");
+    assert(Boolean(errorLogLine && !errorLogLine.includes(OPENAI_TIMEOUT_MESSAGE)), "4b. o log não depende da mensagem pública");
+
+    const repoTimeout = memoryRepo(lesson());
+    let flowCalls = 0;
+    let flowError: unknown;
+    try {
+      await startLegalReview(
+        repoTimeout,
+        {
+          audit: (input) =>
+            auditLessonWithOpenAI({
+              ...input,
+              callModel: async () => {
+                flowCalls += 1;
+                throw Object.assign(new Error("Request timed out."), {
+                  name: "APIConnectionTimeoutError",
+                  code: "timeout",
+                });
+              },
+            }),
+        },
+        { day: 1, part: 0, force: true, uid: "ceo", now: 130_000 }
+      );
+    } catch (err) {
+      flowError = err;
+    }
+    assert(flowCalls === 2, "4b. o fluxo repete a geração antes de encerrar");
+    assert(
+      flowError instanceof LegalReviewError && flowError.status === 502 && flowError.message === OPENAI_TIMEOUT_MESSAGE,
+      "4b. startLegalReview falha com status 502 e mensagem em português"
+    );
+    assert(!isCoverageFailure(flowError), "4b. o fluxo não trata o timeout como validação jurídica");
+    assert(
+      repoTimeout.lessons.get("day_1_part_0")!.content === original,
+      "4b. timeout da repetição mantém a aula publicada inalterada"
+    );
+    assert(
+      [...repoTimeout.reviews.values()].every((review) => review.status === "failed"),
+      "4b. revisão permanece como status failed"
+    );
+    const retryIndex = await repoTimeout.getIndex("day_1_part_0");
+    assert(
+      retryIndex.processingReviewId === null && retryIndex.processingStartedAt === null && retryIndex.latestStatus === "failed",
+      "4b. timeout da repetição libera o lease"
     );
   }
 
