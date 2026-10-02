@@ -18,7 +18,7 @@ export const LEGAL_REVIEW_LOG_EVENTS = [
 
 export type LegalReviewLogEvent = (typeof LEGAL_REVIEW_LOG_EVENTS)[number];
 export type LegalReviewFirestoreStep = "begin" | "complete" | "fail";
-export type LegalReviewRetryReason = "timeout" | "invalid_audit" | "missing_sources";
+export type LegalReviewRetryReason = "timeout" | "invalid_audit" | "missing_sources" | "rejected_patches";
 
 export interface SafeLegalReviewError {
   name?: string;
@@ -56,7 +56,7 @@ export interface LegalReviewTrace {
 const STAGES = new Set(["start", "openai", "validation", "firestore", "http", "success", "sanitizer"]);
 const LEVELS = new Set(["VERIFICADO_COM_FONTES", "VERIFICACAO_PARCIAL", "FALHA_NA_VERIFICACAO"]);
 const FIRESTORE_STEPS = new Set<LegalReviewFirestoreStep>(["begin", "complete", "fail"]);
-const RETRY_REASONS = new Set<LegalReviewRetryReason>(["timeout", "invalid_audit", "missing_sources"]);
+const RETRY_REASONS = new Set<LegalReviewRetryReason>(["timeout", "invalid_audit", "missing_sources", "rejected_patches"]);
 const UNSAFE_MESSAGE =
   /sk-[A-Za-z0-9_-]{6,}|bearer\s+[A-Za-z0-9\-._~+/]+=*|authorization\s*[:=]|cookie\s*[:=]|set-cookie|aiza[0-9A-Za-z\-_]{8,}|gocspx-|\[block_|```|<aula|output_text|\breasoning\b|eyJ[A-Za-z0-9_-]{10,}|x-goog-|signature=/i;
 const LEAK = /sk-|bearer\s|authorization|openai_api_key|gemini_api_key|aiza|gocspx-/i;

@@ -179,6 +179,11 @@ function clip(value: unknown, max: number): string {
   return String(value ?? "").replace(/\u0000/g, "").slice(0, max);
 }
 
+/** Contexto literal. Não remove espaços: eles distinguem a ocorrência. */
+function literalContext(value: unknown): string {
+  return String(value ?? "").replace(/\u0000/g, "").slice(0, 2000);
+}
+
 function oneOf<T extends string>(value: unknown, allowed: T[], fallback: T): T {
   const text = String(value ?? "").trim() as T;
   return allowed.includes(text) ? text : fallback;
@@ -1280,6 +1285,245 @@ export interface NormalizedAudit {
   reviewedMarkdown: string;
   reviewNotes: string;
   consultedSources: ConsultedLegalSource[];
+  /** Transitório. Não entra em legal_reviews. */
+  repairablePatches?: RepairablePatch[];
+  /** Transitório. Não entra em legal_reviews. */
+  appliedPatchInputs?: AppliedPatchInput[];
+}
+
+export type LiteralRejectReason =
+  | "excerpt_missing"
+  | "ambiguous"
+  | "overlap"
+  | "html"
+  | "marker"
+  | "length";
+
+export interface LiteralPatchInput {
+  key: string;
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  beforeContext?: string;
+  afterContext?: string;
+}
+
+export interface AppliedLiteralPatch {
+  key: string;
+  start: number;
+  end: number;
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  beforeContext: string;
+  afterContext: string;
+}
+
+export interface RejectedLiteralPatch {
+  key: string;
+  reason: LiteralRejectReason;
+}
+
+export interface LiteralPatchApplication {
+  markdown: string;
+  applied: AppliedLiteralPatch[];
+  rejected: RejectedLiteralPatch[];
+}
+
+export interface RepairablePatch {
+  id: string;
+  reason: "excerpt_missing" | "ambiguous" | "overlap";
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  beforeContext: string;
+  afterContext: string;
+}
+
+export interface AppliedPatchInput {
+  id: string;
+  beforeContext: string;
+  afterContext: string;
+}
+
+function isRepairableReason(reason: LiteralRejectReason): reason is RepairablePatch["reason"] {
+  return reason === "excerpt_missing" || reason === "ambiguous" || reason === "overlap";
+}
+
+function rejectionNote(reason: LiteralRejectReason): string {
+  switch (reason) {
+    case "excerpt_missing":
+      return "Patch não aplicado: o originalExcerpt não foi localizado literalmente no Markdown original.";
+    case "ambiguous":
+      return "Patch não aplicado: o trecho não identifica uma única ocorrência no Markdown original.";
+    case "overlap":
+      return "Patch não aplicado: o intervalo se sobrepõe a outro patch e nenhum dos conflitantes foi aplicado.";
+    case "html":
+      return "Patch não aplicado: a substituição introduziria HTML.";
+    case "marker":
+      return "Patch não aplicado: a substituição removeria um marcador de parte.";
+    case "length":
+      return "Patch não aplicado: a substituição excederia o tamanho admitido.";
+    default:
+      return "Patch não aplicado.";
+  }
+}
+
+function rangesOverlap(left: { start: number; end: number }, right: { start: number; end: number }): boolean {
+  return left.start < right.end && right.start < left.end;
+}
+
+function findLiteralSpans(
+  haystack: string,
+  needle: string,
+  before: string,
+  after: string
+): Array<{ start: number; end: number }> {
+  if (needle.length === 0) return [];
+  const spans: Array<{ start: number; end: number }> = [];
+  let from = 0;
+  while (from < haystack.length) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) break;
+    const end = at + needle.length;
+    const beforeOk = before.length === 0 || (at >= before.length && haystack.slice(at - before.length, at) === before);
+    const afterOk = after.length === 0 || haystack.slice(end, end + after.length) === after;
+    if (beforeOk && afterOk) spans.push({ start: at, end });
+    from = at + 1;
+  }
+  return spans;
+}
+
+function replacementDropsBlockMarker(originalExcerpt: string, revisedExcerpt: string): boolean {
+  const after = new Set(blockMarkers(revisedExcerpt));
+  return blockMarkers(originalExcerpt).some((marker) => !after.has(marker));
+}
+
+function markdownWithinLimit(original: string, revised: string): boolean {
+  if (revised.length > 900_000) return false;
+  if (original.trim().length >= 20 && revised.trim().length < 20) return false;
+  return revised.length <= Math.max(original.length * 3, original.length + 20_000);
+}
+
+function applySpans(original: string, patches: AppliedLiteralPatch[]): string {
+  const ordered = [...patches].sort((left, right) => right.start - left.start || right.end - left.end);
+  let text = original;
+  for (const patch of ordered) {
+    text = text.slice(0, patch.start) + patch.revisedExcerpt + text.slice(patch.end);
+  }
+  return text;
+}
+
+/**
+ * Localiza e aplica patches por igualdade literal no Markdown original.
+ * Não normaliza espaço, não escolhe ocorrência e não funde sobreposição.
+ */
+export function applyLiteralPatches(original: string, patches: LiteralPatchInput[]): LiteralPatchApplication {
+  const rejected: RejectedLiteralPatch[] = [];
+  let pending = patches.map((patch) => ({
+    ...patch,
+    beforeContext: patch.beforeContext ?? "",
+    afterContext: patch.afterContext ?? "",
+  }));
+
+  for (let guard = 0; guard <= patches.length; guard += 1) {
+    const located: AppliedLiteralPatch[] = [];
+    const stillPending: typeof pending = [];
+    for (const patch of pending) {
+      if (containsHtmlMarkup(patch.revisedExcerpt)) {
+        rejected.push({ key: patch.key, reason: "html" });
+        continue;
+      }
+      if (replacementDropsBlockMarker(patch.originalExcerpt, patch.revisedExcerpt)) {
+        rejected.push({ key: patch.key, reason: "marker" });
+        continue;
+      }
+      const spans = findLiteralSpans(original, patch.originalExcerpt, patch.beforeContext, patch.afterContext);
+      if (spans.length === 0) {
+        rejected.push({ key: patch.key, reason: "excerpt_missing" });
+        continue;
+      }
+      if (spans.length > 1) {
+        rejected.push({ key: patch.key, reason: "ambiguous" });
+        continue;
+      }
+      const span = spans[0];
+      located.push({
+        key: patch.key,
+        start: span.start,
+        end: span.end,
+        originalExcerpt: patch.originalExcerpt,
+        revisedExcerpt: patch.revisedExcerpt,
+        beforeContext: patch.beforeContext,
+        afterContext: patch.afterContext,
+      });
+      stillPending.push(patch);
+    }
+
+    const conflicted = new Set<string>();
+    for (let left = 0; left < located.length; left += 1) {
+      for (let right = left + 1; right < located.length; right += 1) {
+        if (rangesOverlap(located[left], located[right])) {
+          conflicted.add(located[left].key);
+          conflicted.add(located[right].key);
+        }
+      }
+    }
+    for (const patch of located) {
+      if (conflicted.has(patch.key)) rejected.push({ key: patch.key, reason: "overlap" });
+    }
+    const kept = located.filter((patch) => !conflicted.has(patch.key));
+    const markdown = kept.length ? applySpans(original, kept) : original;
+    const safe = markdownWithinLimit(original, markdown)
+      && markersPreserved(original, markdown)
+      && (!containsHtmlMarkup(markdown) || containsHtmlMarkup(original));
+    if (safe && outsidePatchBytesIdentical(original, markdown, kept)) {
+      return { markdown, applied: kept, rejected };
+    }
+    if (!kept.length) return { markdown: original, applied: [], rejected };
+    const offender = [...kept].sort((left, right) => {
+      const growth = (patch: AppliedLiteralPatch) => patch.revisedExcerpt.length - (patch.end - patch.start);
+      return growth(right) - growth(left);
+    })[0];
+    rejected.push({ key: offender.key, reason: containsHtmlMarkup(markdown) && !containsHtmlMarkup(original) ? "html" : !markersPreserved(original, markdown) ? "marker" : "length" });
+    pending = stillPending.filter((patch) => patch.key !== offender.key && !conflicted.has(patch.key));
+  }
+
+  return { markdown: original, applied: [], rejected };
+}
+
+/** Reconstrói o original substituindo os intervalos aplicados pelo originalExcerpt. */
+export function revertAppliedLiteralPatches(appliedMarkdown: string, applied: AppliedLiteralPatch[]): string {
+  const sorted = [...applied].sort((left, right) => left.start - right.start || left.end - right.end);
+  let delta = 0;
+  const shifted = sorted.map((patch) => {
+    const start = patch.start + delta;
+    const end = start + patch.revisedExcerpt.length;
+    delta += patch.revisedExcerpt.length - (patch.end - patch.start);
+    return { start, end, originalExcerpt: patch.originalExcerpt };
+  });
+  let text = appliedMarkdown;
+  for (const patch of [...shifted].sort((left, right) => right.start - left.start)) {
+    text = text.slice(0, patch.start) + patch.originalExcerpt + text.slice(patch.end);
+  }
+  return text;
+}
+
+/** Todo byte fora dos intervalos declarados permanece o do Markdown original. */
+export function outsidePatchBytesIdentical(
+  original: string,
+  appliedMarkdown: string,
+  applied: Array<Pick<AppliedLiteralPatch, "start" | "end" | "revisedExcerpt">>
+): boolean {
+  const sorted = [...applied].sort((left, right) => left.start - right.start || left.end - right.end);
+  let originalAt = 0;
+  let appliedAt = 0;
+  for (const patch of sorted) {
+    const gap = original.slice(originalAt, patch.start);
+    if (appliedMarkdown.slice(appliedAt, appliedAt + gap.length) !== gap) return false;
+    appliedAt += gap.length;
+    if (appliedMarkdown.slice(appliedAt, appliedAt + patch.revisedExcerpt.length) !== patch.revisedExcerpt) return false;
+    appliedAt += patch.revisedExcerpt.length;
+    originalAt = patch.end;
+  }
+  return original.slice(originalAt) === appliedMarkdown.slice(appliedAt);
 }
 
 export type ClassifiedLegalAudit =
@@ -1327,9 +1571,106 @@ export function classifyLegalAudit(
       emptyCoverage("too_many_changes", declared.length, "TOO_MANY_CHANGES", "TOO_MANY_CHANGES")
     );
   }
-  const changes = declared
-    .map((item, index) => readChange(item, index, consulted))
-    .filter((item): item is LegalReviewChange => Boolean(item));
+  const drafts = declared.flatMap((item, index) => {
+    const change = readChange(item, index, consulted);
+    if (!change) return [];
+    const source = asRecord(item);
+    return [{
+      change,
+      beforeContext: literalContext(source?.beforeContext),
+      afterContext: literalContext(source?.afterContext),
+      key: `${index}:${change.id}`,
+    }];
+  });
+  const unreadMaterial = declared.some((item, index) => {
+    const kept = drafts.some((draft) => draft.key.startsWith(`${index}:`));
+    return !kept && rawMaterialChange(item);
+  });
+
+  return {
+    ok: true,
+    audit: finalizePatchAudit({
+      original,
+      drafts,
+      held: [],
+      search,
+      consultedSources,
+      reviewNotes: clip(record.reviewNotes, 8000),
+      confidence: oneOf(record.confidence, CONFIDENCE, "MEDIA"),
+      modelClaims: Array.isArray(record.unverifiedClaims) ? record.unverifiedClaims : [],
+      unreadMaterial,
+    }),
+  };
+}
+
+function rawMaterialChange(value: unknown): boolean {
+  const record = asRecord(value);
+  if (!record) return false;
+  const type = oneOf(record.type, CHANGE_TYPES, "CORRECAO");
+  const category = oneOf(record.category, CATEGORIES, "CONCEITO");
+  if (!isMaterialLegalChange({ type, category })) return false;
+  return clip(record.originalExcerpt, 4000).trim() !== clip(record.revisedExcerpt, 4000).trim();
+}
+
+interface PatchDraft {
+  change: LegalReviewChange;
+  beforeContext: string;
+  afterContext: string;
+  key: string;
+}
+
+function finalizePatchAudit(input: {
+  original: string;
+  drafts: PatchDraft[];
+  held: LegalReviewChange[];
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] };
+  consultedSources: ConsultedLegalSource[];
+  reviewNotes: string;
+  confidence: LegalReviewConfidence;
+  modelClaims: unknown[];
+  unreadMaterial: boolean;
+}): NormalizedAudit {
+  const applicable = input.drafts.filter((draft) => draft.change.confirmation === "CONFIRMADO");
+  const appliedResult = applyLiteralPatches(input.original, applicable.map((draft) => ({
+    key: draft.key,
+    originalExcerpt: draft.change.originalExcerpt,
+    revisedExcerpt: draft.change.revisedExcerpt,
+    beforeContext: draft.beforeContext,
+    afterContext: draft.afterContext,
+  })));
+  const rejectedByKey = new Map(appliedResult.rejected.map((item) => [item.key, item.reason]));
+  const appliedByKey = new Map(appliedResult.applied.map((item) => [item.key, item]));
+  const resolved = input.drafts.map((draft) => {
+    const reason = rejectedByKey.get(draft.key);
+    if (!reason) return draft.change;
+    return {
+      ...draft.change,
+      confirmation: "NAO_CONFIRMADO" as const,
+      verified: false,
+      reason: rejectionNote(reason),
+    };
+  });
+  const changes = [...input.held, ...resolved];
+  const repairablePatches: RepairablePatch[] = input.drafts.flatMap((draft) => {
+    const reason = rejectedByKey.get(draft.key);
+    if (!reason || !isRepairableReason(reason)) return [];
+    return [{
+      id: draft.change.id,
+      reason,
+      originalExcerpt: draft.change.originalExcerpt,
+      revisedExcerpt: draft.change.revisedExcerpt,
+      beforeContext: draft.beforeContext,
+      afterContext: draft.afterContext,
+    }];
+  });
+  const appliedPatchInputs: AppliedPatchInput[] = input.drafts.flatMap((draft) => {
+    if (!appliedByKey.has(draft.key)) return [];
+    return [{
+      id: draft.change.id,
+      beforeContext: draft.beforeContext,
+      afterContext: draft.afterContext,
+    }];
+  });
 
   const unverifiedClaims: LegalUnverifiedClaim[] = [];
   const seen = new Set<string>();
@@ -1339,88 +1680,136 @@ export function classifyLegalAudit(
     seen.add(key);
     unverifiedClaims.push({ excerpt: excerpt.slice(0, 2000), reason: reason.slice(0, 2000) });
   };
-  if (Array.isArray(record.unverifiedClaims)) {
-    for (const item of record.unverifiedClaims) {
-      const claim = asRecord(item);
-      if (!claim) continue;
-      pushClaim(clip(claim.excerpt, 2000), clip(claim.reason, 2000) || "Não confirmado em fonte oficial.");
-    }
+  for (const item of input.modelClaims) {
+    const claim = asRecord(item);
+    if (!claim) continue;
+    pushClaim(clip(claim.excerpt, 2000), clip(claim.reason, 2000) || "Não confirmado em fonte oficial.");
+  }
+  if (input.unreadMaterial) {
+    pushClaim("Alteração não aplicada.", "Uma alteração material declarada não pôde ser lida e não foi aplicada.");
   }
   for (const change of changes) {
-    if (change.confirmation === "NAO_CONFIRMADO") {
-      let reason = change.reason || "NAO_CONFIRMADO";
-      if (changeLacksNormativeSpecificity(change)) {
-        reason =
-          "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica.";
-      } else if (changeContainsUngroundedInvention(change)) {
-        reason =
-          "Invenção normativa desprovida de fundamento em fonte oficial (prazo, quórum ou recurso inexistente na fonte).";
-      }
-      pushClaim(change.revisedExcerpt || change.originalExcerpt, reason);
+    if (change.confirmation !== "NAO_CONFIRMADO") continue;
+    let reason = change.reason || "NAO_CONFIRMADO";
+    if (changeLacksNormativeSpecificity(change)) {
+      reason = "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica.";
+    } else if (changeContainsUngroundedInvention(change)) {
+      reason = "Invenção normativa desprovida de fundamento em fonte oficial (prazo, quórum ou recurso inexistente na fonte).";
     }
+    pushClaim(change.revisedExcerpt || change.originalExcerpt, reason);
   }
 
-  let reviewedMarkdown = clip(record.reviewedMarkdown, 900_000);
-  let outcome = oneOf(record.outcome || record.status, OUTCOMES, "ALTERACOES_NECESSARIAS");
-  if (containsHtmlMarkup(reviewedMarkdown)) {
-    return validationFailure(
-      INVALID_AUDIT_MESSAGE,
-      "invalid_audit",
-      emptyCoverage("invalid_audit", changes.length, "HTML_REJECTED", "HTML_REJECTED")
-    );
-  }
-  if (!markersPreserved(original, reviewedMarkdown)) {
-    return validationFailure(
-      INVALID_AUDIT_MESSAGE,
-      "invalid_audit",
-      emptyCoverage("invalid_audit", changes.length, "MARKER_MISMATCH", "MARKER_MISMATCH")
-    );
-  }
-  if (reviewedMarkdown.trim().length < 20 || reviewedMarkdown.length > Math.max(original.length * 3, original.length + 20_000)) {
-    return validationFailure(
-      INVALID_AUDIT_MESSAGE,
-      "invalid_audit",
-      emptyCoverage("invalid_audit", changes.length, "INVALID_LENGTH", "INVALID_LENGTH")
-    );
-  }
-  const coverage = assessSubstantiveCoverage(original, reviewedMarkdown, changes);
-  if (coverage.uncovered > 0) {
-    return validationFailure(UNCOVERED_AUDIT_MESSAGE, "uncovered_edits", {
-      ...coverage,
-      auditFailure: "COVERAGE_FAILURE",
-      failureReasonCode: coverage.failureReasonCode || "COVERAGE_FAILURE",
-    });
-  }
-  if (!changes.length) {
-    reviewedMarkdown = original;
-    outcome = "SEM_ALTERACOES_RELEVANTES";
-  }
-
+  const rejectedMaterial = input.unreadMaterial || changes.some((change) => (
+    isMaterialLegalChange(change) && change.confirmation !== "CONFIRMADO"
+  ));
+  const reviewedMarkdown = changes.length === 0 && !rejectedMaterial ? input.original : appliedResult.markdown;
+  const outcome: LegalReviewOutcome = changes.length === 0 && !rejectedMaterial
+    ? "SEM_ALTERACOES_RELEVANTES"
+    : "ALTERACOES_NECESSARIAS";
   const material = changes.filter(isMaterialLegalChange);
-  const officialSourcesConsulted = consultedSources.some((source) => source.official);
+  const officialSourcesConsulted = input.consultedSources.some((source) => source.official);
   const verificationLevel = enforceVerificationLevel({
-    webSearchExecuted: search.webSearchExecuted && consultedSources.length > 0,
+    webSearchExecuted: input.search.webSearchExecuted && input.consultedSources.length > 0,
     officialSourcesConsulted,
     allMaterialChangesConfirmed: material.every((change) => change.confirmation === "CONFIRMADO"),
     hasUnverified: unverifiedClaims.length > 0,
-    diffConsistent: true,
+    diffConsistent: reviewedMarkdown === input.original || outsidePatchBytesIdentical(input.original, reviewedMarkdown, appliedResult.applied),
     manuallyEdited: false,
   });
 
   return {
-    ok: true,
-    audit: {
-      outcome,
-      confidence: oneOf(record.confidence, CONFIDENCE, "MEDIA"),
-      verificationLevel,
-      summary: summarizeChanges(changes),
-      changes,
-      unverifiedClaims: unverifiedClaims.slice(0, 40),
-      reviewedMarkdown,
-      reviewNotes: clip(record.reviewNotes, 8000),
-      consultedSources,
-    },
+    outcome,
+    confidence: input.confidence,
+    verificationLevel,
+    summary: summarizeChanges(changes),
+    changes,
+    unverifiedClaims: unverifiedClaims.slice(0, 40),
+    reviewedMarkdown,
+    reviewNotes: input.reviewNotes,
+    consultedSources: input.consultedSources,
+    repairablePatches,
+    appliedPatchInputs,
   };
+}
+
+/**
+ * Reaplica, no Markdown original, os patches já aceitos e o reparo do follow-up.
+ * O follow-up não substitui um patch já validado.
+ */
+export function mergePatchAudits(
+  originalMarkdown: string,
+  current: NormalizedAudit,
+  follow: NormalizedAudit,
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] },
+  consultedSources: ConsultedLegalSource[]
+): NormalizedAudit {
+  const acceptedIds = new Set((current.appliedPatchInputs || []).map((item) => item.id));
+  const repairableIds = new Set((current.repairablePatches || []).map((item) => item.id));
+  const followById = new Map(follow.changes.map((change) => [change.id, change]));
+  const followContext = new Map((follow.appliedPatchInputs || []).map((item) => [item.id, item]));
+  for (const patch of follow.repairablePatches || []) {
+    if (!followContext.has(patch.id)) {
+      followContext.set(patch.id, { id: patch.id, beforeContext: patch.beforeContext, afterContext: patch.afterContext });
+    }
+  }
+  const currentContext = new Map((current.appliedPatchInputs || []).map((item) => [item.id, item]));
+  for (const patch of current.repairablePatches || []) {
+    if (!currentContext.has(patch.id)) {
+      currentContext.set(patch.id, { id: patch.id, beforeContext: patch.beforeContext, afterContext: patch.afterContext });
+    }
+  }
+
+  const held: LegalReviewChange[] = [];
+  const drafts: PatchDraft[] = [];
+  const seenDraft = new Set<string>();
+  const pushDraft = (change: LegalReviewChange, beforeContext: string, afterContext: string, key: string) => {
+    if (seenDraft.has(change.id)) return;
+    seenDraft.add(change.id);
+    drafts.push({ change, beforeContext, afterContext, key });
+  };
+
+  for (const change of current.changes) {
+    if (acceptedIds.has(change.id)) {
+      const context = currentContext.get(change.id);
+      pushDraft(change, context?.beforeContext || "", context?.afterContext || "", `kept:${change.id}`);
+      continue;
+    }
+    const replacement = repairableIds.has(change.id) ? followById.get(change.id) : undefined;
+    if (replacement) {
+      const context = followContext.get(replacement.id);
+      pushDraft(replacement, context?.beforeContext || "", context?.afterContext || "", `repair:${replacement.id}`);
+      continue;
+    }
+    held.push(change);
+  }
+  const heldIds = new Set(held.map((change) => change.id));
+  for (const change of follow.changes) {
+    if (acceptedIds.has(change.id) || seenDraft.has(change.id) || heldIds.has(change.id)) continue;
+    const context = followContext.get(change.id);
+    pushDraft(change, context?.beforeContext || "", context?.afterContext || "", `follow:${change.id}`);
+  }
+
+  const retiredExcerpts = new Set<string>();
+  for (const patch of current.repairablePatches || []) {
+    if (!followById.has(patch.id)) continue;
+    retiredExcerpts.add(patch.originalExcerpt);
+    retiredExcerpts.add(patch.revisedExcerpt);
+  }
+  const modelClaims = [...current.unverifiedClaims, ...follow.unverifiedClaims]
+    .filter((claim) => !retiredExcerpts.has(claim.excerpt))
+    .map((claim) => ({ excerpt: claim.excerpt, reason: claim.reason }));
+
+  return finalizePatchAudit({
+    original: String(originalMarkdown || ""),
+    drafts,
+    held,
+    search,
+    consultedSources,
+    reviewNotes: follow.reviewNotes || current.reviewNotes,
+    confidence: follow.confidence,
+    modelClaims,
+    unreadMaterial: false,
+  });
 }
 
 export function normalizeLegalAudit(
@@ -1485,7 +1874,6 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
     "summary",
     "changes",
     "unverifiedClaims",
-    "reviewedMarkdown",
     "reviewNotes",
   ],
   properties: {
@@ -1518,6 +1906,8 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
           "category",
           "originalExcerpt",
           "revisedExcerpt",
+          "beforeContext",
+          "afterContext",
           "reason",
           "verified",
           "confirmation",
@@ -1531,6 +1921,8 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
           category: { type: "string", enum: CATEGORIES },
           originalExcerpt: { type: "string" },
           revisedExcerpt: { type: "string" },
+          beforeContext: { type: "string" },
+          afterContext: { type: "string" },
           reason: { type: "string" },
           verified: { type: "boolean" },
           confirmation: { type: "string", enum: ["CONFIRMADO", "NAO_CONFIRMADO"] },
@@ -1567,7 +1959,6 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
         },
       },
     },
-    reviewedMarkdown: { type: "string" },
     reviewNotes: { type: "string" },
   },
 };

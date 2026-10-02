@@ -89,9 +89,15 @@ Não melhore a redação de texto juridicamente correto.
 
 Não reescreva parágrafos corretos simplesmente por preferência estilística.
 
-Cada modificação feita em reviewedMarkdown precisa ter um item correspondente em changes[]. originalExcerpt reproduz integralmente o trecho original alterado. revisedExcerpt reproduz integralmente o trecho correspondente da versão revisada. Os trechos originalExcerpt e revisedExcerpt devem ser estritamente literais (idênticos caractere a caractere ao texto, sem adicionar 'nº', abreviações, números por extenso alterados para dígitos ou pontuações inexistentes). Quando várias correções atingirem o mesmo parágrafo, é preferível um único change abrangendo integralmente todo o trecho alterado do parágrafo.
+Não devolva o Markdown integral da aula. O servidor aplica cada patch no texto original e preserva, byte a byte, tudo o que estiver fora do trecho substituído.
 
-Não crie alterações artificiais. Se não houver erro material nem omissão relevante, devolva status SEM_ALTERACOES_RELEVANTES, changes vazio e reviewedMarkdown idêntico ao original.
+Cada correção entra somente como um item de changes[]. originalExcerpt precisa ser cópia literal de um trecho do Markdown original. revisedExcerpt é o texto que substitui exatamente esse trecho. beforeContext e afterContext são cópias literais do que vem imediatamente antes e depois, usadas só para escolher uma ocorrência quando o trecho se repete. Eles não fazem parte do texto substituído. Se o trecho aparece uma única vez, deixe beforeContext e afterContext como string vazia.
+
+Os trechos originalExcerpt e revisedExcerpt devem ser estritamente literais (idênticos caractere a caractere ao texto, sem adicionar 'nº', abreviações, números por extenso alterados para dígitos ou pontuações inexistentes). Não normalize espaços, não corte pontuação e não escolha uma ocorrência por aproximação. Quando várias correções atingirem o mesmo parágrafo, é preferível um único change abrangendo integralmente todo o trecho alterado do parágrafo.
+
+Inserção: originalExcerpt é uma âncora literal única e revisedExcerpt é essa âncora seguida do texto novo. Remoção: revisedExcerpt fica vazio ou traz só o que deve permanecer no lugar do trecho.
+
+Não crie alterações artificiais. Se não houver erro material nem omissão relevante, devolva status SEM_ALTERACOES_RELEVANTES e changes vazio. Não envie o Markdown da aula.
 
 Não invente percentuais de incidência nem faixas alta, média ou baixa. Se a aula trouxer percentual não medido de cobrança de banca, remova essa afirmação. Mantenha alíquota, pena e hipótese de incidência quando forem conteúdo jurídico.
 
@@ -107,7 +113,7 @@ Não transforme isso em obrigação de copiar integralmente a lei. Não exija in
 
 ## MARKDOWN E ESTRUTURA
 
-Entregue reviewedMarkdown em Markdown válido, compatível com o material original.
+Não entregue o Markdown da aula. Entregue apenas o JSON. A candidata montada pelo servidor precisa continuar em Markdown válido, compatível com o material original.
 
 Use **negrito**, *itálico*, títulos Markdown, listas, tabelas e blockquotes quando necessário.
 
@@ -198,7 +204,7 @@ export function buildUntrustedLessonInput(input: {
   const fence = (value: string) => String(value || "").replaceAll("</aula_nao_confiavel>", "<aula_nao_confiavel_literal>");
   const published = input.publishedContent && input.publishedContent !== input.content
     ? `
-Há também o texto publicado, distinto da candidata editada. Audite a candidata. Cada diferença substancial entre o original publicado e o reviewedMarkdown final precisa aparecer em changes, com originalExcerpt e revisedExcerpt.
+Há também o texto publicado, distinto da candidata editada. Audite a candidata. Cada diferença substancial entre o original publicado e a candidata precisa aparecer em changes, com originalExcerpt e revisedExcerpt literais.
 
 <original_publicado>
 ${fence(input.publishedContent)}

@@ -5,9 +5,12 @@
 import OpenAI from "openai";
 import {
   LEGAL_REVIEW_JSON_SCHEMA,
+  describeConsultedSources,
   explainLegalAuditFailure,
+  mergePatchAudits,
   normalizeLegalAudit,
   type NormalizedAudit,
+  type RepairablePatch,
 } from "../lib/legalReviewValidate";
 import { searchDomainsForLesson } from "../lib/legalReviewSources";
 import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "./legalReviewPrompt";
@@ -18,6 +21,10 @@ const DEFAULT_OPENAI_REVIEW_MODEL = "gpt-5.6";
 /** A Function tem 600s. Este orçamento deixa validação, Firestore e a resposta HTTP de fora da espera da OpenAI. */
 export const OPENAI_AUDIT_BUDGET_MS = 250_000;
 export const OPENAI_ATTEMPT_TIMEOUT_MS = 200_000;
+/** Nova geração só começa se ainda houver orçamento para outra tentativa de 200s. */
+export const MIN_GENERATION_RETRY_REMAINING_MS = 200_000;
+/** Follow-up só começa se ainda houver pelo menos 90s. */
+export const MIN_FOLLOW_UP_REMAINING_MS = 90_000;
 /** O laço da auditoria continua capaz de repetir. O SDK não repete por conta própria. */
 export const OPENAI_REVIEW_SDK_MAX_RETRIES = 0;
 const MISSING_KEY =
@@ -208,7 +215,7 @@ export function buildReviewCreateParams(input: {
     ],
     tool_choice: "required" as const,
     reasoning: { effort: "high" as const },
-    max_output_tokens: 32000,
+    max_output_tokens: 12000,
     text: {
       format: {
         type: "json_schema" as const,
@@ -279,21 +286,15 @@ async function createResponse(
 }
 
 const COVERAGE_REPAIR_FOLLOW_UP = [
-  "A resposta anterior foi recusada porque reviewedMarkdown contém alterações que não estão integralmente descritas em changes[].",
-  "Refaça a resposta completa.",
-  "REGRA OBRIGATÓRIA:",
-  "Para cada alteração feita em reviewedMarkdown, inclua exatamente um item adequado em changes[].",
-  "originalExcerpt deve reproduzir integralmente o trecho original que foi efetivamente alterado.",
-  "revisedExcerpt deve reproduzir integralmente o trecho correspondente da versão revisada.",
-  "Os trechos originalExcerpt e revisedExcerpt devem ser estritamente literais, exatamente como constam do texto original e revisado, sem adicionar 'nº', abreviações ou caracteres inexistentes.",
-  "Quando várias correções atingirem o mesmo parágrafo, é preferível incluir um único change abrangendo integralmente todo o trecho alterado do parágrafo.",
-  "Não faça alterações silenciosas.",
-  "Não melhore estilo, pontuação, headings, listas ou formatação se isso não for necessário para corrigir conteúdo jurídico.",
+  "A resposta anterior teve patches recusados.",
+  "Reenvie somente os patches recusados.",
+  "Não refaça patches já validados.",
+  "Não devolva o texto integral da aula.",
+  "Não reescreva a aula.",
+  "originalExcerpt deve ser cópia literal do Markdown original.",
+  "beforeContext e afterContext só desambiguam a ocorrência e não fazem parte do texto substituído.",
+  "Não normalize espaços e não escolha a primeira ocorrência.",
   "Preserve literalmente todo texto que não necessite correção.",
-  "Se não puder justificar uma modificação, mantenha o texto original.",
-  "Antes de responder, faça uma autoconsistência entre reviewedMarkdown e changes[].",
-  "A validação do servidor exige cobertura integral e recusará novamente qualquer alteração não declarada.",
-  "Preserve expressamente órgãos, tribunais, prazos e competências específicas confirmadas por fontes oficiais; nunca os substitua por termos genéricos como 'autoridade competente', 'órgão competente' ou 'prazo legal'.",
   "Devolva somente o JSON do schema.",
   "Não invente URLs.",
   "Se não houver comprovação, use NAO_CONFIRMADO.",
@@ -335,6 +336,42 @@ export function reviewFollowUpInstruction(error: unknown): string {
   const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : "";
   if (code === "too_many_changes") return TOO_MANY_FOLLOW_UP;
   return GENERIC_FOLLOW_UP;
+}
+
+/** Follow-up enxuto: só patches recusados e o contexto literal já enviado. */
+export function buildRejectedPatchFollowUp(input: {
+  repairable: RepairablePatch[];
+  acceptedIds: string[];
+}): string {
+  const lines = [
+    "A resposta anterior teve patches recusados pelo servidor.",
+    "Reenvie somente os patches recusados abaixo.",
+    "Não refaça patches já validados.",
+    "Não devolva o texto integral da aula.",
+    "Não reescreva a aula.",
+    "originalExcerpt, beforeContext e afterContext precisam ser literais e identificar uma única ocorrência no Markdown original.",
+    "Não normalize espaços e não escolha a primeira ocorrência.",
+    "Devolva somente o JSON do schema, com changes contendo apenas o reparo.",
+    "Não invente URLs.",
+    "Se não houver comprovação, use NAO_CONFIRMADO.",
+    "Preserve os marcadores [BLOCK_n].",
+  ];
+  if (input.acceptedIds.length) {
+    lines.push(`Patches já validados, que não devem ser reenviados: ${input.acceptedIds.join(", ")}.`);
+  }
+  for (const patch of input.repairable) {
+    lines.push(
+      [
+        `Patch recusado ${patch.id}.`,
+        `Motivo: ${patch.reason}.`,
+        `originalExcerpt: ${JSON.stringify(patch.originalExcerpt)}`,
+        `revisedExcerpt: ${JSON.stringify(patch.revisedExcerpt)}`,
+        `beforeContext: ${JSON.stringify(patch.beforeContext)}`,
+        `afterContext: ${JSON.stringify(patch.afterContext)}`,
+      ].join(" ")
+    );
+  }
+  return lines.join("\n");
 }
 
 function traceCounts(audit: AuditLessonResult): LegalReviewTraceCounts {
@@ -384,6 +421,7 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
 
   let response: ReviewModelResponse | null = null;
   for (let tryNumber = 0; tryNumber < 2; tryNumber += 1) {
+    if (tryNumber > 0 && remaining() < MIN_GENERATION_RETRY_REMAINING_MS) break;
     const timeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
     if (timeoutMs < 15_000) break;
     trace.openaiStart();
@@ -394,12 +432,12 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
       trace.openaiEnd(response.model);
       break;
     } catch (error) {
-      if (tryNumber === 0 && isTimeout(error)) {
+      if (tryNumber === 0 && isTimeout(error) && remaining() >= MIN_GENERATION_RETRY_REMAINING_MS) {
         trace.noteFailure(error, "openai");
         trace.retry("timeout");
         continue;
       }
-      if (isTimeout(error)) trace.noteFailure(openAiTimeoutDiagnostic(OPENAI_TIMEOUT_GENERATION_RETRY), "openai");
+      if (isTimeout(error) && tryNumber > 0) trace.noteFailure(openAiTimeoutDiagnostic(OPENAI_TIMEOUT_GENERATION_RETRY), "openai");
       else trace.noteFailure(error, "openai");
       throw reviewFailureForOpenAIError(error);
     }
@@ -411,44 +449,74 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   }
 
   let parsed = read(response);
-  const lacksSources = !(parsed instanceof Error) && !parsed.webSearchUsed;
-  // Uma resposta de cobertura gera no máximo este reparo. Se ele também falhar, não há terceira chamada.
-  if (parsed instanceof Error || lacksSources) {
-    const followUpTimeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
-    if (followUpTimeoutMs >= 15_000) {
-      trace.retry(lacksSources ? "missing_sources" : "invalid_audit");
-      userInput = `${userInput}\n\n${reviewFollowUpInstruction(parsed)}`;
-      trace.openaiStart();
-      try {
-        response = input.callModel
-          ? await input.callModel({
-            model: requestedModel,
-            instructions,
-            userInput,
-            lessonText: input.content,
-            timeoutMs: followUpTimeoutMs,
-          })
-          : await createResponse(
-          client as OpenAI,
-          requestedModel,
-          instructions,
-          userInput,
-          input.content,
-          followUpTimeoutMs
-        );
-        trace.openaiEnd(response.model);
-        parsed = read(response);
-      } catch (error) {
-        if (isTimeout(error)) trace.noteFailure(openAiTimeoutDiagnostic(OPENAI_TIMEOUT_FOLLOW_UP), "openai");
-        else trace.noteFailure(error, "openai");
-        throw reviewFailureForOpenAIError(error);
-      }
-    }
-  }
-
   if (parsed instanceof Error) {
     trace.noteFailure(parsed, "validation");
     throw parsed;
   }
+  const repairable = parsed.repairablePatches ?? [];
+  const lacksSources = !parsed.webSearchUsed;
+  const firstUrls = extractConsultedSourceUrls(response.output);
+  // No máximo um follow-up. Patches já validados não são refeitos.
+  if ((repairable.length > 0 || lacksSources) && remaining() >= MIN_FOLLOW_UP_REMAINING_MS) {
+    const followUpTimeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
+    const patchFollowUp = repairable.length > 0;
+    trace.retry(patchFollowUp ? "rejected_patches" : "missing_sources");
+    const followUser = patchFollowUp
+      ? buildRejectedPatchFollowUp({
+        repairable,
+        acceptedIds: (parsed.appliedPatchInputs ?? []).map((item) => item.id),
+      })
+      : `${userInput}\n\n${reviewFollowUpInstruction(parsed)}`;
+    trace.openaiStart();
+    try {
+      response = input.callModel
+        ? await input.callModel({
+          model: requestedModel,
+          instructions,
+          userInput: followUser,
+          lessonText: input.content,
+          timeoutMs: followUpTimeoutMs,
+        })
+        : await createResponse(
+        client as OpenAI,
+        requestedModel,
+        instructions,
+        followUser,
+        input.content,
+        followUpTimeoutMs
+      );
+      trace.openaiEnd(response.model);
+      const followParsed = read(response);
+      if (!(followParsed instanceof Error)) {
+        if (patchFollowUp) {
+          const followUrls = extractConsultedSourceUrls(response.output);
+          const consultedUrls = [...firstUrls, ...followUrls];
+          const merged = mergePatchAudits(
+            baseline,
+            parsed,
+            followParsed,
+            { webSearchExecuted: consultedUrls.length > 0, consultedUrls },
+            describeConsultedSources(consultedUrls)
+          );
+          parsed = {
+            ...parsed,
+            ...merged,
+            model: response.model || parsed.model,
+            webSearchUsed: consultedUrls.length > 0,
+            usage: readUsage(response.usage) ?? parsed.usage,
+          };
+        } else {
+          parsed = followParsed;
+        }
+      }
+    } catch (error) {
+      if (isTimeout(error)) trace.noteFailure(openAiTimeoutDiagnostic(OPENAI_TIMEOUT_FOLLOW_UP), "openai");
+      else trace.noteFailure(error, "openai");
+      throw reviewFailureForOpenAIError(error);
+    }
+  }
+
+  delete parsed.repairablePatches;
+  delete parsed.appliedPatchInputs;
   return parsed;
 }
