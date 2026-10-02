@@ -41,6 +41,7 @@ export interface LegalReviewAuditor {
     topic: string;
     content: string;
     publishedContent?: string;
+    sectionIndex?: number;
     trace?: LegalReviewTrace;
   }): Promise<AuditLessonResult>;
 }
@@ -303,6 +304,7 @@ export async function startLegalReviewSection(
       subject: lesson.subject,
       topic: lesson.topic || lesson.subject,
       content: slice,
+      sectionIndex: input.blockIndex,
       trace,
     });
     const pending: LegalReviewView = {
@@ -452,6 +454,7 @@ export async function reauditLegalReview(
       topic: current.topic,
       content: current.reviewedMarkdown,
       publishedContent: current.originalContent,
+      sectionIndex: current.blockIndex,
       trace,
     });
     const pending: LegalReviewView = {

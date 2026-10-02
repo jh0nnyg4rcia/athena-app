@@ -46,6 +46,8 @@ export interface AuditLessonInput {
   topic: string;
   content: string;
   publishedContent?: string;
+  /** Índice zero-based da parte interna. Ausente na revisão do documento inteiro. */
+  sectionIndex?: number;
   trace?: LegalReviewTrace;
   /** Só testes locais. Produção usa a Responses API. */
   callModel?: (input: {
@@ -325,6 +327,7 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
     topic: input.topic,
     content: input.content,
     publishedContent: input.publishedContent,
+    sectionIndex: input.sectionIndex,
   });
   const startedAt = Date.now();
   const remaining = () => OPENAI_AUDIT_BUDGET_MS - (Date.now() - startedAt);

@@ -299,6 +299,11 @@ export function LegalReviewPanel({
 
           {phase === "edit" && (
             <div className="flex flex-col gap-2 min-h-[50vh]">
+              {preview && (
+                <p className="text-sky-100 bg-sky-500/10 border border-sky-500/30 rounded-2xl px-4 py-3 text-sm">
+                  Este ajuste altera somente a versão candidata desta prévia. Não há publicação nem substituição da aula.
+                </p>
+              )}
               <label className="text-xs font-bold text-slate-300">Texto integral da versão candidata (Markdown com marcadores [BLOCK_1] a [BLOCK_6]):</label>
               <textarea
                 defaultValue={review?.reviewedMarkdown || ""}

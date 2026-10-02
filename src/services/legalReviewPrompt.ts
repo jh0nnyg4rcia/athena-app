@@ -179,6 +179,8 @@ export function buildUntrustedLessonInput(input: {
   topic: string;
   content: string;
   publishedContent?: string;
+  /** Índice zero-based da parte interna [BLOCK_n]. Ausente na revisão do documento inteiro. */
+  sectionIndex?: number;
 }): string {
   const fence = (value: string) => String(value || "").replaceAll("</aula_nao_confiavel>", "<aula_nao_confiavel_literal>");
   const published = input.publishedContent && input.publishedContent !== input.content
@@ -191,12 +193,18 @@ ${fence(input.publishedContent)}
 `
     : "";
   const fenced = fence(input.content);
+  const sectionIndex = input.sectionIndex;
+  const structural = Number.isInteger(sectionIndex) && sectionIndex !== undefined && sectionIndex >= 0
+    ? `- bloco da trilha: ${input.part + 1}
+- parte interna: ${sectionIndex + 1}
+O marcador [BLOCK_${sectionIndex + 1}] identifica esta parte interna da aula. O número dentro de [BLOCK_N] é a parte interna e não é o bloco da trilha. Não registre observação, correção, conflito ou alteração porque [BLOCK_${sectionIndex + 1}] aparece numa aula cujo bloco da trilha é ${input.part + 1}. Preserve esse marcador literalmente: não o renomeie, não o remova e não o renumere.`
+    : `- bloco: ${input.part + 1}`;
   return `Data da revisão: ${input.reviewDate}.
 
 Metadados estruturais, que você não pode alterar:
 - id: ${input.lessonId}
 - dia: ${input.day}
-- bloco: ${input.part + 1}
+${structural}
 - disciplina: ${input.subject}
 - tema: ${input.topic}
 

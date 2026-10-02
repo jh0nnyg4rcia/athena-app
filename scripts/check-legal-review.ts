@@ -799,6 +799,20 @@ async function main() {
   const lessonAt = fenced.indexOf("<aula_nao_confiavel>");
   const attackAt = fenced.indexOf(malicious);
   assert(warningAt >= 0 && lessonAt > warningAt && attackAt > lessonAt, "comando da aula fica isolado como dado");
+  assert(fenced.includes("- bloco: 1") && !fenced.includes("parte interna") && !fenced.includes("bloco da trilha"), "revisão do documento inteiro mantém o metadado de bloco");
+  const sectionFenced = buildUntrustedLessonInput({
+    reviewDate: date,
+    lessonId: "day_1_part_0_block_1",
+    day: 1,
+    part: 0,
+    sectionIndex: 1,
+    subject: "Constituição Federal",
+    topic: "Lei",
+    content: "[BLOCK_2]\nO conceito permanece.",
+  });
+  assert(sectionFenced.includes("- bloco da trilha: 1") && sectionFenced.includes("- parte interna: 2"), "prévia da parte distingue bloco da trilha e parte interna");
+  assert(sectionFenced.includes("[BLOCK_2]") && sectionFenced.includes("não é o bloco da trilha") && sectionFenced.includes("Preserve esse marcador literalmente"), "o marcador interno não é tratado como bloco da trilha");
+  assert(!sectionFenced.includes("- bloco: 1\n"), "prévia da parte não reutiliza o metadado ambíguo de bloco");
 
   const previousModel = process.env.OPENAI_REVIEW_MODEL;
   delete process.env.OPENAI_REVIEW_MODEL;
