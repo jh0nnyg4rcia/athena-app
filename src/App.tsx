@@ -152,6 +152,21 @@ function isCeoAccount(account: { email?: string | null } | null | undefined): bo
   return (account?.email || '').toLowerCase().trim() === ATHENA_CEO_EMAIL;
 }
 
+function homologatedReviewReady(
+  lesson: HomologatedLesson | null | undefined,
+  day: number | undefined,
+  part: number
+): boolean {
+  return Boolean(
+    day !== undefined &&
+    lesson &&
+    lesson.day === day &&
+    lesson.part === part &&
+    lesson.status === 'approved' &&
+    !lesson.pendingCloud
+  );
+}
+
 type ResumeState = { tab: AthenaTab; sessionId: string | null };
 
 function resumeKey(uid: string) {
@@ -1510,6 +1525,28 @@ const ChatMessage = memo(({
               animate={{ opacity: 1 }}
               className="pt-4 flex flex-wrap gap-3"
             >
+              {(() => {
+                const lessonCtx = inferTrilhaContext(
+                  { trilhaDay, trilhaMaterialIndex, title: '' },
+                  messages,
+                  msg
+                );
+                const effectiveDay = lessonCtx.day;
+                const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? lessonCtx.part);
+                const reviewReady = homologatedReviewReady(homologatedLessonState, effectiveDay, msgPartIdx);
+                if (!legalReviewButtonVisible(Boolean(isCEO), reviewReady) || effectiveDay === undefined) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onReviewLesson?.(effectiveDay, msgPartIdx, msg.currentBlockIndex ?? 0)}
+                    className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                    title="Audita somente a parte aberta. A aula publicada não é alterada."
+                  >
+                    <Search size={13} />
+                    <span>Revisar esta parte</span>
+                  </button>
+                );
+              })()}
               {(msg.currentBlockIndex ?? 0) < msg.blocks.length - 1 ? (
                 <div className="flex flex-wrap gap-3 items-center w-full pt-2">
                   {isError && retryMessage && (
@@ -1608,17 +1645,6 @@ const ChatMessage = memo(({
                                 </div>
 
                                 <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                                  {legalReviewButtonVisible(Boolean(isCEO), isThisPartApproved) && effectiveDay !== undefined && (
-                                    <button
-                                      type="button"
-                                      onClick={() => onReviewLesson?.(effectiveDay, msgPartIdx, msg.currentBlockIndex ?? 0)}
-                                      className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Audita somente a parte aberta. A aula publicada não é alterada."
-                                    >
-                                      <Search size={13} />
-                                      <span>Revisar esta parte</span>
-                                    </button>
-                                  )}
                                   <button
                                     type="button"
                                     onClick={() => onEditLesson?.(msgIdx)}
@@ -7161,6 +7187,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                             visibleLesson?.content
                           )
                         );
+                        const reviewReady = homologatedReviewReady(homologatedLessonState, tDay, tMatIdx ?? 0);
                         
                         const visibleMessages = (messages || []).filter(m => !getIsInstructionMessage(m));
                         
@@ -7343,7 +7370,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                       Testar Revisor Jurídico
                                     </button>
                                     )}
-                                    {legalReviewButtonVisible(Boolean(isCEO), cacheCurrent) && tDay !== undefined && (
+                                    {legalReviewButtonVisible(Boolean(isCEO), reviewReady) && tDay !== undefined && (
                                       <button
                                         type="button"
                                         onClick={() => openLegalReview(tDay, tMatIdx ?? 0, currentBlockIndex)}
