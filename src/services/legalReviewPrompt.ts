@@ -163,9 +163,12 @@ Se não encontrar comprovação adequada, marque a afirmação como NAO_CONFIRMA
 
 Cada alteração traz evidence[] próprio. Preencha institution, title, url, supportExplanation e sourceType. sourceType é um destes: LEI, CONSTITUICAO, DECRETO, RESOLUCAO, SUMULA, ACORDAO, REPERCUSSAO_GERAL, REPETITIVO, INFORMATIVO, ATO_NORMATIVO, OUTRO_OFICIAL.
 
-official e consulted serão conferidos pelo servidor. Não trate um booleano seu como prova. supportsChange só pode ser verdadeiro quando o documento sustenta aquela alteração específica.
+official e consulted serão conferidos pelo servidor. Não trate um booleano seu como prova. supportsChange só pode ser verdadeiro quando o documento sustenta aquela alteração específica ou a respectiva proposição material na alteração composta.
 
 Uma página oficial de outro órgão não comprova afirmação atribuída ao STF, ao STJ ou a outro tribunal. Tema de repercussão geral exige fonte do STF. Tema repetitivo do STJ exige fonte do STJ. Correção de lei federal exige fonte legislativa federal primária.
+
+Quando uma alteração jurídica compuser proposições de múltiplas normas ou fontes (por exemplo, vedações da Constituição Federal combinadas com impedimentos da Lei de Migração e regras do Estatuto dos Refugiados), inclua em evidence[] todas as fontes oficiais necessárias para cobrir conjuntamente cada uma das proposições materiais da redação revisada. Para cada evidência oficial que comprovar a sua respectiva proposição ou diploma na redação revisada, preencha supportsChange: true (não marque supportsChange: false apenas porque o documento sustenta uma proposição da alteração composta e não a alteração inteira). Quando todas as proposições materiais da redação revisada estiverem fundamentadas pelas fontes oficiais consultadas reunidas em evidence[], a alteração deve ser classificada com confirmation: "CONFIRMADO" e verified: true. Cada diploma ou órgão específico introduzido na redação deve possuir sua correspondente evidência oficial comprobatória. A combinação de fontes não autoriza inventar prazo, quórum ou recurso não previsto nas fontes consultadas.
+
 
 ## OBJETIVO FINAL
 

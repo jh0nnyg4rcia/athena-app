@@ -87,12 +87,66 @@ export function safeHttpUrl(raw: string): string | null {
 }
 
 export function canonicalSourceUrl(raw: string): string | null {
-  const href = safeHttpsUrl(raw);
-  if (!href) return null;
-  const url = new URL(href);
+  let url: URL;
+  try {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return null;
+    url = new URL(trimmed);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (!url.hostname || url.username || url.password) return null;
+  } catch {
+    return null;
+  }
   url.hash = "";
-  const path = url.pathname.replace(/\/+$/, "") || "/";
-  return `${url.protocol}//${url.hostname.toLowerCase()}${path}${url.search}`;
+
+  let hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (hostname.startsWith("www.")) {
+    hostname = hostname.slice(4);
+  }
+
+  let pathname = url.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    // preserve if malformed
+  }
+  pathname = pathname.toLowerCase().replace(/\/+$/, "") || "/";
+
+  // Normalização de variações do Planalto:
+  // ex.: /ccivil_03/constituicao/constituicaocompilado.htm -> /ccivil_03/constituicao/constituicao.htm
+  // ex.: /ccivil_03/constituicao/constituicao_compilado.htm -> /ccivil_03/constituicao/constituicao.htm
+  // ex.: /ccivil_03/leis/l9474compilado.htm -> /ccivil_03/leis/l9474.htm
+  if (hostname === "planalto.gov.br" || hostname.endsWith(".planalto.gov.br")) {
+    pathname = pathname
+      .replace(/_compilad[oa]\.htm$/i, ".htm")
+      .replace(/compilad[oa]\.htm$/i, ".htm");
+  }
+
+  // Documentos estáticos de legislação/jurisprudência (.htm, .html, .pdf)
+  // não usam query parameters para identificar o ato normativo.
+  // Limpar busca/âncoras geradas por motores de busca.
+  const isStaticDocument = /\.(?:html?|pdf)$/i.test(pathname);
+  let search = url.search;
+  if (isStaticDocument || !search) {
+    search = "";
+  } else {
+    // Se for URL dinâmica, remove parâmetros comuns de rastreamento/sessão
+    const sp = new URLSearchParams(search);
+    const keysToRemove: string[] = [];
+    for (const key of sp.keys()) {
+      if (/^(?:utm_|ref|source|search_context)/i.test(key)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      sp.delete(key);
+    }
+    sp.sort();
+    const qs = sp.toString();
+    search = qs ? `?${qs}` : "";
+  }
+
+  return `https://${hostname}${pathname}${search}`;
 }
 
 export function isOfficialLegalUrl(raw: string): boolean {
@@ -213,20 +267,6 @@ export function isMaterialLegalChange(change: Pick<LegalReviewChange, "type" | "
   return MATERIAL_TYPES.has(change.type) && MATERIAL_CATEGORIES.has(change.category);
 }
 
-function evidenceSupportsFamily(evidence: LegalReviewEvidence, family: string): boolean {
-  if (!evidence.official || !evidence.consulted || !evidence.supportsChange) return false;
-  const host = matchOfficialHost(evidence.url);
-  return Boolean(host && host.family === family && sourceTypeFits(evidence.sourceType, family));
-}
-
-function evidenceConfirmsMaterialClaim(evidence: LegalReviewEvidence): boolean {
-  if (!evidence.official || !evidence.consulted || evidence.supportsChange !== true) return false;
-  const url = safeHttpsUrl(evidence.url);
-  if (!url) return false;
-  const host = matchOfficialHost(url);
-  return Boolean(host && sourceTypeFits(evidence.sourceType, host.family));
-}
-
 const GENERIC_NORMATIVE_PATTERNS: Array<{
   type: "organ" | "deadline" | "quorum";
   pattern: RegExp;
@@ -245,7 +285,7 @@ const GENERIC_NORMATIVE_PATTERNS: Array<{
   },
 ];
 
-const SPECIFIC_ORGAN_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
+export const SPECIFIC_ORGAN_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
   { id: "STF", pattern: /\bSTF\b|Supremo Tribunal Federal/i },
   { id: "STJ", pattern: /\bSTJ\b|Superior Tribunal de Justi[cç]a/i },
   { id: "CNJ", pattern: /\bCNJ\b|Conselho Nacional de Justi[cç]a/i },
@@ -261,46 +301,275 @@ const SPECIFIC_ORGAN_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
   { id: "TCU", pattern: /\bTCU\b|\bTribuna(?:l|is) de Contas\b/i },
 ];
 
-const SPECIFIC_DEADLINE_PATTERNS: RegExp[] = [
+export const SPECIFIC_DEADLINE_PATTERNS: RegExp[] = [
   /\b\d+\s+(?:dias|meses|anos|horas)\b/i,
   /\b(?:cinco|dez|quinze|vinte|trinta|quarenta\s+e\s+cinco|sessenta|noventa|cento\s+e\s+vinte)\s+dias\b/i,
 ];
 
-const SPECIFIC_QUORUM_PATTERNS: RegExp[] = [
+export const SPECIFIC_QUORUM_PATTERNS: RegExp[] = [
   /\bmaioria\s+(?:absoluta|simples)\b/i,
   /\b(?:dois\s+ter[cç]os|2\/3|tr[eê]s\s+quintos|3\/5|unanimidade)\b/i,
 ];
 
-function organAttributedInExplanation(explanation: string, organPattern: RegExp): boolean {
+export const SPECIFIC_RECOURSE_PATTERNS: RegExp[] = [
+  /\brecurso\s+extraordin[aá]rio\b/i,
+  /\brecurso\s+especial\b/i,
+  /\bagravo\s+(?:de\s+instrumento|interno|regimental)\b/i,
+  /\bapela[cç][aã]o\b/i,
+  /\bembargos\s+de\s+declara[cç][aã]o\b/i,
+  /\brecurso\s+ordin[aá]rio(?:\s+constitucional)?\b/i,
+];
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeDeadlineText(text: string): string {
+  let normalized = text.toLowerCase();
+  // 1. Remove parênteses com extenso após dígitos: ex.: "2 (dois) anos" -> "2 anos", "1 (um) ano" -> "1 ano", "15 (quinze) dias" -> "15 dias"
+  normalized = normalized.replace(/\b(\d+)\s*\([a-zçãéíóú\s]+\)\s*(dias?|meses|m[eê]s|anos?|horas?)\b/gi, "$1 $2");
+  // 2. Padronização de números por extenso antes de unidades temporais ou isolados
+  normalized = normalized
+    .replace(/\b(?:um|uma)\b/g, "1")
+    .replace(/\b(?:dois|duas)\b/g, "2")
+    .replace(/\btr[eê]s\b/g, "3")
+    .replace(/\bquatro\b/g, "4")
+    .replace(/\bcinco\b/g, "5")
+    .replace(/\bseis\b/g, "6")
+    .replace(/\bsete\b/g, "7")
+    .replace(/\boito\b/g, "8")
+    .replace(/\bnove\b/g, "9")
+    .replace(/\bdez\b/g, "10")
+    .replace(/\bonze\b/g, "11")
+    .replace(/\bdoze\b/g, "12")
+    .replace(/\bquinze\b/g, "15")
+    .replace(/\bvinte\b/g, "20")
+    .replace(/\btrinta\b/g, "30")
+    .replace(/\bquarenta\s+e\s+cinco\b/g, "45")
+    .replace(/\bsessenta\b/g, "60")
+    .replace(/\bnoventa\b/g, "90")
+    .replace(/\bcento\s+e\s+vinte\b/g, "120");
+  // 3. Normalização de singular/plural nas unidades temporais para comparação uniforme
+  normalized = normalized
+    .replace(/\bano\b/g, "anos")
+    .replace(/\bdia\b/g, "dias")
+    .replace(/\bm[eê]s\b/g, "meses")
+    .replace(/\bhora\b/g, "horas");
+  return normalized;
+}
+
+
+function normalizeQuorumText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\bdois\s+ter[cç]os\b/g, "2/3")
+    .replace(/\btr[eê]s\s+quintos\b/g, "3/5");
+}
+
+export function extractSpecificStatutes(text: string): Array<{ type: string; number: string; raw: string }> {
+  const statutes: Array<{ type: string; number: string; raw: string }> = [];
+  const seen = new Set<string>();
+  const regex = /\b(Lei(?:\s+Complementar|\s+Federal)?|Decreto(?:-Lei)?|Medida\s+Provis[oó]ria|MP|LC)\s*(?:n[º°.]\s*)?(\d+(?:\.\d+)?)(?:\/(\d{2,4}))?\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text || ""))) {
+    const rawNumber = match[2].replace(/\./g, "");
+    if (!seen.has(rawNumber)) {
+      seen.add(rawNumber);
+      statutes.push({ type: match[1], number: rawNumber, raw: match[0] });
+    }
+  }
+  return statutes;
+}
+
+export function newlyIntroducedStatutes(
+  original: string,
+  revised: string
+): Array<{ type: string; number: string; raw: string }> {
+  const origStatutes = new Set(extractSpecificStatutes(original).map((s) => s.number));
+  return extractSpecificStatutes(revised).filter((s) => !origStatutes.has(s.number));
+}
+
+export function evidenceSupportsStatute(evidence: LegalReviewEvidence, statuteNumber: string): boolean {
+  if (!evidence.official || !evidence.consulted || !evidence.supportsChange) return false;
+  const cleanUrl = evidence.url.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  if (cleanUrl.includes(statuteNumber)) return true;
+  const cleanTitle = (evidence.title || "").replace(/\./g, "");
+  if (new RegExp(`\\b${statuteNumber}\\b`).test(cleanTitle)) return true;
+  const cleanExplanation = (evidence.supportExplanation || "").replace(/\./g, "");
+  if (new RegExp(`\\b${statuteNumber}\\b`).test(cleanExplanation)) return true;
+  return false;
+}
+
+export function changeContainsUngroundedInvention(
+  change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt"> & {
+    evidence?: LegalReviewEvidence[];
+  }
+): boolean {
+  const revised = String(change.revisedExcerpt || "");
+  if (!revised.trim()) return false;
+  const original = String(change.originalExcerpt || "");
+  const explanationsAndTitles = (change.evidence || [])
+    .map((e) => `${e.title || ""} ${e.supportExplanation || ""}`)
+    .join("\n");
+
+  // 1. Prazos específicos inventados
+  const normRevisedDeadlines = normalizeDeadlineText(revised);
+  const normOriginalDeadlines = normalizeDeadlineText(original);
+  const normEvidenceDeadlines = normalizeDeadlineText(explanationsAndTitles);
+
+  for (const pattern of SPECIFIC_DEADLINE_PATTERNS) {
+    const match = pattern.exec(normRevisedDeadlines);
+    if (match) {
+      const phrase = match[0];
+      const inOriginal = new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(normOriginalDeadlines);
+      const inEvidence = new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(normEvidenceDeadlines);
+      if (!inOriginal && !inEvidence) {
+        return true;
+      }
+    }
+  }
+
+  // 2. Quóruns específicos inventados
+  const normRevisedQuorum = normalizeQuorumText(revised);
+  const normOriginalQuorum = normalizeQuorumText(original);
+  const normEvidenceQuorum = normalizeQuorumText(explanationsAndTitles);
+
+  for (const pattern of SPECIFIC_QUORUM_PATTERNS) {
+    const match = pattern.exec(normRevisedQuorum);
+    if (match) {
+      const phrase = match[0];
+      const inOriginal = new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(normOriginalQuorum);
+      const inEvidence = new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(normEvidenceQuorum);
+      if (!inOriginal && !inEvidence) {
+        return true;
+      }
+    }
+  }
+
+  // 3. Recursos judiciais específicos inventados
+  for (const pattern of SPECIFIC_RECOURSE_PATTERNS) {
+    if (pattern.test(revised)) {
+      const inOriginal = pattern.test(original);
+      const inEvidence = pattern.test(explanationsAndTitles);
+      if (!inOriginal && !inEvidence) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+export function organAttributedInExplanation(explanation: string, organPattern: RegExp): boolean {
   if (!explanation) return false;
   const organSource = organPattern.source;
   const organFlags = organPattern.flags.includes("i") ? "i" : "";
 
-  // 1. Competência ou atribuição dirigida ao órgão específico:
-  // ex.: "compete ao STF", "cabe ao Supremo Tribunal Federal", "atribuição do STF", "competência privativa do STF"
-  const directedToOrgan = new RegExp(
-    `(?:\\bcompete|\\bcompet[eê]ncia(?:\\s+(?:origin[aá]ria|exclusiva|privativa|recursal))?|\\bcaber[aá]|\\bcabe|\\batribui[cç][aã]o|\\bincumbe|\\bjulgamento\\s+(?:privativo|origin[aá]rio)?|\\baprecia[cç][aã]o)\\s+(?:ao?|pelo?|do?|da)?\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+  // 1. Competência ou atribuição normativa/jurisdicional dirigida ao órgão:
+  // ex.: "compete ao STF", "compete privativamente ao STF", "cabe ao STF", "incumbe ao STF", "atribui ao STF", "pertence ao STF", "reserva-se ao STF", "outorga-se ao STF"
+  const directedVerbs = new RegExp(
+    `(?:\\b(?:compete|competir[aá]|cabe|caber[aá]|incumbe|incumbir[aá]|atribui(?:r(?:-[aá])?)?|pertence|reserva-se|outorga-se|defere-se)(?:\\s+(?:privativamente|exclusivamente|originariamente|especificamente))?)\\s+(?:(?:[eé]|ser[aá])\\s+)?(?:ao?|pelo?|do?|da|perante\\s+o|a\\s+cargo\\s+do?|sob\\s+a\\s+responsabilidade\\s+do?)\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
     organFlags
   );
-  if (directedToOrgan.test(explanation)) return true;
+  if (directedVerbs.test(explanation)) return true;
 
-  // 2. Órgão como sujeito com competência ou encargo jurisdicional direto:
-  // ex.: "STF é competente", "Supremo Tribunal Federal possui competência", "STF deve apreciar"
+  // 2. Substantivos de competência institucional vinculados ao órgão:
+  // ex.: "competência do STF", "competência privativa do STF", "atribuição do STF", "jurisdição do STF", "alçada do STF", "prerrogativa do STF", "encargo do STF", "função institucional do STF"
+  const competenceNouns = new RegExp(
+    `(?:\\b(?:compet[eê]ncia|atribui[cç][aã]o|jurisdi[cç][aã]o|al[cç]ada|prerrogativa|encargo|fun[cç][aã]o|papel|miss[aã]o\\s+institucional)(?:\\s+(?:origin[aá]ria|exclusiva|privativa|constitucional|recursal|institucional))?)\\s+(?:(?:[eé]|ser[aá])\\s+)?(?:ao?|pelo?|do?|da|perante\\s+o|pertencente\\s+ao?|delegad[oa]\\s+ao?)\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+    organFlags
+  );
+  if (competenceNouns.test(explanation)) return true;
+
+  // 3. Atos jurisdicionais, decisórios, autorizativos ou de controle conferidos ao órgão:
+  // ex.: "exige pronunciamento prévio do STF", "julgamento pelo STF", "manifestação do STF", "decisão do STF", "apreciação do STF", "análise pelo STF", "exame pelo STF", "deliberação do STF", "autorização da Câmara", "homologação do STF", "chancela do STF", "crivo do STF"
+  const jurisdictionalActs = new RegExp(
+    `(?:\\b(?:pronunciamento|manifesta[cç][aã]o|decis[aã]o|julgamento|aprecia[cç][aã]o|an[aá]lise|exame|delibera[cç][aã]o|autoriza[cç][aã]o|homologa[cç][aã]o|chancela|crivo|valida[cç][aã]o|ju[ií]zo\\s+de\\s+deliba[cç][aã]o)(?:\\s+(?:pr[eé]vi[oa]|origin[aá]ri[oa]|definitiv[oa]|vinculante))?)\\s+(?:(?:[eé]|ser[aá])\\s+)?(?:ao?|pelo?|pela|do?|da|perante\\s+o|a\\s+cargo\\s+do?|por\\s+parte\\s+do?|a\\s+ser\\s+proferid[oa]\\s+pelo?)\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+    organFlags
+  );
+  if (jurisdictionalActs.test(explanation)) return true;
+
+  // 4. Órgão como sujeito ativo de ato normativo, decisório ou jurisdicional:
+  // ex.: "STF é competente", "Senado Federal processa e julga", "STF julga a extradição", "STF aprecia a legalidade", "Câmara dos Deputados autoriza"
   const organAsSubject = new RegExp(
-    `(?:${organSource})\\s+(?:(?:[eé]\\s+competente|possui\\s+compet[eê]ncia|tem\\s+compet[eê]ncia|det[eé]m\\s+compet[eê]ncia|deve\\s+apreciar|deve\\s+julgar|aprecia\\s+o\\s+car[aá]ter|julga\\s+(?:o|a|os|as))\\b)`,
+    `(?:${organSource})\\s+(?:(?:[eé]\\s+competente|possui\\s+(?:a\\s+)?compet[eê]ncia|tem\\s+(?:a\\s+)?compet[eê]ncia|det[eé]m\\s+(?:a\\s+)?compet[eê]ncia|processa\\s+e\\s+julga|julga|aprecia|decide|delibera|autoriza|homologa|chancela|exige\\s+manifesta[cç][aã]o)\\b)`,
     organFlags
   );
   if (organAsSubject.test(explanation)) return true;
 
-  // 3. Definição expressa do órgão competente:
-  // ex.: "órgão competente: STF", "autoridade competente é o STF"
+  // 5. Submissão, via ou instância decisória perante o órgão:
+  // ex.: "submissão ao STF", "tramitação perante o STF", "pedido perante o STF", "processamento perante o Senado Federal"
+  const venueSubmission = new RegExp(
+    `(?:\\b(?:submiss[aã]o|tramita[cç][aã]o|processamento|pedido|requerimento|recurso)(?:\\s+(?:pr[eé]vi[oa]|diret[oa]))?)\\s+(?:ao?|perante\\s+o|junto\\s+ao?)\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+    organFlags
+  );
+  if (venueSubmission.test(explanation)) return true;
+
+  // 6. Definição expressa do órgão competente:
+  // ex.: "órgão competente: STF", "autoridade judiciária competente é o STF", "tribunal competente: Supremo Tribunal Federal"
   const organDefined = new RegExp(
-    `(?:(?:[oó]rg[aã]o|autoridade|tribunal)\\s+competente(?:\\s+[eé]|\\s*:\\s*|\\s+ser[aá])\\s+(?:o\\s+)?(?:${organSource})\\b)`,
+    `(?:(?:[oó]rg[aã]o(?:\\s+jurisdicional)?|autoridade(?:\\s+judici[aá]ria)?|tribunal|inst[aâ]ncia)\\s+competente(?:\\s+[eé]|\\s*:\\s*|\\s+ser[aá])\\s+(?:o\\s+|a\\s+)?(?:${organSource})\\b)`,
     organFlags
   );
   if (organDefined.test(explanation)) return true;
 
   return false;
+}
+
+function evidenceSupportsFamily(evidence: LegalReviewEvidence, family: string): boolean {
+  if (!evidence.official || !evidence.consulted || !evidence.supportsChange) return false;
+  const host = matchOfficialHost(evidence.url);
+  if (!host) return false;
+  // 1. Correspondência institucional direta (ex.: stf.jus.br -> STF)
+  if (host.family === family && sourceTypeFits(evidence.sourceType, family)) {
+    return true;
+  }
+  // 2. Cobertura composta: atos normativos oficiais (LEGISLACAO_FEDERAL ou DIARIO_OFICIAL)
+  // que atribuem expressamente competência, função ou encargo a um órgão específico (ex.: STF, STJ).
+  // A fonte legislativa só sustenta a especificidade do órgão se seu texto/explicação
+  // expressamente atribuir essa competência ao órgão (evitando que fontes genéricas sustentem
+  // órgãos não previstos no diploma).
+  if (host.family === "LEGISLACAO_FEDERAL" || host.family === "DIARIO_OFICIAL") {
+    const organItem = SPECIFIC_ORGAN_PATTERNS.find((item) => item.id === family);
+    if (organItem) {
+      // A Constituição da República Federativa do Brasil é a fonte primária originária
+      // das competências e prerrogativas dos órgãos constitucionais federais (STF, STJ, CNJ, TSE, TST, STM, TRFs, etc.).
+      const isConstitution =
+        evidence.sourceType === "CONSTITUICAO" ||
+        /\bconstituic(?:ao|ão)\b/i.test(evidence.title) ||
+        /\/constituicao(?:\.htm|_compilad[oa]\.htm)/i.test(evidence.url);
+      const isFederalConstitutionalOrgan =
+        family === "STF" ||
+        family === "STJ" ||
+        family === "CNJ" ||
+        family === "TSE" ||
+        family === "TST" ||
+        family === "STM" ||
+        family === "CONGRESSO" ||
+        family === "TCU" ||
+        family.startsWith("TRF") ||
+        family.startsWith("TRT");
+
+      if (isConstitution && isFederalConstitutionalOrgan) {
+        return true;
+      }
+
+      const attributed =
+        organAttributedInExplanation(evidence.supportExplanation, organItem.pattern) ||
+        organAttributedInExplanation(evidence.title, organItem.pattern);
+      if (attributed) return true;
+    }
+  }
+
+  return false;
+}
+
+function evidenceConfirmsMaterialClaim(evidence: LegalReviewEvidence): boolean {
+  if (!evidence.official || !evidence.consulted || evidence.supportsChange !== true) return false;
+  const url = safeHttpsUrl(evidence.url);
+  if (!url) return false;
+  const host = matchOfficialHost(url);
+  return Boolean(host && sourceTypeFits(evidence.sourceType, host.family));
 }
 
 export function changeLacksNormativeSpecificity(
@@ -352,9 +621,25 @@ export function changeLacksNormativeSpecificity(
   return false;
 }
 
-function confirmChange(change: Omit<LegalReviewChange, "verified" | "confirmation">, modelConfirmation: LegalConfirmation): LegalConfirmation {
+function confirmChange(
+  change: Omit<LegalReviewChange, "verified" | "confirmation">,
+  modelConfirmation: LegalConfirmation
+): LegalConfirmation {
   if (modelConfirmation === "NAO_CONFIRMADO") return "NAO_CONFIRMADO";
   if (changeLacksNormativeSpecificity(change)) return "NAO_CONFIRMADO";
+  if (changeContainsUngroundedInvention(change)) return "NAO_CONFIRMADO";
+
+  // Verificação de diplomas normativos expressamente introduzidos na revisão:
+  // Se o trecho revisado introduzir diplomas normativos específicos não presentes no original,
+  // cada diploma introduzido deve ser amparado por ao menos uma evidência oficial consultada.
+  const introducedStatutes = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
+  if (introducedStatutes.length > 0) {
+    const statutesCovered = introducedStatutes.every((statute) =>
+      change.evidence.some((item) => evidenceSupportsStatute(item, statute.number))
+    );
+    if (!statutesCovered) return "NAO_CONFIRMADO";
+  }
+
   const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
   const required = institutionsNamedInClaim(claim, change.category);
   if (required.length) {
@@ -1063,9 +1348,14 @@ export function classifyLegalAudit(
   }
   for (const change of changes) {
     if (change.confirmation === "NAO_CONFIRMADO") {
-      const reason = changeLacksNormativeSpecificity(change)
-        ? "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica."
-        : (change.reason || "NAO_CONFIRMADO");
+      let reason = change.reason || "NAO_CONFIRMADO";
+      if (changeLacksNormativeSpecificity(change)) {
+        reason =
+          "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica.";
+      } else if (changeContainsUngroundedInvention(change)) {
+        reason =
+          "Invenção normativa desprovida de fundamento em fonte oficial (prazo, quórum ou recurso inexistente na fonte).";
+      }
       pushClaim(change.revisedExcerpt || change.originalExcerpt, reason);
     }
   }

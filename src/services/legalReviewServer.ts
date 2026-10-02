@@ -131,17 +131,35 @@ export function extractConsultedSourceUrls(output: unknown): string[] {
   const urls: string[] = [];
   for (const item of output) {
     if (!item || typeof item !== "object") continue;
-    const call = item as {
-      type?: string;
-      action?: { type?: string; sources?: Array<{ url?: string }>; url?: string | null };
-    };
-    if (call.type !== "web_search_call" || !call.action) continue;
-    if (Array.isArray(call.action.sources)) {
-      for (const source of call.action.sources) {
-        if (source?.url) urls.push(source.url);
+    const record = item as Record<string, unknown>;
+    const action = record.action as Record<string, unknown> | undefined;
+
+    if (action) {
+      if (Array.isArray(action.sources)) {
+        for (const source of action.sources) {
+          if (source && typeof source === "object" && typeof (source as Record<string, unknown>).url === "string") {
+            urls.push((source as Record<string, unknown>).url as string);
+          }
+        }
+      }
+      if (typeof action.url === "string" && action.url) {
+        urls.push(action.url);
       }
     }
-    if (call.action.type === "open_page" && call.action.url) urls.push(call.action.url);
+
+    if (Array.isArray(record.sources)) {
+      for (const source of record.sources) {
+        if (source && typeof source === "object" && typeof (source as Record<string, unknown>).url === "string") {
+          urls.push((source as Record<string, unknown>).url as string);
+        } else if (typeof source === "string" && source) {
+          urls.push(source);
+        }
+      }
+    }
+
+    if (typeof record.url === "string" && record.url) {
+      urls.push(record.url);
+    }
   }
   return urls;
 }

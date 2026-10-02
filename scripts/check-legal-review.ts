@@ -638,6 +638,517 @@ async function main() {
   ]), originalWithMp, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
   assert(mpAudit?.changes[0]?.confirmation === "CONFIRMADO", "não-colisão: sigla MP de Medida Provisória não exige Ministério Público");
 
+  // Regressão Cobertura Composta: Caso Real "Asilo, Refúgio e Extradição" (Lei 13.445/2017 + Decreto 9.199/2017)
+  const PLANALTO_LEI_13445 = "https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2017/lei/l13445.htm";
+  const PLANALTO_DECRETO_9199 = "https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2017/decreto/d9199.htm";
+
+  const evidenceLei13445 = {
+    institution: "Presidência da República",
+    title: "Lei nº 13.445/2017 (Lei de Migração)",
+    url: PLANALTO_LEI_13445,
+    official: true,
+    consulted: true,
+    supportsChange: true,
+    supportExplanation: "A Lei 13.445/2017 estabelece nos incisos VII e IX do art. 82 impedimentos distintos à extradição, e no § 1º a preponderância da infração comum. O art. 82, § 2º dispõe que a autoridade judiciária competente apreciará o caráter da infração.",
+    sourceType: "LEI",
+  };
+
+  const evidenceDecreto9199 = {
+    institution: "Presidência da República",
+    title: "Decreto nº 9.199/2017 (Regulamento da Lei de Migração)",
+    url: PLANALTO_DECRETO_9199,
+    official: true,
+    consulted: true,
+    supportsChange: true,
+    supportExplanation: "O Decreto 9.199/2017, art. 267, § 2º, regulamenta a matéria fixando expressamente: Caberá ao Supremo Tribunal Federal a apreciação do caráter da infração.",
+    sourceType: "DECRETO",
+  };
+
+  const asiloOriginalExcerpt = "Para aplicação da vedação fundada na natureza política do fato, cabe à autoridade judiciária competente apreciar o caráter da infração.";
+  const asiloCompositeRevisedExcerpt = "Nos termos do art. 82, VII e IX, da Lei 13.445/2017, são impedimentos distintos a natureza política do fato e a condição de asilado ou refugiado, admitida a extradição quando preponderar o crime comum (§ 1º); outrossim, nos termos do art. 267, § 2º, do Decreto 9.199/2017, cabe ao Supremo Tribunal Federal apreciar o caráter da infração.";
+  const asiloOriginalFull = original.replace("O conceito permanece.", asiloOriginalExcerpt);
+  const asiloCompositeFull = original.replace("O conceito permanece.", asiloCompositeRevisedExcerpt);
+
+  // 10. Regressão Composta 1: Ambas as fontes fornecidas -> CONFIRMADO
+  const compositeBothAudit = normalizeLegalAudit(auditBody(asiloCompositeFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Adequação dos impedimentos da Lei 13.445/2017 e da competência do STF regulamentada no Decreto 9.199/2017.",
+      originalExcerpt: asiloOriginalExcerpt,
+      revisedExcerpt: asiloCompositeRevisedExcerpt,
+      evidence: [evidenceLei13445, evidenceDecreto9199],
+    }),
+  ]), asiloOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445, PLANALTO_DECRETO_9199] });
+  assert(compositeBothAudit?.changes[0]?.confirmation === "CONFIRMADO", "regressão composta 1: composição de Lei 13.445 e Decreto 9.199 é CONFIRMADA com ambas as fontes");
+  assert(compositeBothAudit?.verificationLevel === "VERIFICADO_COM_FONTES", "regressão composta 1: nível verificado com fontes mantido");
+  assert(compositeBothAudit?.unverifiedClaims.length === 0, "regressão composta 1: zero alegações não verificadas");
+
+  // 11. Regressão Composta 2: Falta a fonte do STF (apenas Lei 13.445 fornecida) -> NAO_CONFIRMADO
+  const compositeMissingStfSourceAudit = normalizeLegalAudit(auditBody(asiloCompositeFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Adequação aos impedimentos à extradição.",
+      originalExcerpt: asiloOriginalExcerpt,
+      revisedExcerpt: asiloCompositeRevisedExcerpt,
+      evidence: [evidenceLei13445],
+    }),
+  ]), asiloOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445] });
+  assert(compositeMissingStfSourceAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "regressão composta 2: falta de fonte específica do STF impede confirmação da competência do STF");
+  assert(compositeMissingStfSourceAudit?.verificationLevel !== "VERIFICADO_COM_FONTES", "regressão composta 2: nível verificado rebaixado");
+
+  // 12. Regressão Composta 3: Falta a fonte da Lei 13.445 (apenas Decreto 9.199 fornecido) -> NAO_CONFIRMADO
+  const compositeMissingStatuteSourceAudit = normalizeLegalAudit(auditBody(asiloCompositeFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Adequação à competência do STF.",
+      originalExcerpt: asiloOriginalExcerpt,
+      revisedExcerpt: asiloCompositeRevisedExcerpt,
+      evidence: [evidenceDecreto9199],
+    }),
+  ]), asiloOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_DECRETO_9199] });
+  assert(compositeMissingStatuteSourceAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "regressão composta 3: decreto isolado não sustenta normas autônomas introduzidas da Lei 13.445");
+
+  // 13. Regressão Composta 4: Combinação de fontes inventando prazo inexistente -> NAO_CONFIRMADO
+  const asiloWithDeadline = asiloCompositeRevisedExcerpt + " O pedido deve ser apreciado no prazo de 5 dias.";
+  const compositeWithDeadlineAudit = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", asiloWithDeadline), [
+    change({
+      category: "LEGISLACAO",
+      reason: "Adequação com prazo inventado.",
+      originalExcerpt: asiloOriginalExcerpt,
+      revisedExcerpt: asiloWithDeadline,
+      evidence: [evidenceLei13445, evidenceDecreto9199],
+    }),
+  ]), asiloOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445, PLANALTO_DECRETO_9199] });
+  assert(compositeWithDeadlineAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "regressão composta 4: combinação de fontes não pode inventar prazo inexistente");
+  assert(compositeWithDeadlineAudit?.unverifiedClaims.some((c) => c.reason.includes("prazo") || c.reason.includes("Invenção")) === true, "regressão composta 4: registra motivo de invenção normativa de prazo");
+
+  // 14. Regressão Composta 5: Combinação de fontes inventando quórum inexistente -> NAO_CONFIRMADO
+  const asiloWithQuorum = asiloCompositeRevisedExcerpt + " A decisão exige maioria de dois terços dos membros.";
+  const compositeWithQuorumAudit = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", asiloWithQuorum), [
+    change({
+      category: "LEGISLACAO",
+      reason: "Adequação com quórum inventado.",
+      originalExcerpt: asiloOriginalExcerpt,
+      revisedExcerpt: asiloWithQuorum,
+      evidence: [evidenceLei13445, evidenceDecreto9199],
+    }),
+  ]), asiloOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445, PLANALTO_DECRETO_9199] });
+  assert(compositeWithQuorumAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "regressão composta 5: combinação de fontes não pode inventar quórum inexistente");
+
+  // 15. Regressão Composta 6: Combinação de fontes inventando recurso inexistente -> NAO_CONFIRMADO
+  const asiloWithRecourse = asiloCompositeRevisedExcerpt + " Cabendo recurso especial ao Superior Tribunal de Justiça.";
+  const compositeWithRecourseAudit = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", asiloWithRecourse), [
+    change({
+      category: "LEGISLACAO",
+      reason: "Adequação com recurso inventado.",
+      originalExcerpt: asiloOriginalExcerpt,
+      revisedExcerpt: asiloWithRecourse,
+      evidence: [evidenceLei13445, evidenceDecreto9199],
+    }),
+  ]), asiloOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445, PLANALTO_DECRETO_9199] });
+  assert(compositeWithRecourseAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "regressão composta 6: combinação de fontes não pode inventar recurso inexistente");
+
+  // 16. Regressão Composta 7: Paráfrase preservando autoridade judiciária competente quando apenas a lei é usada -> CONFIRMADO
+  const asiloGenericPreservedExcerpt = "Nos termos do art. 82, VII e IX, da Lei 13.445/2017, são hipóteses de impedimento da extradição, cabendo à autoridade judiciária competente apreciar o caráter da infração (§ 2º).";
+  const compositeGenericAudit = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", asiloGenericPreservedExcerpt), [
+    change({
+      category: "LEGISLACAO",
+      reason: "Atualização estritamente conforme a Lei 13.445/2017.",
+      originalExcerpt: asiloOriginalExcerpt,
+      revisedExcerpt: asiloGenericPreservedExcerpt,
+      evidence: [evidenceLei13445],
+    }),
+  ]), asiloOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445] });
+  assert(compositeGenericAudit?.changes[0]?.confirmation === "CONFIRMADO", "regressão composta 7: preservação legítima do conceito legal genérico com base na lei é confirmada");
+  assert(compositeGenericAudit?.verificationLevel === "VERIFICADO_COM_FONTES", "regressão composta 7: nível verificado mantido");
+
+  // =========================================================================
+  // REGRESSÕES OBRIGATÓRIAS: CASO REAL 1 (CF/88) E CASO REAL 2 (LEI 13.445 + STF)
+  // =========================================================================
+
+  // --- CASO REAL 1: CONSTITUIÇÃO FEDERAL (arts. 51, I, e 52, I) ---
+  const cfOriginalExcerpt = "Poder Legislativo: Típica (legislar e fiscalizar); Atípica de natureza executiva (administrar suas secretarias e servidores).";
+  const cfRevisedExcerpt = "Poder Legislativo: Típica (legislar e fiscalizar); Atípica de natureza executiva (administrar suas secretarias e servidores) e jurisdicional (o Senado Federal processa e julga o Presidente e o Vice-Presidente da República nos crimes de responsabilidade, após autorização da Câmara dos Deputados por dois terços de seus membros).";
+  const cfOriginalFull = original.replace("O conceito permanece.", cfOriginalExcerpt);
+  const cfRevisedFull = original.replace("O conceito permanece.", cfRevisedExcerpt);
+
+  const URL_CF_PLANALTO_RAW = "https://www.planalto.gov.br/ccivil_03/constituicao/constituicao.htm#art51";
+  const URL_CF_PLANALTO_HTTP_SEARCH = "http://www.planalto.gov.br/ccivil_03/constituicao/constituicao.htm";
+  const URL_CF_PLANALTO_COMPILADO = "https://planalto.gov.br/ccivil_03/Constituicao/ConstituicaoCompilado.htm";
+  const URL_CF_NON_OFFICIAL = "https://jusbrasil.com.br/artigos/constituicao-art-51";
+
+  const evidenceCfOfficial = {
+    institution: "Legislação federal",
+    title: "Constituição da República Federativa do Brasil de 1988 — arts. 51, I, e 52, I",
+    url: URL_CF_PLANALTO_RAW,
+    official: true,
+    consulted: true,
+    supportsChange: true,
+    supportExplanation: "A CF/88 prevê no art. 51, I, a autorização por dois terços da Câmara dos Deputados e no art. 52, I, o processamento e julgamento pelo Senado Federal nos crimes de responsabilidade.",
+    sourceType: "CONSTITUICAO" as const,
+  };
+
+  // Teste 1: CF/88 consultada com reconciliação de variação canônica de URL (compilado vs htm, #art51) -> CONFIRMADO
+  const cfAuditConfirmed = normalizeLegalAudit(auditBody(cfRevisedFull, [
+    change({
+      type: "ACRESCIMO",
+      category: "CONCEITO",
+      reason: "Inclusão da função atípica jurisdicional do Poder Legislativo prevista na CF/88 (arts. 51, I, e 52, I).",
+      originalExcerpt: cfOriginalExcerpt,
+      revisedExcerpt: cfRevisedExcerpt,
+      evidence: [evidenceCfOfficial],
+    }),
+  ]), cfOriginalFull, { webSearchExecuted: true, consultedUrls: [URL_CF_PLANALTO_COMPILADO] });
+  assert(cfAuditConfirmed?.changes[0]?.confirmation === "CONFIRMADO", "Caso Real 1: CF/88 com normalização canônica de URL é CONFIRMADA");
+  assert(cfAuditConfirmed?.changes[0]?.evidence[0]?.consulted === true, "Caso Real 1: evidência da CF/88 reconhecida como consultada");
+  assert(cfAuditConfirmed?.changes[0]?.evidence[0]?.official === true, "Caso Real 1: evidência da CF/88 reconhecida como oficial");
+  assert(cfAuditConfirmed?.changes[0]?.evidence[0]?.supportsChange === true, "Caso Real 1: evidência da CF/88 suporta a alteração");
+  assert(cfAuditConfirmed?.verificationLevel === "VERIFICADO_COM_FONTES", "Caso Real 1: nível verificado com fontes atingido");
+
+  // Teste 1b: Reconciliação quando a busca externa retorna link http -> CONFIRMADO
+  const cfAuditHttpSearch = normalizeLegalAudit(auditBody(cfRevisedFull, [
+    change({
+      type: "ACRESCIMO",
+      category: "CONCEITO",
+      reason: "Inclusão da função atípica jurisdicional do Poder Legislativo prevista na CF/88 (arts. 51, I, e 52, I).",
+      originalExcerpt: cfOriginalExcerpt,
+      revisedExcerpt: cfRevisedExcerpt,
+      evidence: [evidenceCfOfficial],
+    }),
+  ]), cfOriginalFull, { webSearchExecuted: true, consultedUrls: [URL_CF_PLANALTO_HTTP_SEARCH] });
+  assert(cfAuditHttpSearch?.changes[0]?.confirmation === "CONFIRMADO", "Caso Real 1b: reconciliação de URL de busca HTTP com evidência HTTPS");
+  assert(cfAuditConfirmed?.changes[0]?.evidence[0]?.consulted === true, "Caso Real 1: evidência da CF/88 reconhecida como consultada");
+  assert(cfAuditConfirmed?.changes[0]?.evidence[0]?.official === true, "Caso Real 1: evidência da CF/88 reconhecida como oficial");
+  assert(cfAuditConfirmed?.changes[0]?.evidence[0]?.supportsChange === true, "Caso Real 1: evidência da CF/88 suporta a alteração");
+  assert(cfAuditConfirmed?.verificationLevel === "VERIFICADO_COM_FONTES", "Caso Real 1: nível verificado com fontes atingido");
+
+  // Teste 2: CF/88 sem URL correspondente em consultedUrls -> NAO_CONFIRMADO (falha fechada para fontes não consultadas)
+  const cfAuditUnconsulted = normalizeLegalAudit(auditBody(cfRevisedFull, [
+    change({
+      type: "ACRESCIMO",
+      category: "CONCEITO",
+      reason: "Inclusão da função atípica jurisdicional do Poder Legislativo.",
+      originalExcerpt: cfOriginalExcerpt,
+      revisedExcerpt: cfRevisedExcerpt,
+      evidence: [evidenceCfOfficial],
+    }),
+  ]), cfOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445] });
+  assert(cfAuditUnconsulted?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 1 (falha fechada): CF/88 sem URL em consultedUrls é NÃO_CONFIRMADO");
+  assert(cfAuditUnconsulted?.changes[0]?.evidence[0]?.consulted === false, "Caso Real 1: evidência não consultada marcada como consulted=false");
+  assert(cfAuditUnconsulted?.verificationLevel !== "VERIFICADO_COM_FONTES", "Caso Real 1: rebaixa verificação quando URL não foi consultada");
+
+  // Teste 3: URL não oficial para CF/88 (ex.: Jusbrasil) -> NAO_CONFIRMADO (rejeição de domínio não oficial)
+  const evidenceCfNonOfficial = {
+    ...evidenceCfOfficial,
+    url: URL_CF_NON_OFFICIAL,
+  };
+  const cfAuditNonOfficial = normalizeLegalAudit(auditBody(cfRevisedFull, [
+    change({
+      type: "ACRESCIMO",
+      category: "CONCEITO",
+      reason: "Inclusão da função atípica jurisdicional do Poder Legislativo.",
+      originalExcerpt: cfOriginalExcerpt,
+      revisedExcerpt: cfRevisedExcerpt,
+      evidence: [evidenceCfNonOfficial],
+    }),
+  ]), cfOriginalFull, { webSearchExecuted: true, consultedUrls: [URL_CF_NON_OFFICIAL] });
+  assert(cfAuditNonOfficial?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 1 (falha fechada): fonte não oficial é NÃO_CONFIRMADO mesmo se consultada");
+  assert(cfAuditNonOfficial?.changes[0]?.evidence[0]?.official === false, "Caso Real 1: domínio não oficial marcado como official=false");
+
+  // --- CASO REAL 2: LEI 13.445/2017 + STF ("pronunciamento prévio do STF") ---
+  const extraditionOriginalExcerpt = "A extradição não será concedida quando se tratar de crime político.";
+  const extraditionRevisedExcerpt = "A lei impede a extradição por crime político ou de opinião e quando o extraditando é beneficiário de refúgio ou asilo territorial; prevê a exceção da preponderância do crime comum e exige pronunciamento prévio do STF sobre a legalidade e a procedência da extradição.";
+  const extraditionOriginalFull = original.replace("O conceito permanece.", extraditionOriginalExcerpt);
+  const extraditionRevisedFull = original.replace("O conceito permanece.", extraditionRevisedExcerpt);
+
+  const evidenceLei13445WithStfAttribution = {
+    institution: "Presidência da República",
+    title: "Lei nº 13.445/2017",
+    url: PLANALTO_LEI_13445,
+    official: true,
+    consulted: true,
+    supportsChange: true,
+    supportExplanation: "A lei impede a extradição por crime político ou de opinião e quando o extraditando é beneficiário de refúgio ou asilo territorial; prevê a exceção da preponderância do crime comum e exige pronunciamento prévio do STF sobre a legalidade e a procedência da extradição.",
+    sourceType: "LEI" as const,
+  };
+
+  // Teste 4: Lei 13.445 consultada com atribuição expressa ("exige pronunciamento prévio do STF") -> CONFIRMADO
+  const extraditionConfirmedAudit = normalizeLegalAudit(auditBody(extraditionRevisedFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Atualização conforme Lei de Migração e atribuição de competência do STF.",
+      originalExcerpt: extraditionOriginalExcerpt,
+      revisedExcerpt: extraditionRevisedExcerpt,
+      evidence: [evidenceLei13445WithStfAttribution],
+    }),
+  ]), extraditionOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445] });
+  assert(extraditionConfirmedAudit?.changes[0]?.confirmation === "CONFIRMADO", "Caso Real 2: Lei 13.445 com 'pronunciamento prévio do STF' é CONFIRMADA");
+  assert(extraditionConfirmedAudit?.verificationLevel === "VERIFICADO_COM_FONTES", "Caso Real 2: nível verificado com fontes mantido");
+
+  // Teste 5: Lei mencionando STF sem atribuição normativa (mera citação passiva) -> NAO_CONFIRMADO
+  const evidenceLei13445PassiveMention = {
+    ...evidenceLei13445WithStfAttribution,
+    supportExplanation: "A lei impede a extradição por crime político, mencionando a jurisprudência histórica do STF em notas explicativas.",
+  };
+  const extraditionPassiveMentionAudit = normalizeLegalAudit(auditBody(extraditionRevisedFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Atualização com STF.",
+      originalExcerpt: extraditionOriginalExcerpt,
+      revisedExcerpt: extraditionRevisedExcerpt,
+      evidence: [evidenceLei13445PassiveMention],
+    }),
+  ]), extraditionOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445] });
+  assert(extraditionPassiveMentionAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 2 (falha fechada): menção passiva ao STF sem atribuição normativa não confirma competência");
+
+  // Teste 6: Lei contendo apenas expressão genérica "autoridade judiciária competente" -> NAO_CONFIRMADO para reivindicação do STF
+  const evidenceLei13445GenericOrgan = {
+    ...evidenceLei13445WithStfAttribution,
+    supportExplanation: "O art. 82, § 2º dispõe que cabe à autoridade judiciária competente apreciar o caráter da infração.",
+  };
+  const extraditionGenericOrganAudit = normalizeLegalAudit(auditBody(extraditionRevisedFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Atualização com STF.",
+      originalExcerpt: extraditionOriginalExcerpt,
+      revisedExcerpt: extraditionRevisedExcerpt,
+      evidence: [evidenceLei13445GenericOrgan],
+    }),
+  ]), extraditionOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445] });
+  assert(extraditionGenericOrganAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 2 (falha fechada): autoridade judiciária competente genérica não sustenta STF específico");
+
+  // Teste 7: Atribuição a tribunal incorreto (STJ atribuído quando o trecho revisado exige STF) -> NAO_CONFIRMADO
+  const evidenceLei13445WrongCourt = {
+    ...evidenceLei13445WithStfAttribution,
+    supportExplanation: "A lei prevê recurso ao Superior Tribunal de Justiça para apreciar o pedido.",
+  };
+  const extraditionWrongCourtAudit = normalizeLegalAudit(auditBody(extraditionRevisedFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Atualização com STF.",
+      originalExcerpt: extraditionOriginalExcerpt,
+      revisedExcerpt: extraditionRevisedExcerpt,
+      evidence: [evidenceLei13445WrongCourt],
+    }),
+  ]), extraditionOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445] });
+  assert(extraditionWrongCourtAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 2 (falha fechada): competência do STJ não sustenta alegação de STF");
+
+  // Teste 8: Evidência não consultada para Lei 13.445 -> NAO_CONFIRMADO
+  const extraditionUnconsultedAudit = normalizeLegalAudit(auditBody(extraditionRevisedFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Atualização conforme Lei de Migração.",
+      originalExcerpt: extraditionOriginalExcerpt,
+      revisedExcerpt: extraditionRevisedExcerpt,
+      evidence: [evidenceLei13445WithStfAttribution],
+    }),
+  ]), extraditionOriginalFull, { webSearchExecuted: true, consultedUrls: [] });
+  assert(extraditionUnconsultedAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 2 (falha fechada): evidência não consultada recusa confirmação");
+
+  // Teste 9: Evidência com supportsChange = false -> NAO_CONFIRMADO
+  const evidenceSupportsFalse = {
+    ...evidenceLei13445WithStfAttribution,
+    supportsChange: false,
+  };
+  const extraditionSupportsFalseAudit = normalizeLegalAudit(auditBody(extraditionRevisedFull, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Atualização conforme Lei de Migração.",
+      originalExcerpt: extraditionOriginalExcerpt,
+      revisedExcerpt: extraditionRevisedExcerpt,
+      evidence: [evidenceSupportsFalse],
+    }),
+  ]), extraditionOriginalFull, { webSearchExecuted: true, consultedUrls: [PLANALTO_LEI_13445] });
+  assert(extraditionSupportsFalseAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 2 (falha fechada): supportsChange=false recusa confirmação");
+
+  // Teste 10: Preservação de casos anteriores de Cobertura Composta (Lei 13.445 + Decreto 9.199)
+  assert(compositeBothAudit?.changes[0]?.confirmation === "CONFIRMADO", "Preservação: Cobertura Composta de Lei 13.445 + Decreto 9.199 permanece CONFIRMADA");
+
+  // Teste 11: Preservação das rejeições de invenção normativa (prazo, quórum, recurso)
+  assert(compositeWithDeadlineAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Preservação: prazo inventado permanece NÃO_CONFIRMADO");
+  assert(compositeWithQuorumAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Preservação: quórum inventado permanece NÃO_CONFIRMADO");
+  assert(compositeWithRecourseAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Preservação: recurso inventado permanece NÃO_CONFIRMADO");
+
+  // Teste 12: Comportamento da UI para Lei 9.474/1997 — Projeção do status global da alteração na evidência
+  // Na UI (LegalReviewPanel.tsx, linha 65): Status = confirmed && evidence.supportsChange ? "Confirmado" : "Não confirmado"
+  // Uma evidência oficial, consultada e válida (como Lei 9.474/1997) exibe "Não confirmado" se o change estiver NÃO_CONFIRMADO.
+  const evidenceLei9474 = {
+    institution: "Presidência da República",
+    title: "Lei nº 9.474/1997 (Estatuto dos Refugiados)",
+    url: "https://www.planalto.gov.br/ccivil_03/leis/l9474.htm",
+    official: true,
+    consulted: true,
+    supportsChange: true,
+    supportExplanation: "Define os mecanismos para a implementação do Estatuto dos Refugiados de 1951.",
+    sourceType: "LEI" as const,
+  };
+  const uiEvidenceStatus = (changeConfirmed: boolean, evSupports: boolean) =>
+    changeConfirmed && evSupports ? "Confirmado" : "Não confirmado";
+  assert(uiEvidenceStatus(false, evidenceLei9474.supportsChange) === "Não confirmado", "Auditoria UI: evidência da Lei 9.474 projeta 'Não confirmado' quando a alteração não foi confirmada");
+  assert(uiEvidenceStatus(true, evidenceLei9474.supportsChange) === "Confirmado", "Auditoria UI: evidência da Lei 9.474 projeta 'Confirmado' quando a alteração foi confirmada");
+
+  // =========================================================================
+  // CASO REAL 4: EXTRADIÇÃO, ASILO E REFÚGIO (CF/88 + LEI 13.445 + LEI 9.474)
+  // =========================================================================
+  const PLANALTO_CF88_EXTRADICAO = "https://www.planalto.gov.br/ccivil_03/constituicao/constituicao.htm";
+  const PLANALTO_LEI_9474_FULL = "https://www.planalto.gov.br/ccivil_03/leis/l9474.htm";
+
+  const case4OriginalExcerpt = "10. Concessão de asilo político.";
+  const case4RevisedExcerpt =
+    "10. Concessão de asilo político e refúgio. A extradição não será concedida quando o fato constituir crime político ou de opinião (CF/88, art. 5º, LII) ou quando o extraditando for beneficiário de refúgio (Lei 9.474/1997, arts. 33 e 34), ressalvada a preponderância da infração comum (Lei 13.445/2017, art. 82, VII e § 1º). Caberá ao Supremo Tribunal Federal apreciar o caráter da infração (art. 82, § 2º), vedada a extradição executória quando a pena restante for inferior a 2 anos (art. 82, § 4º).";
+
+  const case4OriginalFull = original.replace("O conceito permanece.", case4OriginalExcerpt);
+  const case4RevisedFull = original.replace("O conceito permanece.", case4RevisedExcerpt);
+
+  const case4EvCf88 = {
+    institution: "Presidência da República",
+    title: "Constituição da República Federativa do Brasil de 1988 — art. 5º, LII",
+    url: PLANALTO_CF88_EXTRADICAO,
+    sourceType: "CONSTITUICAO" as const,
+    official: true,
+    consulted: true,
+    supportsChange: true,
+    supportExplanation: "O art. 5º, LII da CF/88 veda expressamente a extradição de estrangeiro por crime político ou de opinião.",
+  };
+
+  const case4EvLei13445 = {
+    institution: "Presidência da República",
+    title: "Lei nº 13.445/2017, art. 82, VII e IX, §§ 1º, 2º e 4º",
+    url: PLANALTO_LEI_13445,
+    sourceType: "LEI" as const,
+    official: true,
+    consulted: true,
+    supportsChange: true,
+    supportExplanation: "A Lei de Migração estabelece impedimentos à extradição, a ressalva da preponderância da infração comum (§ 1º), a competência para apreciar o caráter da infração (§ 2º) e a vedação à extradição executória com pena restante inferior a dois anos (§ 4º).",
+  };
+
+  const case4EvLei9474 = {
+    institution: "Presidência da República",
+    title: "Lei nº 9.474/1997, arts. 33 e 34",
+    url: PLANALTO_LEI_9474_FULL,
+    sourceType: "LEI" as const,
+    official: true,
+    consulted: true,
+    supportsChange: true,
+    supportExplanation: "Os arts. 33 e 34 da Lei 9.474/1997 estabelecem que a concessão de refúgio obsta o seguimento de qualquer pedido de extradição baseado nos fatos que fundamentaram o refúgio.",
+  };
+
+  // Teste 13a: Caso Real 4 com todas as 3 fontes oficiais consultadas -> CONFIRMADO
+  const case4AuditConfirmed = normalizeLegalAudit(auditBody(case4RevisedFull, [
+    change({
+      id: "change-case-4",
+      type: "PRECISAO",
+      severity: "ALTA",
+      category: "LEGISLACAO",
+      originalExcerpt: case4OriginalExcerpt,
+      revisedExcerpt: case4RevisedExcerpt,
+      reason: "Atualizar os regimes de extradição, asilo e refúgio conforme a CF/88, Lei 13.445/2017 e Lei 9.474/1997.",
+      verified: true,
+      confirmation: "CONFIRMADO",
+      evidence: [case4EvCf88, case4EvLei13445, case4EvLei9474],
+    }),
+  ]), case4OriginalFull, {
+    webSearchExecuted: true,
+    consultedUrls: [PLANALTO_CF88_EXTRADICAO, PLANALTO_LEI_13445, PLANALTO_LEI_9474_FULL],
+  });
+  assert(case4AuditConfirmed?.changes[0]?.confirmation === "CONFIRMADO", "Caso Real 4: alteração composta Extradição, Asilo e Refúgio é CONFIRMADA com as 3 fontes oficiais");
+  assert(case4AuditConfirmed?.verificationLevel === "VERIFICADO_COM_FONTES", "Caso Real 4: nível global é VERIFICADO_COM_FONTES");
+  assert(case4AuditConfirmed?.unverifiedClaims.length === 0, "Caso Real 4: unverifiedClaims é vazio");
+  assert(case4AuditConfirmed?.changes[0]?.evidence.length === 3, "Caso Real 4: todas as 3 evidências preservadas");
+  assert(case4AuditConfirmed?.changes[0]?.evidence.every((e) => e.consulted && e.official && e.supportsChange) === true, "Caso Real 4: todas as 3 evidências são oficiais, consultadas e suportam a alteração");
+  assert(case4AuditConfirmed?.changes[0]?.evidence.every((e) => uiEvidenceStatus(case4AuditConfirmed.changes[0].confirmation === "CONFIRMADO", e.supportsChange) === "Confirmado") === true, "Caso Real 4: na UI, todas as 3 evidências projetam 'Confirmado'");
+
+  // Teste 13b: Normalização de redação legal de prazo — formato com parênteses "inferior a 2 (dois) anos"
+  const case4EvLei13445Parenthetical = {
+    ...case4EvLei13445,
+    supportExplanation: "Veda a extradição executória quando a pena restante a ser cumprida for inferior a 2 (dois) anos.",
+  };
+  const case4AuditParenthetical = normalizeLegalAudit(auditBody(case4RevisedFull, [
+    change({
+      id: "change-case-4-paren",
+      type: "PRECISAO",
+      severity: "ALTA",
+      category: "LEGISLACAO",
+      originalExcerpt: case4OriginalExcerpt,
+      revisedExcerpt: case4RevisedExcerpt,
+      reason: "Atualizar com prazo no formato 2 (dois) anos.",
+      verified: true,
+      confirmation: "CONFIRMADO",
+      evidence: [case4EvCf88, case4EvLei13445Parenthetical, case4EvLei9474],
+    }),
+  ]), case4OriginalFull, {
+    webSearchExecuted: true,
+    consultedUrls: [PLANALTO_CF88_EXTRADICAO, PLANALTO_LEI_13445, PLANALTO_LEI_9474_FULL],
+  });
+  assert(case4AuditParenthetical?.changes[0]?.confirmation === "CONFIRMADO", "Caso Real 4: formato legislativo '2 (dois) anos' normaliza e não acusa invenção normativa");
+
+  // Teste 13c: Falha fechada para invenção normativa de prazo (ex.: "inferior a 5 anos" não previsto) -> NAO_CONFIRMADO
+  const case4RevisedWithInventedDeadline = case4RevisedExcerpt.replace("inferior a 2 anos", "inferior a 5 anos");
+  const case4AuditInventedDeadline = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", case4RevisedWithInventedDeadline), [
+    change({
+      id: "change-case-4-inv-deadline",
+      type: "PRECISAO",
+      severity: "ALTA",
+      category: "LEGISLACAO",
+      originalExcerpt: case4OriginalExcerpt,
+      revisedExcerpt: case4RevisedWithInventedDeadline,
+      reason: "Atualização com prazo inventado.",
+      verified: true,
+      confirmation: "CONFIRMADO",
+      evidence: [case4EvCf88, case4EvLei13445, case4EvLei9474],
+    }),
+  ]), case4OriginalFull, {
+    webSearchExecuted: true,
+    consultedUrls: [PLANALTO_CF88_EXTRADICAO, PLANALTO_LEI_13445, PLANALTO_LEI_9474_FULL],
+  });
+  assert(case4AuditInventedDeadline?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 4 (falha fechada): prazo de 5 anos inexistente nas fontes é NÃO_CONFIRMADO");
+  assert(case4AuditInventedDeadline?.verificationLevel !== "VERIFICADO_COM_FONTES", "Caso Real 4 (falha fechada): invenção de prazo impede VERIFICADO_COM_FONTES");
+  assert(case4AuditInventedDeadline?.unverifiedClaims.some((c) => c.reason.includes("Invenção normativa") || c.reason.includes("prazo")) === true, "Caso Real 4: registra unverifiedClaim de invenção normativa");
+
+  // Teste 13d: Falha fechada para omissão de diploma normativo essencial introduzido (Lei 9.474 introduzida sem evidência) -> NAO_CONFIRMADO
+  const case4AuditMissingStatute = normalizeLegalAudit(auditBody(case4RevisedFull, [
+    change({
+      id: "change-case-4-missing-statute",
+      type: "PRECISAO",
+      severity: "ALTA",
+      category: "LEGISLACAO",
+      originalExcerpt: case4OriginalExcerpt,
+      revisedExcerpt: case4RevisedExcerpt,
+      reason: "Atualizar sem a fonte do refúgio.",
+      verified: true,
+      confirmation: "CONFIRMADO",
+      evidence: [case4EvCf88, case4EvLei13445], // falta Lei 9.474
+    }),
+  ]), case4OriginalFull, {
+    webSearchExecuted: true,
+    consultedUrls: [PLANALTO_CF88_EXTRADICAO, PLANALTO_LEI_13445],
+  });
+  assert(case4AuditMissingStatute?.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso Real 4 (falha fechada): falta de evidência da Lei 9.474 introduzida no texto recusa confirmação");
+
+  // Teste 13e: Variação com competência da 'autoridade judiciária competente' preservada conforme a lei -> CONFIRMADO
+  const case4GenericAuthorityExcerpt =
+    "10. Concessão de asilo político e refúgio. A extradição não será concedida quando o fato constituir crime político ou de opinião (CF/88, art. 5º, LII) ou quando o extraditando for beneficiário de refúgio (Lei 9.474/1997, arts. 33 e 34), ressalvada a preponderância da infração comum (Lei 13.445/2017, art. 82, VII e § 1º). Caberá à autoridade judiciária competente apreciar o caráter da infração (art. 82, § 2º), vedada a extradição executória quando a pena restante for inferior a 2 anos (art. 82, § 4º).";
+  const case4AuditGenericAuthority = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", case4GenericAuthorityExcerpt), [
+    change({
+      id: "change-case-4-generic-auth",
+      type: "PRECISAO",
+      severity: "ALTA",
+      category: "LEGISLACAO",
+      originalExcerpt: case4OriginalExcerpt,
+      revisedExcerpt: case4GenericAuthorityExcerpt,
+      reason: "Atualizar com a dicção legal de autoridade judiciária competente.",
+      verified: true,
+      confirmation: "CONFIRMADO",
+      evidence: [case4EvCf88, case4EvLei13445, case4EvLei9474],
+    }),
+  ]), case4OriginalFull, {
+    webSearchExecuted: true,
+    consultedUrls: [PLANALTO_CF88_EXTRADICAO, PLANALTO_LEI_13445, PLANALTO_LEI_9474_FULL],
+  });
+  assert(case4AuditGenericAuthority?.changes[0]?.confirmation === "CONFIRMADO", "Caso Real 4: redação com 'autoridade judiciária competente' direta da lei é CONFIRMADA");
+  assert(case4AuditGenericAuthority?.verificationLevel === "VERIFICADO_COM_FONTES", "Caso Real 4: 'autoridade judiciária competente' direta da lei atinge VERIFICADO_COM_FONTES");
+  assert(case4AuditGenericAuthority?.unverifiedClaims.length === 0, "Caso Real 4: 'autoridade judiciária competente' sem alegações não verificadas");
+
   const uncovered = normalizeLegalAudit(auditBody(
     original.replace("O conceito permanece.", "O conceito permanece.\n\nO STF decidiu em segredo que a pena mudou."),
     [change({})]
