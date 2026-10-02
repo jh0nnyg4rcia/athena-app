@@ -405,6 +405,55 @@ async function main() {
     }),
   ]), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
   assert(unnamedDenied?.changes[0]?.confirmation === "NAO_CONFIRMADO", "evidência sem pertinência não confirma alteração material sem família nomeada");
+  const unnamedAbsent = normalizeLegalAudit(auditBody(original.replace("detenção", "reclusão"), [
+    change({
+      category: "CONCEITO",
+      reason: unnamedReason,
+      originalExcerpt: "detenção",
+      revisedExcerpt: "reclusão",
+      evidence: [evidence(PLANALTO, "LEI", true)],
+    }),
+  ]), original, { webSearchExecuted: true, consultedUrls: [STF] });
+  assert(unnamedAbsent?.changes[0]?.evidence[0]?.consulted === false, "C: evidência oficial fora da pesquisa não é consultada");
+  assert(unnamedAbsent?.changes[0]?.confirmation === "NAO_CONFIRMADO", "C: URL não consultada não confirma alteração sem família nomeada");
+  const unnamedUnofficial = normalizeLegalAudit(auditBody(original.replace("detenção", "reclusão"), [
+    change({
+      category: "CONCEITO",
+      reason: unnamedReason,
+      originalExcerpt: "detenção",
+      revisedExcerpt: "reclusão",
+      evidence: [evidence("https://www.jusbrasil.com.br/algo", "LEI", true)],
+    }),
+  ]), original, { webSearchExecuted: true, consultedUrls: ["https://www.jusbrasil.com.br/algo"] });
+  assert(unnamedUnofficial?.changes[0]?.evidence[0]?.official === false, "D: URL não oficial permanece não oficial");
+  assert(unnamedUnofficial?.changes[0]?.confirmation === "NAO_CONFIRMADO", "D: URL não oficial não confirma alteração sem família nomeada");
+  const unnamedMismatch = normalizeLegalAudit(auditBody(original.replace("detenção", "reclusão"), [
+    change({
+      category: "CONCEITO",
+      reason: unnamedReason,
+      originalExcerpt: "detenção",
+      revisedExcerpt: "reclusão",
+      evidence: [evidence(PLANALTO, "ACORDAO", true)],
+    }),
+  ]), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+  assert(unnamedMismatch?.changes[0]?.evidence[0]?.supportsChange === false, "E: sourceType incompatível perde a pertinência");
+  assert(unnamedMismatch?.changes[0]?.confirmation === "NAO_CONFIRMADO", "E: sourceType incompatível não confirma a alteração");
+  const stfConfirmed = normalizeLegalAudit(auditBody(original, [
+    change({
+      category: "JURISPRUDENCIA",
+      reason: "O STF decidiu que a pena é de reclusão.",
+      evidence: [evidence(STF, "ACORDAO", true)],
+    }),
+  ]), original, { webSearchExecuted: true, consultedUrls: [STF] });
+  assert(stfConfirmed?.changes[0]?.confirmation === "CONFIRMADO", "H: evidência do STF confirma alegação do STF");
+  const stjConfirmed = normalizeLegalAudit(auditBody(original, [
+    change({
+      category: "JURISPRUDENCIA",
+      reason: "O STJ entende que a pena é de reclusão.",
+      evidence: [evidence(STJ, "ACORDAO", true)],
+    }),
+  ]), original, { webSearchExecuted: true, consultedUrls: [STJ] });
+  assert(stjConfirmed?.changes[0]?.confirmation === "CONFIRMADO", "I: evidência do STJ confirma alegação do STJ");
 
   const uncovered = normalizeLegalAudit(auditBody(
     original.replace("O conceito permanece.", "O conceito permanece.\n\nO STF decidiu em segredo que a pena mudou."),
