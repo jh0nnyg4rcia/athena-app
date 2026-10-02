@@ -11,15 +11,28 @@ import {
   startLegalReviewTest,
 } from "../services/legalReviewFlow";
 import { LegalReviewError, isReviewId, readLessonSlot } from "../services/legalReviewRepository";
+import { sanitizeLegalReviewError, sanitizeLegalReviewMessage } from "../services/legalReviewTrace";
+
+function publicFailure(message: string): string {
+  const safe = sanitizeLegalReviewMessage(message);
+  if (!message || safe === "Falha sem mensagem segura.") {
+    return "A auditoria falhou. A aula publicada não foi alterada.";
+  }
+  return safe;
+}
 
 function sendReviewError(res: Response, error: unknown) {
   if (error instanceof LegalReviewError) {
-    res.status(error.status).json({ error: error.message });
+    res.status(error.status).json({ error: publicFailure(error.message) });
     return;
   }
-  const message = error instanceof Error ? error.message : "A auditoria falhou. A aula publicada não foi alterada.";
-  console.error("[legal-review] falha sem alteração da aula.");
-  res.status(500).json({ error: message.slice(0, 280) });
+  const safe = sanitizeLegalReviewError(error, "http");
+  console.error(JSON.stringify({
+    severity: "ERROR",
+    message: "LEGAL_REVIEW_ERROR",
+    error: safe,
+  }));
+  res.status(500).json({ error: publicFailure(safe.message) });
 }
 
 export function registerLegalReviewRoutes(

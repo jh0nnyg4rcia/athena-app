@@ -39,9 +39,16 @@ import {
   buildReviewCreateParams,
   extractConsultedSourceUrls,
   interpretReviewResponse,
+  OPENAI_ATTEMPT_TIMEOUT_MS,
+  OPENAI_AUDIT_BUDGET_MS,
+  OPENAI_REVIEW_SDK_MAX_RETRIES,
   reviewFailureForOpenAIError,
   reviewModelName,
 } from "../src/services/legalReviewServer";
+import {
+  createLegalReviewTrace,
+  sanitizeLegalReviewError,
+} from "../src/services/legalReviewTrace";
 import {
   approveLegalReview,
   reauditLegalReview,
@@ -738,6 +745,142 @@ async function main() {
   const guardAt = approveSlice.indexOf("reviewCannotBePublished");
   assert(guardAt > 0 && guardAt < approveSlice.indexOf("LESSONS") && guardAt < approveSlice.indexOf("PARTS"), "Firestore recusa teste antes de escrever aulas ou partes");
   assert(readFileSync("firestore.rules", "utf8").includes("match /legal_reviews/{reviewId}"), "rules negam a coleção ao cliente");
+
+  const functionSource = readFileSync("functions/src/index.ts", "utf8");
+  assert(functionSource.includes("timeoutSeconds: 600"), "a Function HTTP espera até 600 segundos");
+  assert(!functionSource.includes("timeoutSeconds: 300"), "o timeout antigo de 300 segundos saiu da Function");
+  assert(OPENAI_AUDIT_BUDGET_MS === 250_000 && OPENAI_AUDIT_BUDGET_MS < 600_000, "a OpenAI não ocupa os 600 segundos da Function");
+  assert(OPENAI_ATTEMPT_TIMEOUT_MS <= OPENAI_AUDIT_BUDGET_MS, "cada chamada tem teto menor ou igual ao orçamento");
+  assert(OPENAI_REVIEW_SDK_MAX_RETRIES === 0, "o SDK não repete a chamada por conta própria");
+  assert(serverSource.includes("tryNumber < 2") && serverSource.includes("trace.retry("), "o retry da auditoria continua e fica registrado");
+  assert(!serverSource.includes("console.log") && !serverSource.includes("console.error"), "o servidor da auditoria não grava log solto");
+
+  const secret = "sk-test-secret-value-1234567890";
+  const bearer = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
+  const lessonExcerpt = LEGAL_REVIEW_TEST_MATERIAL.slice(40, 120);
+  const revisedMarkdown = "## Revisado secreto\n\nEste Markdown revisado não pode ir para o log.";
+  const reasoning = "raciocinio interno que o modelo nao deve revelar no log";
+  const lines: string[] = [];
+  const trace = createLegalReviewTrace({
+    testMode: true,
+    requestedModel: "gpt-5.6",
+    write: (line) => lines.push(line),
+  });
+  trace.start();
+  trace.openaiStart();
+  trace.openaiEnd("gpt-5.6");
+  trace.validationStart();
+  trace.validationEnd({
+    servedModel: "gpt-5.6",
+    verificationLevel: "VERIFICADO_COM_FONTES",
+    consultedSources: 2,
+    changes: 3,
+    unverifiedClaims: 1,
+  });
+  trace.firestoreStart("complete");
+  trace.firestoreEnd();
+  trace.success({
+    servedModel: "gpt-5.6",
+    verificationLevel: "VERIFICADO_COM_FONTES",
+    consultedSources: 2,
+    changes: 3,
+    unverifiedClaims: 1,
+  });
+  const dumped = lines.join("\n");
+  assert(lines.some((line) => line.includes("LEGAL_REVIEW_START")), "há marco de início");
+  assert(lines.some((line) => line.includes("LEGAL_REVIEW_OPENAI_START")), "há marco de início da OpenAI");
+  assert(lines.some((line) => line.includes("LEGAL_REVIEW_OPENAI_END")), "há marco de fim da OpenAI");
+  assert(lines.some((line) => line.includes("LEGAL_REVIEW_VALIDATION_START")), "há marco de início da validação");
+  assert(lines.some((line) => line.includes("LEGAL_REVIEW_VALIDATION_END")), "há marco de fim da validação");
+  assert(lines.some((line) => line.includes("LEGAL_REVIEW_FIRESTORE_START")), "há marco de início do Firestore");
+  assert(lines.some((line) => line.includes("LEGAL_REVIEW_FIRESTORE_END")), "há marco de fim do Firestore");
+  assert(lines.some((line) => line.includes("LEGAL_REVIEW_SUCCESS")), "há marco de sucesso");
+  assert(!dumped.includes(secret) && !dumped.includes("sk-"), "log de sucesso não inclui API key");
+  assert(!dumped.includes("Authorization") && !dumped.includes("Bearer"), "log de sucesso não inclui Authorization");
+  assert(!dumped.includes(lessonExcerpt), "log de sucesso não inclui a aula");
+  assert(!dumped.includes("Revisado secreto") && !dumped.includes("## "), "log de sucesso não inclui Markdown revisado");
+  const success = JSON.parse(lines[lines.length - 1] || "{}") as {
+    at?: string;
+    elapsedMs?: number;
+    stageMs?: number;
+    testMode?: boolean;
+    requestedModel?: string;
+    servedModel?: string;
+    attempt?: number;
+    verificationLevel?: string;
+    consultedSources?: number;
+    changes?: number;
+    unverifiedClaims?: number;
+  };
+  assert(typeof success.at === "string" && !Number.isNaN(Date.parse(success.at)), "sucesso tem timestamp");
+  assert(typeof success.elapsedMs === "number" && typeof success.stageMs === "number", "sucesso tem durações");
+  assert(success.testMode === true && success.requestedModel === "gpt-5.6" && success.servedModel === "gpt-5.6", "sucesso identifica modo e modelos");
+  assert(success.attempt === 1, "sucesso informa a tentativa");
+  assert(success.verificationLevel === "VERIFICADO_COM_FONTES", "sucesso informa o nível de verificação");
+  assert(success.consultedSources === 2 && success.changes === 3 && success.unverifiedClaims === 1, "sucesso informa as quantidades");
+
+  const errorLines: string[] = [];
+  const errorTrace = createLegalReviewTrace({
+    testMode: true,
+    requestedModel: `chave ${secret}`,
+    write: (line) => errorLines.push(line),
+  });
+  const openaiError = Object.assign(
+    new Error(`falha ${secret} ${bearer} ${lessonExcerpt} ${revisedMarkdown} ${reasoning}`),
+    {
+      name: "APIError",
+      status: 500,
+      code: "server_error",
+      type: "server_error",
+      request: { headers: { Authorization: bearer }, body: revisedMarkdown },
+      headers: { Authorization: bearer, cookie: "session=secret" },
+      error: { message: lessonExcerpt, type: "server_error", reasoning },
+      reasoning,
+      output_text: revisedMarkdown,
+    }
+  );
+  errorTrace.noteFailure(openaiError, "openai");
+  errorTrace.error(openaiError);
+  const errorDump = errorLines.join("\n");
+  const safeError = sanitizeLegalReviewError(openaiError, "openai");
+  assert(safeError.name === "APIError" && safeError.status === 500 && safeError.code === "server_error", "erro sanitizado guarda código e status");
+  assert(safeError.type === "server_error" && safeError.stage === "openai", "erro sanitizado guarda tipo e etapa");
+  assert(safeError.message === "Falha sem mensagem segura.", "mensagem com segredo ou aula é substituída");
+  assert(!("request" in safeError) && !("headers" in safeError) && !("reasoning" in safeError), "erro sanitizado não copia o objeto do SDK");
+  assert(!errorDump.includes(secret) && !errorDump.includes("sk-"), "log de erro não inclui API key");
+  assert(!errorDump.includes("Authorization") && !errorDump.includes("Bearer") && !errorDump.includes("eyJ"), "log de erro não inclui Authorization");
+  assert(!errorDump.includes(lessonExcerpt), "log de erro não inclui a aula");
+  assert(!errorDump.includes("Revisado secreto") && !errorDump.includes(reasoning), "log de erro não inclui Markdown nem raciocínio");
+  const loggedError = JSON.parse(errorLines[0] || "{}") as { message?: string; error?: { stage?: string; status?: number } };
+  assert(loggedError.message === "LEGAL_REVIEW_ERROR" && loggedError.error?.stage === "openai" && loggedError.error?.status === 500, "log de erro é estruturado");
+
+  const retryLines: string[] = [];
+  const retryTrace = createLegalReviewTrace({
+    testMode: false,
+    requestedModel: "gpt-5.6",
+    write: (line) => retryLines.push(line),
+  });
+  retryTrace.openaiStart();
+  retryTrace.noteFailure(Object.assign(new Error("timeout"), { status: 408, code: "timeout" }), "openai");
+  retryTrace.retry("timeout");
+  const retry = JSON.parse(retryLines.find((line) => line.includes("LEGAL_REVIEW_RETRY")) || "{}") as {
+    retryReason?: string;
+    attempt?: number;
+    error?: { status?: number; message?: string };
+  };
+  assert(retry.retryReason === "timeout" && retry.attempt === 1 && retry.error?.status === 408, "retry real fica identificável");
+  assert(retry.error?.message === "timeout", "retry de timeout conserva a mensagem curta");
+
+  const credentialLines: string[] = [];
+  const credentialTrace = createLegalReviewTrace({
+    testMode: false,
+    requestedModel: "gpt-5.6",
+    write: (line) => credentialLines.push(line),
+  });
+  credentialTrace.error(new Error("OPENAI_API_KEY ausente no servidor. GEMINI_API_KEY também não entra no log."));
+  const credentialDump = credentialLines.join("\n");
+  assert(!credentialDump.includes("OPENAI_API_KEY") && !credentialDump.includes("GEMINI_API_KEY"), "log não repete o nome da variável secreta");
+  assert(credentialDump.includes("A credencial do provedor não está disponível no servidor."), "ausência de credencial vira mensagem segura");
 
   if (failed) {
     console.error(`${failed} verificações falharam.`);

@@ -8,7 +8,13 @@ import {
   type StoredCatalogLesson,
 } from "../lib/legalReviewTypes";
 import { isCeoEmail } from "../lib/contentProvider";
-import type { AuditLessonResult } from "./legalReviewServer";
+import { reviewModelName, type AuditLessonResult } from "./legalReviewServer";
+import {
+  createLegalReviewTrace,
+  sanitizeLegalReviewMessage,
+  type LegalReviewTrace,
+  type LegalReviewTraceCounts,
+} from "./legalReviewTrace";
 import { candidateMarkdownAccepted } from "./legalReviewPublish";
 import {
   LegalReviewError,
@@ -34,12 +40,49 @@ export interface LegalReviewAuditor {
     topic: string;
     content: string;
     publishedContent?: string;
+    trace?: LegalReviewTrace;
   }): Promise<AuditLessonResult>;
 }
 
 export type StartReviewResult =
   | { alreadyReviewed: true; message: string; lastReviewDate: string; reviewId: string }
   | { alreadyReviewed: false; review: LegalReviewView };
+
+function reviewCounts(review: Pick<LegalReviewView, "model" | "verificationLevel" | "consultedSources" | "changes" | "unverifiedClaims">): LegalReviewTraceCounts {
+  return {
+    servedModel: review.model,
+    verificationLevel: review.verificationLevel,
+    consultedSources: review.consultedSources.length,
+    changes: review.changes.length,
+    unverifiedClaims: review.unverifiedClaims.length,
+  };
+}
+
+function failureMessage(error: unknown): string {
+  if (error instanceof LegalReviewError) return error.message;
+  const raw = error instanceof Error ? error.message : "";
+  const safe = sanitizeLegalReviewMessage(raw);
+  if (!raw || safe === "Falha sem mensagem segura.") {
+    return "A auditoria falhou. A aula publicada não foi alterada.";
+  }
+  return safe;
+}
+
+async function tracedFirestore(
+  trace: LegalReviewTrace,
+  step: "begin" | "complete" | "fail",
+  write: () => Promise<unknown>
+) {
+  trace.firestoreStart(step);
+  try {
+    await write();
+    trace.firestoreEnd();
+  } catch (error) {
+    trace.noteFailure(error, "firestore");
+    trace.firestoreEnd();
+    throw error;
+  }
+}
 
 function blankReview(
   lesson: StoredCatalogLesson,
@@ -128,7 +171,15 @@ export async function startLegalReview(
 
   const reviewDate = formatReviewDate(new Date(now));
   const processing = blankReview(lesson, input.uid, now, reviewDate);
-  await repo.begin(processing);
+  const trace = createLegalReviewTrace({ testMode: false, requestedModel: reviewModelName() });
+  trace.start();
+  try {
+    await tracedFirestore(trace, "begin", () => repo.begin(processing));
+  } catch (error) {
+    trace.error(error);
+    if (error instanceof LegalReviewError) throw error;
+    throw new LegalReviewError(failureMessage(error), 502);
+  }
 
   try {
     const audit = await auditor.audit({
@@ -139,6 +190,7 @@ export async function startLegalReview(
       subject: lesson.subject,
       topic: lesson.topic || lesson.subject,
       content: lesson.content,
+      trace,
     });
     const pending: LegalReviewView = {
       ...processing,
@@ -161,15 +213,13 @@ export async function startLegalReview(
       auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
       sourceHistory: [],
     };
-    await repo.complete(pending);
+    await tracedFirestore(trace, "complete", () => repo.complete(pending));
+    trace.success(reviewCounts(pending));
     return { alreadyReviewed: false, review: publicReview(pending) };
   } catch (error) {
-    const message = error instanceof LegalReviewError
-      ? error.message
-      : error instanceof Error
-        ? error.message
-        : "A auditoria falhou. A aula publicada não foi alterada.";
-    await repo.fail(processing.id, lesson.id, message);
+    trace.error(error);
+    const message = failureMessage(error);
+    await tracedFirestore(trace, "fail", () => repo.fail(processing.id, lesson.id, message)).catch(() => undefined);
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(message, 502);
   }
@@ -197,7 +247,15 @@ export async function startLegalReviewTest(
     topic: "Material sintético",
     content,
   }, input.uid, now, reviewDate, true);
-  await repo.begin(processing);
+  const trace = createLegalReviewTrace({ testMode: true, requestedModel: reviewModelName() });
+  trace.start();
+  try {
+    await tracedFirestore(trace, "begin", () => repo.begin(processing));
+  } catch (error) {
+    trace.error(error);
+    if (error instanceof LegalReviewError) throw error;
+    throw new LegalReviewError(failureMessage(error), 502);
+  }
   try {
     const audit = await auditor.audit({
       reviewDate,
@@ -207,6 +265,7 @@ export async function startLegalReviewTest(
       subject: processing.subject,
       topic: processing.topic,
       content,
+      trace,
     });
     const pending: LegalReviewView = {
       ...processing,
@@ -229,15 +288,13 @@ export async function startLegalReviewTest(
       auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
       sourceHistory: [],
     };
-    await repo.complete(pending);
+    await tracedFirestore(trace, "complete", () => repo.complete(pending));
+    trace.success(reviewCounts(pending));
     return publicReview(pending);
   } catch (error) {
-    const message = error instanceof LegalReviewError
-      ? error.message
-      : error instanceof Error
-        ? error.message
-        : "A auditoria falhou. A aula publicada não foi alterada.";
-    await repo.fail(processing.id, LEGAL_REVIEW_TEST_LESSON_ID, message);
+    trace.error(error);
+    const message = failureMessage(error);
+    await tracedFirestore(trace, "fail", () => repo.fail(processing.id, LEGAL_REVIEW_TEST_LESSON_ID, message)).catch(() => undefined);
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(message, 502);
   }
@@ -269,6 +326,8 @@ export async function reauditLegalReview(
   if (!candidateMarkdownAccepted(current.originalContent, current.reviewedMarkdown)) {
     throw new LegalReviewError("O Markdown revisado quebrou a estrutura da aula. A aula publicada não foi alterada.", 400);
   }
+  const trace = createLegalReviewTrace({ testMode: current.testMode === true, requestedModel: reviewModelName() });
+  trace.start();
   try {
     const audit = await auditor.audit({
       reviewDate: formatReviewDate(new Date(now)),
@@ -279,6 +338,7 @@ export async function reauditLegalReview(
       topic: current.topic,
       content: current.reviewedMarkdown,
       publishedContent: current.originalContent,
+      trace,
     });
     const pending: LegalReviewView = {
       ...current,
@@ -309,14 +369,12 @@ export async function reauditLegalReview(
         },
       ].slice(-6),
     };
-    await repo.complete(pending);
+    await tracedFirestore(trace, "complete", () => repo.complete(pending));
+    trace.success(reviewCounts(pending));
     return publicReview(pending);
   } catch (error) {
-    const message = error instanceof LegalReviewError
-      ? error.message
-      : error instanceof Error
-        ? error.message
-        : "A auditoria falhou. A aula publicada não foi alterada.";
+    trace.error(error);
+    const message = failureMessage(error);
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(message, 502);
   }

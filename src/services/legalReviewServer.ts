@@ -7,8 +7,15 @@ import { LEGAL_REVIEW_JSON_SCHEMA, normalizeLegalAudit, type NormalizedAudit } f
 import { searchDomainsForLesson } from "../lib/legalReviewSources";
 import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "./legalReviewPrompt";
 import { redactProviderError } from "./openaiServerService";
+import { createLegalReviewTrace, type LegalReviewTrace, type LegalReviewTraceCounts } from "./legalReviewTrace";
 
 const DEFAULT_OPENAI_REVIEW_MODEL = "gpt-5.6";
+/** A Function tem 600s. Este orçamento deixa validação, Firestore e a resposta HTTP de fora da espera da OpenAI. */
+export const OPENAI_AUDIT_BUDGET_MS = 250_000;
+export const OPENAI_ATTEMPT_TIMEOUT_MS = 200_000;
+export const OPENAI_FOLLOW_UP_TIMEOUT_MS = 90_000;
+/** O laço da auditoria continua capaz de repetir. O SDK não repete por conta própria. */
+export const OPENAI_REVIEW_SDK_MAX_RETRIES = 0;
 const MISSING_KEY =
   "OPENAI_API_KEY ausente no servidor. A chave da OpenAI fica só na Cloud Function, nunca no aplicativo.";
 
@@ -35,6 +42,7 @@ export interface AuditLessonInput {
   topic: string;
   content: string;
   publishedContent?: string;
+  trace?: LegalReviewTrace;
 }
 
 export interface AuditLessonResult extends NormalizedAudit {
@@ -219,51 +227,84 @@ async function createResponse(
 ) {
   return client.responses.create(
     buildReviewCreateParams({ model, instructions, userInput, lessonText }),
-    { timeout: timeoutMs }
+    { timeout: timeoutMs, maxRetries: OPENAI_REVIEW_SDK_MAX_RETRIES }
   );
+}
+
+function traceCounts(audit: AuditLessonResult): LegalReviewTraceCounts {
+  return {
+    servedModel: audit.model,
+    verificationLevel: audit.verificationLevel,
+    consultedSources: audit.consultedSources.length,
+    changes: audit.changes.length,
+    unverifiedClaims: audit.unverifiedClaims.length,
+  };
 }
 
 export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<AuditLessonResult> {
   const apiKey = requireKey();
-  const client = new OpenAI({ apiKey });
+  const client = new OpenAI({ apiKey, maxRetries: OPENAI_REVIEW_SDK_MAX_RETRIES });
   const requestedModel = reviewModelName();
+  const trace = input.trace ?? createLegalReviewTrace({ testMode: false, requestedModel, write: () => {} });
   const instructions = buildLegalReviewInstructions(input.reviewDate);
   const baseline = input.publishedContent || input.content;
-  let userInput = buildUntrustedLessonInput(input);
+  let userInput = buildUntrustedLessonInput({
+    reviewDate: input.reviewDate,
+    lessonId: input.lessonId,
+    day: input.day,
+    part: input.part,
+    subject: input.subject,
+    topic: input.topic,
+    content: input.content,
+    publishedContent: input.publishedContent,
+  });
   const startedAt = Date.now();
-  const budgetMs = 250_000;
-  const remaining = () => budgetMs - (Date.now() - startedAt);
+  const remaining = () => OPENAI_AUDIT_BUDGET_MS - (Date.now() - startedAt);
 
-  let response: Awaited<ReturnType<typeof createResponse>> | null = null;
+  const read = (current: ReviewModelResponse) => {
+    trace.validationStart();
+    try {
+      const audit = interpretReviewResponse(current, baseline, requestedModel);
+      trace.validationEnd(traceCounts(audit));
+      return audit;
+    } catch (error) {
+      trace.validationEnd();
+      trace.noteFailure(error, "validation");
+      return error instanceof Error ? error : new Error("A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.");
+    }
+  };
+
+  let response: ReviewModelResponse | null = null;
   for (let tryNumber = 0; tryNumber < 2; tryNumber += 1) {
-    const timeoutMs = Math.min(200_000, remaining());
+    const timeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
     if (timeoutMs < 15_000) break;
+    trace.openaiStart();
     try {
       response = await createResponse(client, requestedModel, instructions, userInput, input.content, timeoutMs);
+      trace.openaiEnd(response.model);
       break;
     } catch (error) {
-      console.error("[legal-review] OpenAI falhou.", errorStatus(error) || "sem-status");
-      if (tryNumber === 0 && isTimeout(error)) continue;
+      trace.noteFailure(error, "openai");
+      if (tryNumber === 0 && isTimeout(error)) {
+        trace.retry("timeout");
+        continue;
+      }
       throw reviewFailureForOpenAIError(error);
     }
   }
   if (!response) {
-    throw new Error("A OpenAI não concluiu a auditoria. A aula publicada não foi alterada.");
+    const failure = new Error("A OpenAI não concluiu a auditoria. A aula publicada não foi alterada.");
+    trace.noteFailure(failure, "openai");
+    throw failure;
   }
-
-  const read = (current: typeof response) => {
-    try {
-      return interpretReviewResponse(current as ReviewModelResponse, baseline, requestedModel);
-    } catch (error) {
-      return error instanceof Error ? error : new Error("A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.");
-    }
-  };
 
   let parsed = read(response);
   const canFollowUp = remaining() > 20_000;
   const lacksSources = !(parsed instanceof Error) && !parsed.webSearchUsed;
   if ((parsed instanceof Error || lacksSources) && canFollowUp) {
+    trace.retry(lacksSources ? "missing_sources" : "invalid_audit");
     userInput = `${userInput}\n\nA resposta anterior não pôde ser aceita. Pesquise de novo nas fontes oficiais permitidas. Devolva somente o JSON do schema. Cada trecho substancialmente diferente do original precisa de um item em changes, com originalExcerpt e revisedExcerpt. Não invente URLs. Se não houver comprovação, use NAO_CONFIRMADO. Preserve os marcadores [BLOCK_n].`;
+    trace.openaiStart();
     try {
       response = await createResponse(
         client,
@@ -271,15 +312,20 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
         instructions,
         userInput,
         input.content,
-        Math.min(90_000, remaining())
+        Math.min(OPENAI_FOLLOW_UP_TIMEOUT_MS, remaining())
       );
+      trace.openaiEnd(response.model);
       parsed = read(response);
     } catch (error) {
-      console.error("[legal-review] Nova tentativa de auditoria falhou.", errorStatus(error) || "sem-status");
+      trace.noteFailure(error, "openai");
       if (!isTimeout(error)) throw reviewFailureForOpenAIError(error);
+      trace.clearFailure();
     }
   }
 
-  if (parsed instanceof Error) throw parsed;
+  if (parsed instanceof Error) {
+    trace.noteFailure(parsed, "validation");
+    throw parsed;
+  }
   return parsed;
 }

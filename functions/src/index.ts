@@ -18,7 +18,7 @@ async function getApp(): Promise<ExpressApp> {
 export const athenaApi = onRequest(
   {
     region: "southamerica-east1",
-    timeoutSeconds: 300,
+    timeoutSeconds: 600,
     memory: "1GiB",
     maxInstances: 10,
     secrets: [geminiApiKey, openaiApiKey],
