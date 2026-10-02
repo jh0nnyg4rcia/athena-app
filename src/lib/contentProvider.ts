@@ -37,6 +37,33 @@ export function contentEngineLabel(modelName?: string): "ChatGPT" | "Gemini" {
   return "Gemini";
 }
 
+export type GenerationBackend = "gemini" | "openai";
+
+/** Quem redige aula nova, Regerar e questões. O revisor jurídico não usa esta escolha. */
+export function generationBackend(provider: ContentProvider): GenerationBackend {
+  return provider === "chatgpt" ? "openai" : "gemini";
+}
+
+/** Aluno não envia ChatGPT, mesmo que o aparelho tenha essa escolha salva. */
+export function providerForCeoChoice(allowed: boolean, stored: ContentProvider): ContentProvider {
+  if (!allowed) return "gemini";
+  return stored;
+}
+
+export function regenerateEngineName(provider: ContentProvider): "ChatGPT" | "Gemini" {
+  return provider === "chatgpt" ? "ChatGPT" : "Gemini";
+}
+
+export function regenerateLessonConfirm(input: {
+  provider: ContentProvider;
+  day: number;
+  block: number;
+  subject: string;
+}): string {
+  const engine = regenerateEngineName(input.provider);
+  return `Deseja regerar o conteúdo do Bloco ${input.block} do Dia ${input.day} (${input.subject}) com a IA ${engine}?`;
+}
+
 export function isCeoEmail(email: unknown): boolean {
   return String(email ?? "").toLowerCase().trim() === ATHENA_CEO_EMAIL;
 }

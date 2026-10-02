@@ -2,7 +2,7 @@
  * Cliente ATHENA: inferência somente via proxy Express.
  * Nenhuma chave (Gemini ou OpenAI) é lida, armazenada ou enviada a partir do app.
  */
-import { getContentProvider, type ContentProvider } from "../lib/contentProvider";
+import { getContentProvider, providerForCeoChoice, type ContentProvider } from "../lib/contentProvider";
 
 try {
   localStorage.removeItem("athena_gemini_api_key");
@@ -41,8 +41,7 @@ export function setAllowChatGptChoice(allowed: boolean): void {
 }
 
 function providerForRequest(): ContentProvider {
-  if (!allowChatGptChoice) return "gemini";
-  return getContentProvider();
+  return providerForCeoChoice(allowChatGptChoice, getContentProvider());
 }
 
 export const isNativeMobile = (): boolean => {

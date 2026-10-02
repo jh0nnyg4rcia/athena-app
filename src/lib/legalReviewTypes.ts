@@ -207,6 +207,11 @@ export function legalReviewButtonVisible(isCeo: boolean, lessonSaved: boolean): 
   return Boolean(isCeo && lessonSaved);
 }
 
+/** O teste do revisor aparece para o CEO mesmo sem aula homologada. */
+export function legalReviewTestButtonVisible(isCeo: boolean): boolean {
+  return Boolean(isCeo);
+}
+
 export function formatReviewDate(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "America/Sao_Paulo",

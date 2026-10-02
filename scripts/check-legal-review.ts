@@ -8,6 +8,7 @@ import {
   LEGAL_REVIEW_CONFLICT_MESSAGE,
   emptyReviewIndex,
   legalReviewButtonVisible,
+  legalReviewTestButtonVisible,
   type LegalReviewView,
   type StoredCatalogLesson,
 } from "../src/lib/legalReviewTypes";
@@ -259,6 +260,8 @@ async function main() {
   assert(!legalReviewButtonVisible(false, true), "aluno não vê o botão");
   assert(!legalReviewButtonVisible(true, false), "CEO sem aula salva não vê o botão");
   assert(legalReviewButtonVisible(true, true), "CEO com aula salva vê o botão");
+  assert(legalReviewTestButtonVisible(true), "CEO vê o teste do revisor sem aula salva");
+  assert(!legalReviewTestButtonVisible(false), "aluno não vê o teste do revisor");
 
   assert(enforceVerificationLevel({
     webSearchExecuted: false,

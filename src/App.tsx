@@ -65,7 +65,7 @@ import { presentSavedLesson } from './lib/presentSavedLesson';
 import { cacheHoldsText } from './lib/officialCacheRestore';
 import { memo } from 'react';
 import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, setAllowChatGptChoice, type GeminiConnectionTestResult } from './services/geminiService';
-import { contentEngineLabel, getContentProvider, setContentProvider, type ContentProvider } from './lib/contentProvider';
+import { contentEngineLabel, getContentProvider, regenerateEngineName, regenerateLessonConfirm, setContentProvider, type ContentProvider } from './lib/contentProvider';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
 import { calcularIncidenciaParaMaterias, instrucaoEnfase } from './utils/incidenciaUtils';
@@ -116,7 +116,7 @@ import { ReviewList } from './components/ReviewList';
 import { LegalReviewPanel } from './components/LegalReviewPanel';
 import { approveLegalReview, reauditLegalReview, rejectLegalReview, requestLegalReview, requestLegalReviewTest, saveLegalReviewCandidate } from './services/legalReviewClient';
 import { LEGAL_REVIEW_TEST_MATERIAL } from './lib/legalReviewTestMaterial';
-import { legalReviewButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
+import { legalReviewButtonVisible, legalReviewTestButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
@@ -4470,7 +4470,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
     if (!dayItem || !dayItem.materias) return;
 
-    if (!confirm(`Deseja regerar o conteúdo do Bloco ${part + 1} do Dia ${day} (${dayItem.materias[part].nome}) com a IA?`)) return;
+    if (!confirm(regenerateLessonConfirm({
+      provider: contentProvider,
+      day,
+      block: part + 1,
+      subject: dayItem.materias[part].nome,
+    }))) return;
 
     setIsLoading(true);
     const msg = getTrilhaDayPartitionMessage(day, dayItem.materias, part, dayItem.semana, mentorshipStyle);
@@ -7321,6 +7326,16 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                   </div>
 
                                   <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
+                                    {legalReviewTestButtonVisible(Boolean(isCEO)) && (
+                                    <button
+                                      type="button"
+                                      onClick={openLegalReviewTest}
+                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                      title="Testa o revisor com material sintético. O catálogo dos alunos não é alterado."
+                                    >
+                                      Testar Revisor Jurídico
+                                    </button>
+                                    )}
                                     {legalReviewButtonVisible(Boolean(isCEO), cacheCurrent) && tDay !== undefined && (
                                       <button
                                         type="button"
@@ -7332,14 +7347,6 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                         Revisar com IA
                                       </button>
                                     )}
-                                    <button
-                                      type="button"
-                                      onClick={openLegalReviewTest}
-                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Testa o revisor com material sintético. O catálogo dos alunos não é alterado."
-                                    >
-                                      Testar Revisor Jurídico
-                                    </button>
                                     <button
                                       onClick={handleCeoRegenerateQuestions}
                                       disabled={isLoading || isRegeneratingQuestions}
@@ -7354,7 +7361,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                       onClick={handleCeoRegenerateLesson}
                                       disabled={isLoading || isRegeneratingQuestions}
                                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Regerar a aula inteira com a IA Gemini"
+                                      title={`Regerar a aula inteira com a IA ${regenerateEngineName(contentProvider)}`}
                                     >
                                       <RotateCw size={14} className={cn(isLoading && "animate-spin")} />
                                       Regerar IA

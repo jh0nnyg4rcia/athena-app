@@ -15,7 +15,7 @@ import {
   verifyGoogleSession
 } from "../services/authServerService";
 import firebaseConfig from "../../firebase-applet-config.json";
-import { isCeoEmail, parseContentProvider, type ContentProvider } from "../lib/contentProvider";
+import { generationBackend, isCeoEmail, parseContentProvider, type ContentProvider } from "../lib/contentProvider";
 import { rateLimit } from "./rateLimit";
 import { registerLegalReviewRoutes } from "./legalReviewRoutes";
 
@@ -280,7 +280,7 @@ export function createAthenaApiApp(): express.Express {
     const provider = contentProviderOf(req);
     if (!chatGptAllowed(req, res, provider)) return;
     try {
-      const result = provider === "chatgpt"
+      const result = generationBackend(provider) === "openai"
         ? await testChatGptPing()
         : await testGeminiPing(req.body?.preferredModel);
       res.json(result);
@@ -299,7 +299,7 @@ export function createAthenaApiApp(): express.Express {
     try {
       const { message, history, userName, file, mentorshipStyle, mentorshipPhase, preferredModel } = req.body;
       const safeName = typeof userName === "string" && userName.trim() ? userName.trim().slice(0, 80) : "Mestre";
-      const result = provider === "chatgpt"
+      const result = generationBackend(provider) === "openai"
         ? await askChatGPT(message, history || [], safeName, file, mentorshipStyle, mentorshipPhase)
         : await askATHENA(
             message,
@@ -326,7 +326,7 @@ export function createAthenaApiApp(): express.Express {
         res.status(400).json({ error: "Falta o recorte da aula para regerar só as questões." });
         return;
       }
-      const result = provider === "chatgpt"
+      const result = generationBackend(provider) === "openai"
         ? await generateObjectiveChallengeChatGPT(brief)
         : await generateObjectiveChallenge(brief);
       res.json({ responseText: result.text, model: result.model });
@@ -342,7 +342,7 @@ export function createAthenaApiApp(): express.Express {
     try {
       const { questionText, userAnswer, referenceResponse, phase, userName } = req.body;
       const safeName = typeof userName === "string" && userName.trim() ? userName.trim().slice(0, 80) : "Mestre";
-      const evalResult = provider === "chatgpt"
+      const evalResult = generationBackend(provider) === "openai"
         ? await evaluateAnswerChatGPT(questionText, userAnswer, referenceResponse, phase, safeName)
         : await evaluateAnswer(
             questionText,
