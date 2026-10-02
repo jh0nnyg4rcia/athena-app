@@ -17,10 +17,9 @@ import {
   enforceVerificationLevel,
   isOfficialLegalUrl,
   normalizeLegalAudit,
-  COVERAGE_TOKEN_RATIO,
   MAX_DECLARED_CHANGES,
-  SHORT_DELTA_TOKEN_LIMIT,
   assessSubstantiveCoverage,
+  coverageTokens,
   editorialSignature,
   explainLegalAuditFailure,
   uncoveredSubstantiveEdits,
@@ -472,7 +471,21 @@ async function main() {
     originalExcerpt: "detenção",
     revisedExcerpt: "reclusão",
   })]).length === 0, "bloco requebrado continua coberto pelo excerpt da correção");
-  assert(COVERAGE_TOKEN_RATIO === 0.9 && SHORT_DELTA_TOKEN_LIMIT === 4, "limiar de cobertura documentado");
+  assert(coverageTokens("§ 5º").join("|") === "§|5º", "§ é token autônomo");
+  assert(coverageTokens("art. 121, § 2º").join("|") === "art|121|§|2º", "artigo e parágrafo permanecem tokens distintos");
+  assert(uncoveredSubstantiveEdits(
+    "casa mesa livro porta chave",
+    "regime passa a prever sanção maior desde logo agora não",
+    [change({
+      originalExcerpt: "casa mesa livro porta chave",
+      revisedExcerpt: "regime passa a prever sanção maior desde logo agora",
+    })],
+  ).length > 0, "delta de 10 tokens exige também o último");
+  assert(uncoveredSubstantiveEdits(
+    "aplica-se o art. 10",
+    "aplica-se o art. 10, § 1º",
+    [change({ originalExcerpt: "aplica-se o art. 10", revisedExcerpt: "1º" })],
+  ).length > 0, "excerpt só com 1º não cobre a inserção de §");
   const coverageFailure = explainLegalAuditFailure(auditBody(longRevised, [change({
     originalExcerpt: "regra geral",
     revisedExcerpt: "Outra redação",

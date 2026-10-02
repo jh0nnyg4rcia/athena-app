@@ -291,15 +291,13 @@ export function summarizeChanges(changes: LegalReviewChange[]): LegalReviewSumma
  */
 export const MAX_DECLARED_CHANGES = 40;
 
-/**
- * Fração mínima dos tokens que de fato mudaram e que o excerpt precisa conter, em ordem.
- * Delta de até 4 tokens exige 100%: número, data, "não" ou tema não podem ficar de fora.
- * Acima disso, 90%. Abaixo do limiar, a cobertura falha fechada.
- */
-export const COVERAGE_TOKEN_RATIO = 0.9;
-export const SHORT_DELTA_TOKEN_LIMIT = 4;
 const TOKEN_LCS_CELL_LIMIT = 250_000;
-const TOKEN_PATTERN = /[\p{L}\p{N}]+(?:[.-][\p{L}\p{N}]+)*[ºª]?/gu;
+const STRUCTURAL_LINE = /^(#{1,6}\s+|(?:[-*+]|\d+[.)])\s+)/;
+/**
+ * § é token próprio. Vírgula, ponto e demais pontuação comum continuam fora.
+ * Número com ponto interno (9.605, 999.999) e ordinal (5º) permanecem um token.
+ */
+const TOKEN_PATTERN = /§|[\p{L}\p{N}]+(?:[.-][\p{L}\p{N}]+)*[ºª]?/gu;
 
 export interface CoverageHunkDiagnostic {
   kind: ChangeHunk["kind"];
@@ -373,10 +371,9 @@ export function coverageTokens(value: string): string[] {
   return editorialSignature(value).match(TOKEN_PATTERN) || [];
 }
 
+/** Cada token removido ou acrescentado precisa aparecer no excerpt daquele lado. */
 function requiredTokenMatches(deltaLength: number): number {
-  if (deltaLength <= 0) return 0;
-  if (deltaLength <= SHORT_DELTA_TOKEN_LIMIT) return deltaLength;
-  return Math.ceil(deltaLength * COVERAGE_TOKEN_RATIO);
+  return deltaLength;
 }
 
 function orderedMatchCount(delta: string[], excerpt: string[]): number {
@@ -485,14 +482,26 @@ function emptyCoverage(reason: CoverageDiagnostics["reason"], changeCount = 0): 
   };
 }
 
+function paragraphReflowOnly(before: string, after: string): boolean {
+  const left = editorialSignature(before);
+  const right = editorialSignature(after);
+  if (left.split("\n").some((line) => STRUCTURAL_LINE.test(line))) return false;
+  if (right.split("\n").some((line) => STRUCTURAL_LINE.test(line))) return false;
+  const fold = (value: string) => value.replace(/\n/g, " ").replace(/[ \t]+/g, " ").trim();
+  return fold(left) === fold(right);
+}
+
+function requiresDeclaredChange(hunk: ChangeHunk): boolean {
+  if (editorialSignature(hunk.original) === editorialSignature(hunk.revised)) return false;
+  return !paragraphReflowOnly(hunk.original, hunk.revised);
+}
+
 export function assessSubstantiveCoverage(
   original: string,
   revised: string,
   changes: Array<Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">>
 ): CoverageDiagnostics {
-  const substantive = changeHunks(original, revised).filter(
-    (hunk) => editorialSignature(hunk.original) !== editorialSignature(hunk.revised)
-  );
+  const substantive = changeHunks(original, revised).filter(requiresDeclaredChange);
   const used = new Set<number>();
   const uncovered: CoverageHunkDiagnostic[] = [];
   let covered = 0;
