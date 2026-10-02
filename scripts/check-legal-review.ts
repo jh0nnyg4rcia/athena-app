@@ -457,6 +457,187 @@ async function main() {
   ]), original, { webSearchExecuted: true, consultedUrls: [STJ] });
   assert(stjConfirmed?.changes[0]?.confirmation === "CONFIRMADO", "I: evidência do STJ confirma alegação do STJ");
 
+  // Fidelidade à especificidade da fonte oficial
+  const stfSpecificInput = "caberá ao Supremo Tribunal Federal apreciar o caráter da infração";
+  const stfGenericOutput = "caberá à autoridade judiciária competente apreciar o caráter da infração";
+  const stfParaphraseOutput = "compete ao Supremo Tribunal Federal apreciar o caráter da infração";
+
+  const originalWithStf = original.replace("O conceito permanece.", stfSpecificInput);
+  const revisedWithGeneric = original.replace("O conceito permanece.", stfGenericOutput);
+  const revisedWithParaphrase = original.replace("O conceito permanece.", stfParaphraseOutput);
+
+  // 1. Saída inadequada: substituição do STF por "autoridade judiciária competente" deve ser detectada e recusada
+  const stfDilutedAudit = normalizeLegalAudit(auditBody(revisedWithGeneric, [
+    change({
+      category: "CONCEITO",
+      reason: "Definir competência para apreciar o caráter da infração com base no STF.",
+      originalExcerpt: stfSpecificInput,
+      revisedExcerpt: stfGenericOutput,
+      evidence: [evidence(STF, "ACORDAO", true)],
+    }),
+  ]), originalWithStf, { webSearchExecuted: true, consultedUrls: [STF] });
+  assert(stfDilutedAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "perda de especificidade normativa (STF -> autoridade competente) recusa confirmação");
+  assert(stfDilutedAudit?.verificationLevel !== "VERIFICADO_COM_FONTES", "perda de especificidade normativa impede nível verificado");
+  assert(stfDilutedAudit?.unverifiedClaims.some((c) => c.reason.includes("especificidade normativa")) === true, "unverifiedClaims registra motivo de perda de especificidade");
+
+  // 2. Caso de controle: paráfrase que mantém o órgão específico ("compete ao Supremo Tribunal Federal...") é aceita
+  const stfParaphraseAudit = normalizeLegalAudit(auditBody(revisedWithParaphrase, [
+    change({
+      category: "CONCEITO",
+      reason: "Definir competência preservando o Supremo Tribunal Federal.",
+      originalExcerpt: stfSpecificInput,
+      revisedExcerpt: stfParaphraseOutput,
+      evidence: [evidence(STF, "ACORDAO", true)],
+    }),
+  ]), originalWithStf, { webSearchExecuted: true, consultedUrls: [STF] });
+  assert(stfParaphraseAudit?.changes[0]?.confirmation === "CONFIRMADO", "paráfrase mantendo a especificidade do STF é confirmada");
+  assert(stfParaphraseAudit?.verificationLevel === "VERIFICADO_COM_FONTES", "paráfrase mantendo a especificidade do STF é verificada com fontes");
+
+  // 3. Caso generalizado: outro órgão (STJ substituído por "tribunal competente" deve ser recusado)
+  const stjSpecificInput = "caberá ao Superior Tribunal de Justiça julgar a matéria";
+  const stjGenericOutput = "caberá ao tribunal competente julgar a matéria";
+  const stjParaphraseOutput = "compete ao Superior Tribunal de Justiça julgar a matéria";
+  const originalWithStj = original.replace("O conceito permanece.", stjSpecificInput);
+  const stjDilutedAudit = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", stjGenericOutput), [
+    change({
+      category: "CONCEITO",
+      reason: "Julgamento pelo STJ.",
+      originalExcerpt: stjSpecificInput,
+      revisedExcerpt: stjGenericOutput,
+      evidence: [evidence(STJ, "ACORDAO", true)],
+    }),
+  ]), originalWithStj, { webSearchExecuted: true, consultedUrls: [STJ] });
+  assert(stjDilutedAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "generalização do STJ para tribunal competente recusa confirmação");
+
+  const stjParaphraseAudit = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", stjParaphraseOutput), [
+    change({
+      category: "CONCEITO",
+      reason: "Julgamento pelo STJ com órgão preservado.",
+      originalExcerpt: stjSpecificInput,
+      revisedExcerpt: stjParaphraseOutput,
+      evidence: [evidence(STJ, "ACORDAO", true)],
+    }),
+  ]), originalWithStj, { webSearchExecuted: true, consultedUrls: [STJ] });
+  assert(stjParaphraseAudit?.changes[0]?.confirmation === "CONFIRMADO", "paráfrase mantendo o STJ é confirmada");
+
+  // 4. Caso generalizado: prazo específico substituído por "prazo legal"
+  const prazoSpecificInput = "a interposição deve ocorrer no prazo de 15 dias";
+  const prazoGenericOutput = "a interposição deve ocorrer no prazo legal";
+  const originalWithPrazo = original.replace("O conceito permanece.", prazoSpecificInput);
+  const prazoDilutedAudit = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", prazoGenericOutput), [
+    change({
+      category: "LEGISLACAO",
+      reason: "Prazo recursal da lei.",
+      originalExcerpt: prazoSpecificInput,
+      revisedExcerpt: prazoGenericOutput,
+      evidence: [evidence(PLANALTO, "LEI", true)],
+    }),
+  ]), originalWithPrazo, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+  assert(prazoDilutedAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "substituição de prazo específico por prazo legal recusa confirmação");
+
+  // 5. Caso generalizado: quórum específico substituído por "maioria exigida"
+  const quorumSpecificInput = "aprovação mediante voto de maioria absoluta dos membros";
+  const quorumGenericOutput = "aprovação mediante a maioria exigida dos membros";
+  const originalWithQuorum = original.replace("O conceito permanece.", quorumSpecificInput);
+  const quorumDilutedAudit = normalizeLegalAudit(auditBody(original.replace("O conceito permanece.", quorumGenericOutput), [
+    change({
+      category: "LEGISLACAO",
+      reason: "Quórum da lei complementar.",
+      originalExcerpt: quorumSpecificInput,
+      revisedExcerpt: quorumGenericOutput,
+      evidence: [evidence(PLANALTO, "LEI", true)],
+    }),
+  ]), originalWithQuorum, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+  assert(quorumDilutedAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "substituição de maioria absoluta por maioria exigida recusa confirmação");
+
+  // 6. Teste de falso positivo 1: evidence.institution = "Supremo Tribunal Federal", fonte STF, mas regra não atribui competência ao STF
+  const genericInput = "o ato deve ser praticado pela autoridade competente";
+  const genericOutput = "o ato administrativo deve ser praticado pela autoridade competente";
+  const originalWithGeneric = original.replace("O conceito permanece.", genericInput);
+  const revisedWithGenericPreserved = original.replace("O conceito permanece.", genericOutput);
+
+  const stfEvidenceNotAttributingCompetence = {
+    ...evidence(STF, "ACORDAO", true),
+    institution: "Supremo Tribunal Federal",
+    title: "Recurso Extraordinário 999999",
+    supportExplanation: "O STF fixou a tese de que a atuação da autoridade competente exige motivação idônea.",
+  };
+
+  const falsePositiveAudit1 = normalizeLegalAudit(auditBody(revisedWithGenericPreserved, [
+    change({
+      category: "CONCEITO",
+      reason: "Ajuste de precisão conforme tese do STF sobre motivação.",
+      originalExcerpt: genericInput,
+      revisedExcerpt: genericOutput,
+      evidence: [stfEvidenceNotAttributingCompetence],
+    }),
+  ]), originalWithGeneric, { webSearchExecuted: true, consultedUrls: [STF] });
+  assert(falsePositiveAudit1?.changes[0]?.confirmation === "CONFIRMADO", "falso positivo 1: menção de STF em institution não recusa autoridade competente legítima");
+  assert(falsePositiveAudit1?.verificationLevel === "VERIFICADO_COM_FONTES", "falso positivo 1: mantém nível VERIFICADO_COM_FONTES");
+  assert(falsePositiveAudit1?.unverifiedClaims.length === 0, "falso positivo 1: sem alegações não verificadas");
+
+  // 7. Teste de falso positivo 2: evidence.title menciona "Supremo Tribunal Federal", mas a proposição material não exige STF
+  const stfEvidenceWithTitle = {
+    ...evidence(STF, "ACORDAO", true),
+    institution: "STF",
+    title: "Acórdão do Supremo Tribunal Federal sobre poder regulamentar",
+    supportExplanation: "A decisão reconhece que a regulamentação cabe ao órgão competente da administração.",
+  };
+
+  const genericOrganInput = "a edição de portarias cabe ao órgão competente";
+  const genericOrganOutput = "a edição de portarias compete ao órgão competente da administração";
+  const originalWithGenericOrgan = original.replace("O conceito permanece.", genericOrganInput);
+  const revisedWithGenericOrgan = original.replace("O conceito permanece.", genericOrganOutput);
+
+  const falsePositiveAudit2 = normalizeLegalAudit(auditBody(revisedWithGenericOrgan, [
+    change({
+      category: "CONCEITO",
+      reason: "Reconhecimento do poder regulamentar do órgão competente.",
+      originalExcerpt: genericOrganInput,
+      revisedExcerpt: genericOrganOutput,
+      evidence: [stfEvidenceWithTitle],
+    }),
+  ]), originalWithGenericOrgan, { webSearchExecuted: true, consultedUrls: [STF] });
+  assert(falsePositiveAudit2?.changes[0]?.confirmation === "CONFIRMADO", "falso positivo 2: título com Supremo Tribunal Federal não força menção no texto");
+  assert(falsePositiveAudit2?.verificationLevel === "VERIFICADO_COM_FONTES", "falso positivo 2: mantém VERIFICADO_COM_FONTES");
+
+  // 8. Proteção verdadeira via supportExplanation: quando a explicação afirma competência do STF e a revisão troca por "autoridade judiciária competente"
+  const stfAttributingEvidence = {
+    ...evidence(STF, "ACORDAO", true),
+    institution: "Supremo Tribunal Federal",
+    title: "Extradição STF",
+    supportExplanation: "Compete ao Supremo Tribunal Federal apreciar o caráter da infração para fins de extradição.",
+  };
+
+  const genuineLossFromExplanationAudit = normalizeLegalAudit(auditBody(revisedWithGeneric, [
+    change({
+      category: "CONCEITO",
+      reason: "Adequação do órgão julgador da extradição com base na fonte.",
+      originalExcerpt: "cabe à autoridade competente apreciar o caráter da infração",
+      revisedExcerpt: stfGenericOutput, // "caberá à autoridade judiciária competente apreciar o caráter da infração"
+      evidence: [stfAttributingEvidence],
+    }),
+  ]), original.replace("O conceito permanece.", "cabe à autoridade competente apreciar o caráter da infração"), { webSearchExecuted: true, consultedUrls: [STF] });
+  assert(genuineLossFromExplanationAudit?.changes[0]?.confirmation === "NAO_CONFIRMADO", "proteção verdadeira: supportExplanation afirmando competência do STF recusa autoridade competente genérica");
+  assert(genuineLossFromExplanationAudit?.verificationLevel !== "VERIFICADO_COM_FONTES", "proteção verdadeira: rebaixa nível verificado");
+
+  // 9. Não-colisão de sigla: MP como Medida Provisória não deve exigir Ministério Público
+  const mpInput = "nos termos da MP 1.200, a medida será executada pelo órgão competente";
+  const mpOutput = "conforme a MP 1.200, a medida será executada pelo órgão competente";
+  const originalWithMp = original.replace("O conceito permanece.", mpInput);
+  const revisedWithMp = original.replace("O conceito permanece.", mpOutput);
+
+  const mpAudit = normalizeLegalAudit(auditBody(revisedWithMp, [
+    change({
+      category: "LEGISLACAO",
+      reason: "Atualização conforme a Medida Provisória.",
+      originalExcerpt: mpInput,
+      revisedExcerpt: mpOutput,
+      evidence: [evidence(PLANALTO, "LEI", true)],
+    }),
+  ]), originalWithMp, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+  assert(mpAudit?.changes[0]?.confirmation === "CONFIRMADO", "não-colisão: sigla MP de Medida Provisória não exige Ministério Público");
+
   const uncovered = normalizeLegalAudit(auditBody(
     original.replace("O conceito permanece.", "O conceito permanece.\n\nO STF decidiu em segredo que a pena mudou."),
     [change({})]

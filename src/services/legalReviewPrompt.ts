@@ -95,6 +95,16 @@ Não crie alterações artificiais. Se não houver erro material nem omissão re
 
 Não invente percentuais de incidência nem faixas alta, média ou baixa. Se a aula trouxer percentual não medido de cobrança de banca, remova essa afirmação. Mantenha alíquota, pena e hipótese de incidência quando forem conteúdo jurídico.
 
+## FIDELIDADE À ESPECIFICIDADE DA FONTE OFICIAL
+
+Quando a fonte oficial aplicável identificar expressamente órgão, autoridade, tribunal, sujeito competente, prazo, quórum, requisito, hipótese, exceção, recurso, legitimado, efeito jurídico ou outro elemento normativo específico, preserve essa especificidade na versão revisada sempre que ela for juridicamente relevante. Não substitua informação normativa específica confirmada por expressão genérica como "autoridade competente", "órgão competente", "tribunal competente", "prazo legal", "maioria exigida", "nos termos da lei" ou equivalente, salvo se a generalização for necessária para corrigir uma inexatidão e estiver igualmente amparada pela fonte oficial.
+
+Esta regra funciona nos dois sentidos:
+1. Se o original já contém uma informação específica correta: não a generalize desnecessariamente.
+2. Se a própria fonte oficial utilizada para justificar uma alteração fornece uma informação mais específica e essa informação integra o ponto jurídico alterado: a versão revisada deve preferir a formulação específica juridicamente relevante.
+
+Não transforme isso em obrigação de copiar integralmente a lei. Não exija inclusão de detalhes irrelevantes e não aumente artificialmente o texto. A finalidade é impedir perda material de precisão útil para provas jurídicas.
+
 ## MARKDOWN E ESTRUTURA
 
 Entregue reviewedMarkdown em Markdown válido, compatível com o material original.

@@ -227,8 +227,134 @@ function evidenceConfirmsMaterialClaim(evidence: LegalReviewEvidence): boolean {
   return Boolean(host && sourceTypeFits(evidence.sourceType, host.family));
 }
 
+const GENERIC_NORMATIVE_PATTERNS: Array<{
+  type: "organ" | "deadline" | "quorum";
+  pattern: RegExp;
+}> = [
+  {
+    type: "organ",
+    pattern: /\b(?:autoridade(?:\s+judici[aá]ria)?|[oó]rg[aã]o(?:\s+(?:p[uú]blico|judici[aá]rio))?|tribunal|ju[ií]zo|foro|inst[aâ]ncia)\s+competente\b/i,
+  },
+  {
+    type: "deadline",
+    pattern: /\b(?:no\s+)?prazo\s+(?:legal|regimental|previsto\s+em\s+lei|da\s+lei)\b/i,
+  },
+  {
+    type: "quorum",
+    pattern: /\b(?:maioria\s+exigida|qu[oó]rum\s+(?:legal|exigido|qualificado))\b/i,
+  },
+];
+
+const SPECIFIC_ORGAN_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
+  { id: "STF", pattern: /\bSTF\b|Supremo Tribunal Federal/i },
+  { id: "STJ", pattern: /\bSTJ\b|Superior Tribunal de Justi[cç]a/i },
+  { id: "CNJ", pattern: /\bCNJ\b|Conselho Nacional de Justi[cç]a/i },
+  { id: "TSE", pattern: /\bTSE\b|Tribunal Superior Eleitoral/i },
+  { id: "TST", pattern: /\bTST\b|Tribunal Superior do Trabalho/i },
+  { id: "STM", pattern: /\bSTM\b|Superior Tribunal Militar/i },
+  { id: "TRF", pattern: /\bTRF(?:-?\d)?\b|\bTribuna(?:l|is) Regiona(?:l|is) Federa(?:l|is)\b/i },
+  { id: "TRT", pattern: /\bTRT(?:-?\d{1,2})?\b|\bTribuna(?:l|is) Regiona(?:l|is) do Trabalho\b/i },
+  { id: "TJ", pattern: /\bTJ(?:-[A-Z]{2}|[A-Z]{2,3})\b|\bTribuna(?:l|is) de Justi[cç]a\b/i },
+  { id: "MP", pattern: /\bMinist[eé]rio P[uú]blico\b|\bPGR\b|\bPGJ\b|\bProcurador(?:a)?-Geral\b/i },
+  { id: "DP", pattern: /\bDefensoria P[uú]blica\b|\bDefensor(?:a)?\s+P[uú]blico\b/i },
+  { id: "CONGRESSO", pattern: /\bCongresso Nacional\b|\bSenado Federal\b|\bC[aâ]mara dos Deputados\b/i },
+  { id: "TCU", pattern: /\bTCU\b|\bTribuna(?:l|is) de Contas\b/i },
+];
+
+const SPECIFIC_DEADLINE_PATTERNS: RegExp[] = [
+  /\b\d+\s+(?:dias|meses|anos|horas)\b/i,
+  /\b(?:cinco|dez|quinze|vinte|trinta|quarenta\s+e\s+cinco|sessenta|noventa|cento\s+e\s+vinte)\s+dias\b/i,
+];
+
+const SPECIFIC_QUORUM_PATTERNS: RegExp[] = [
+  /\bmaioria\s+(?:absoluta|simples)\b/i,
+  /\b(?:dois\s+ter[cç]os|2\/3|tr[eê]s\s+quintos|3\/5|unanimidade)\b/i,
+];
+
+function organAttributedInExplanation(explanation: string, organPattern: RegExp): boolean {
+  if (!explanation) return false;
+  const organSource = organPattern.source;
+  const organFlags = organPattern.flags.includes("i") ? "i" : "";
+
+  // 1. Competência ou atribuição dirigida ao órgão específico:
+  // ex.: "compete ao STF", "cabe ao Supremo Tribunal Federal", "atribuição do STF", "competência privativa do STF"
+  const directedToOrgan = new RegExp(
+    `(?:\\bcompete|\\bcompet[eê]ncia(?:\\s+(?:origin[aá]ria|exclusiva|privativa|recursal))?|\\bcaber[aá]|\\bcabe|\\batribui[cç][aã]o|\\bincumbe|\\bjulgamento\\s+(?:privativo|origin[aá]rio)?|\\baprecia[cç][aã]o)\\s+(?:ao?|pelo?|do?|da)?\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+    organFlags
+  );
+  if (directedToOrgan.test(explanation)) return true;
+
+  // 2. Órgão como sujeito com competência ou encargo jurisdicional direto:
+  // ex.: "STF é competente", "Supremo Tribunal Federal possui competência", "STF deve apreciar"
+  const organAsSubject = new RegExp(
+    `(?:${organSource})\\s+(?:(?:[eé]\\s+competente|possui\\s+compet[eê]ncia|tem\\s+compet[eê]ncia|det[eé]m\\s+compet[eê]ncia|deve\\s+apreciar|deve\\s+julgar|aprecia\\s+o\\s+car[aá]ter|julga\\s+(?:o|a|os|as))\\b)`,
+    organFlags
+  );
+  if (organAsSubject.test(explanation)) return true;
+
+  // 3. Definição expressa do órgão competente:
+  // ex.: "órgão competente: STF", "autoridade competente é o STF"
+  const organDefined = new RegExp(
+    `(?:(?:[oó]rg[aã]o|autoridade|tribunal)\\s+competente(?:\\s+[eé]|\\s*:\\s*|\\s+ser[aá])\\s+(?:o\\s+)?(?:${organSource})\\b)`,
+    organFlags
+  );
+  if (organDefined.test(explanation)) return true;
+
+  return false;
+}
+
+export function changeLacksNormativeSpecificity(
+  change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt" | "reason" | "category"> & {
+    evidence?: LegalReviewEvidence[];
+  }
+): boolean {
+  const revised = String(change.revisedExcerpt || "");
+  if (!revised.trim()) return false;
+
+  const original = String(change.originalExcerpt || "");
+  const explanations = (change.evidence || []).map((e) => String(e.supportExplanation || "")).join("\n");
+
+  for (const item of GENERIC_NORMATIVE_PATTERNS) {
+    if (!item.pattern.test(revised)) continue;
+
+    if (item.type === "organ") {
+      for (const organ of SPECIFIC_ORGAN_PATTERNS) {
+        const inOriginal = organ.pattern.test(original);
+        const affirmedInEvidence = organAttributedInExplanation(explanations, organ.pattern);
+
+        if ((inOriginal || affirmedInEvidence) && !organ.pattern.test(revised)) {
+          return true;
+        }
+      }
+    }
+
+    if (item.type === "deadline") {
+      for (const deadline of SPECIFIC_DEADLINE_PATTERNS) {
+        const inOriginal = deadline.test(original);
+        const inEvidence = deadline.test(explanations);
+        if ((inOriginal || inEvidence) && !deadline.test(revised)) {
+          return true;
+        }
+      }
+    }
+
+    if (item.type === "quorum") {
+      for (const quorum of SPECIFIC_QUORUM_PATTERNS) {
+        const inOriginal = quorum.test(original);
+        const inEvidence = quorum.test(explanations);
+        if ((inOriginal || inEvidence) && !quorum.test(revised)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 function confirmChange(change: Omit<LegalReviewChange, "verified" | "confirmation">, modelConfirmation: LegalConfirmation): LegalConfirmation {
   if (modelConfirmation === "NAO_CONFIRMADO") return "NAO_CONFIRMADO";
+  if (changeLacksNormativeSpecificity(change)) return "NAO_CONFIRMADO";
   const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
   const required = institutionsNamedInClaim(claim, change.category);
   if (required.length) {
@@ -937,7 +1063,10 @@ export function classifyLegalAudit(
   }
   for (const change of changes) {
     if (change.confirmation === "NAO_CONFIRMADO") {
-      pushClaim(change.revisedExcerpt || change.originalExcerpt, change.reason || "NAO_CONFIRMADO");
+      const reason = changeLacksNormativeSpecificity(change)
+        ? "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica."
+        : (change.reason || "NAO_CONFIRMADO");
+      pushClaim(change.revisedExcerpt || change.originalExcerpt, reason);
     }
   }
 
