@@ -43,7 +43,7 @@ export interface LegalReviewTrace {
   openaiEnd(servedModel?: string): void;
   retry(reason: LegalReviewRetryReason): void;
   validationStart(): void;
-  validationEnd(counts?: LegalReviewTraceCounts): void;
+  validationEnd(counts?: LegalReviewTraceCounts, failure?: unknown): void;
   firestoreStart(step: LegalReviewFirestoreStep): void;
   firestoreEnd(): void;
   success(counts: LegalReviewTraceCounts): void;
@@ -138,6 +138,41 @@ function defaultWrite(line: string): void {
   console.log(line);
 }
 
+const COVERAGE_REASONS = new Set(["uncovered_edits", "too_many_changes", "invalid_audit"]);
+const HUNK_KINDS = new Set(["add", "remove", "replace"]);
+
+function finiteCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000) return undefined;
+  return Math.round(value);
+}
+
+/** Copia só contagens e códigos. Ignora texto jurídico que tenha vindo junto do erro. */
+export function coverageFromUnknown(error: unknown): Record<string, unknown> | undefined {
+  if (!error || typeof error !== "object" || !("diagnostics" in error)) return undefined;
+  const diagnostics = (error as { diagnostics?: unknown }).diagnostics;
+  if (!diagnostics || typeof diagnostics !== "object") return undefined;
+  const record = diagnostics as Record<string, unknown>;
+  const reason = typeof record.reason === "string" && COVERAGE_REASONS.has(record.reason) ? record.reason : undefined;
+  if (!reason) return undefined;
+  const coverage: Record<string, unknown> = { reason };
+  for (const key of ["hunks", "covered", "uncovered", "add", "remove", "replace", "changeCount", "limit"]) {
+    const value = finiteCount(record[key]);
+    if (value !== undefined) coverage[key] = value;
+  }
+  if (Array.isArray(record.uncoveredChars)) {
+    coverage.uncoveredChars = record.uncoveredChars
+      .map((item) => finiteCount(item))
+      .filter((item): item is number => item !== undefined)
+      .slice(0, 40);
+  }
+  if (Array.isArray(record.uncoveredKinds)) {
+    coverage.uncoveredKinds = record.uncoveredKinds
+      .filter((item) => typeof item === "string" && HUNK_KINDS.has(item))
+      .slice(0, 40);
+  }
+  return coverage;
+}
+
 export function createLegalReviewTrace(input: {
   testMode: boolean;
   requestedModel: string;
@@ -153,6 +188,7 @@ export function createLegalReviewTrace(input: {
   let changes: number | undefined;
   let unverifiedClaims: number | undefined;
   let pending: SafeLegalReviewError | undefined;
+  let coverageLog: Record<string, unknown> | undefined;
   const testMode = input.testMode === true;
   const requestedModel = safeReviewModel(input.requestedModel) || "gpt-5.6";
   const write = input.write ?? defaultWrite;
@@ -181,7 +217,7 @@ export function createLegalReviewTrace(input: {
     }
   ) {
     const now = clock();
-    const payload: Record<string, string | number | boolean | SafeLegalReviewError> = {
+    const payload: Record<string, unknown> = {
       severity: event === "LEGAL_REVIEW_ERROR" ? "ERROR" : event === "LEGAL_REVIEW_RETRY" ? "WARNING" : "INFO",
       message: event,
       at: new Date().toISOString(),
@@ -199,6 +235,12 @@ export function createLegalReviewTrace(input: {
     if (unverifiedClaims !== undefined) payload.unverifiedClaims = unverifiedClaims;
     if (extra?.firestoreStep && FIRESTORE_STEPS.has(extra.firestoreStep)) payload.firestoreStep = extra.firestoreStep;
     if (extra?.retryReason && RETRY_REASONS.has(extra.retryReason)) payload.retryReason = extra.retryReason;
+    if (
+      coverageLog
+      && (event === "LEGAL_REVIEW_VALIDATION_END" || event === "LEGAL_REVIEW_ERROR")
+    ) {
+      payload.coverage = coverageLog;
+    }
     if (extra?.error) {
       payload.error = {
         message: extra.error.message,
@@ -235,6 +277,7 @@ export function createLegalReviewTrace(input: {
     openaiStart() {
       stage = "openai";
       attempt += 1;
+      coverageLog = undefined;
       emit("LEGAL_REVIEW_OPENAI_START");
     },
     openaiEnd(model) {
@@ -256,9 +299,10 @@ export function createLegalReviewTrace(input: {
       stage = "validation";
       emit("LEGAL_REVIEW_VALIDATION_START");
     },
-    validationEnd(counts) {
+    validationEnd(counts, failure) {
       stage = "validation";
       applyCounts(counts);
+      coverageLog = coverageFromUnknown(failure);
       emit("LEGAL_REVIEW_VALIDATION_END");
     },
     firestoreStart(step) {
@@ -278,6 +322,8 @@ export function createLegalReviewTrace(input: {
     noteFailure(error, failedStage) {
       stage = safeStage(failedStage);
       pending = sanitizeLegalReviewError(error, stage);
+      const safeCoverage = coverageFromUnknown(error);
+      if (safeCoverage) coverageLog = safeCoverage;
     },
     clearFailure() {
       pending = undefined;

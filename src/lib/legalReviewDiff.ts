@@ -94,6 +94,43 @@ export function diffOperations(before: string, after: string): DiffLine[] {
   return buildDiff(before, after);
 }
 
+export interface ChangeHunk {
+  kind: "add" | "remove" | "replace";
+  original: string;
+  revised: string;
+}
+
+/**
+ * Agrupa remove/add consecutivos. Uma correção no meio do parágrafo deixa de ser
+ * exigida linha a linha: o bloco guarda o texto removido e o texto acrescentado.
+ */
+export function changeHunks(before: string, after: string): ChangeHunk[] {
+  const hunks: ChangeHunk[] = [];
+  let removed: string[] = [];
+  let added: string[] = [];
+  const flush = () => {
+    if (!removed.length && !added.length) return;
+    const kind = removed.length && added.length ? "replace" : removed.length ? "remove" : "add";
+    hunks.push({
+      kind,
+      original: removed.join("\n"),
+      revised: added.join("\n"),
+    });
+    removed = [];
+    added = [];
+  };
+  for (const line of diffOperations(before, after)) {
+    if (line.kind === "same") {
+      flush();
+      continue;
+    }
+    if (line.kind === "remove") removed.push(line.text);
+    else added.push(line.text);
+  }
+  flush();
+  return hunks;
+}
+
 /** Diff por linha para a tela, com trechos iguais longos resumidos. */
 export function diffLines(before: string, after: string): DiffLine[] {
   return collapseSame(buildDiff(before, after));

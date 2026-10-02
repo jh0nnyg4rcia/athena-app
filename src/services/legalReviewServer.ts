@@ -3,7 +3,12 @@
  * Este módulo não pode ser importado pelo cliente.
  */
 import OpenAI from "openai";
-import { LEGAL_REVIEW_JSON_SCHEMA, normalizeLegalAudit, type NormalizedAudit } from "../lib/legalReviewValidate";
+import {
+  LEGAL_REVIEW_JSON_SCHEMA,
+  explainLegalAuditFailure,
+  normalizeLegalAudit,
+  type NormalizedAudit,
+} from "../lib/legalReviewValidate";
 import { searchDomainsForLesson } from "../lib/legalReviewSources";
 import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "./legalReviewPrompt";
 import { redactProviderError } from "./openaiServerService";
@@ -206,9 +211,7 @@ export function interpretReviewResponse(
     webSearchExecuted: consultedUrls.length > 0,
     consultedUrls,
   });
-  if (!audit) {
-    throw new Error("A revisão não descreveu todas as alterações do texto. A aula publicada não foi alterada.");
-  }
+  if (!audit) throw explainLegalAuditFailure(raw, originalMarkdown);
   return {
     ...audit,
     model: response.model || requestedModel,
@@ -229,6 +232,48 @@ async function createResponse(
     buildReviewCreateParams({ model, instructions, userInput, lessonText }),
     { timeout: timeoutMs, maxRetries: OPENAI_REVIEW_SDK_MAX_RETRIES }
   );
+}
+
+const UNCOVERED_FOLLOW_UP = [
+  "A resposta anterior não pôde ser aceita porque o reviewedMarkdown contém mudanças materiais que não estão todas descritas em changes.",
+  "Cada mudança material precisa de um item em changes.",
+  "originalExcerpt deve corresponder a um trecho do texto original.",
+  "revisedExcerpt deve corresponder ao trecho equivalente do texto revisado.",
+  "Não reescreva trechos que não precisem de correção.",
+  "Preserve ao máximo o texto original fora das correções necessárias.",
+  "Devolva somente o JSON do schema.",
+  "Não invente URLs.",
+  "Se não houver comprovação, use NAO_CONFIRMADO.",
+  "Preserve os marcadores [BLOCK_n].",
+].join(" ");
+
+const TOO_MANY_FOLLOW_UP = [
+  "A resposta anterior declarou mais de 40 alterações.",
+  "Não descarte uma correção jurídica para caber no limite: reduza reescritas editoriais e mantenha cada mudança material descrita.",
+  "originalExcerpt deve corresponder ao texto original e revisedExcerpt ao texto revisado.",
+  "Não reescreva trechos que não precisem de correção.",
+  "Preserve ao máximo o texto original fora das correções necessárias.",
+  "Devolva somente o JSON do schema.",
+  "Não invente URLs.",
+  "Se não houver comprovação, use NAO_CONFIRMADO.",
+  "Preserve os marcadores [BLOCK_n].",
+].join(" ");
+
+const GENERIC_FOLLOW_UP = [
+  "A resposta anterior não pôde ser aceita.",
+  "Pesquise de novo nas fontes oficiais permitidas.",
+  "Devolva somente o JSON do schema.",
+  "Cada trecho substancialmente diferente do original precisa de um item em changes, com originalExcerpt e revisedExcerpt.",
+  "Não invente URLs.",
+  "Se não houver comprovação, use NAO_CONFIRMADO.",
+  "Preserve os marcadores [BLOCK_n].",
+].join(" ");
+
+export function reviewFollowUpInstruction(error: unknown): string {
+  const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : "";
+  if (code === "uncovered_edits") return UNCOVERED_FOLLOW_UP;
+  if (code === "too_many_changes") return TOO_MANY_FOLLOW_UP;
+  return GENERIC_FOLLOW_UP;
 }
 
 function traceCounts(audit: AuditLessonResult): LegalReviewTraceCounts {
@@ -268,7 +313,7 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
       trace.validationEnd(traceCounts(audit));
       return audit;
     } catch (error) {
-      trace.validationEnd();
+      trace.validationEnd(undefined, error);
       trace.noteFailure(error, "validation");
       return error instanceof Error ? error : new Error("A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.");
     }
@@ -303,7 +348,7 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   const lacksSources = !(parsed instanceof Error) && !parsed.webSearchUsed;
   if ((parsed instanceof Error || lacksSources) && canFollowUp) {
     trace.retry(lacksSources ? "missing_sources" : "invalid_audit");
-    userInput = `${userInput}\n\nA resposta anterior não pôde ser aceita. Pesquise de novo nas fontes oficiais permitidas. Devolva somente o JSON do schema. Cada trecho substancialmente diferente do original precisa de um item em changes, com originalExcerpt e revisedExcerpt. Não invente URLs. Se não houver comprovação, use NAO_CONFIRMADO. Preserve os marcadores [BLOCK_n].`;
+    userInput = `${userInput}\n\n${reviewFollowUpInstruction(parsed)}`;
     trace.openaiStart();
     try {
       response = await createResponse(

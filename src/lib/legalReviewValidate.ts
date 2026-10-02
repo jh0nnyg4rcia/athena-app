@@ -1,4 +1,4 @@
-import { diffOperations } from "./legalReviewDiff";
+import { changeHunks, type ChangeHunk } from "./legalReviewDiff";
 import {
   institutionsNamedInClaim,
   isConfiguredOfficialUrl,
@@ -284,31 +284,254 @@ export function summarizeChanges(changes: LegalReviewChange[]): LegalReviewSumma
   };
 }
 
-function normalizeCoverageText(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+/**
+ * Máximo de changes conferíveis. Acima disso a auditoria é recusada por inteiro.
+ * Não há descarte silencioso: um item além do teto poderia ser justamente a alteração jurídica.
+ * O schema não limita o array; o teto fica aqui para o erro ser explícito.
+ */
+export const MAX_DECLARED_CHANGES = 40;
+
+/**
+ * Fração mínima dos tokens que de fato mudaram e que o excerpt precisa conter, em ordem.
+ * Delta de até 4 tokens exige 100%: número, data, "não" ou tema não podem ficar de fora.
+ * Acima disso, 90%. Abaixo do limiar, a cobertura falha fechada.
+ */
+export const COVERAGE_TOKEN_RATIO = 0.9;
+export const SHORT_DELTA_TOKEN_LIMIT = 4;
+const TOKEN_LCS_CELL_LIMIT = 250_000;
+const TOKEN_PATTERN = /[\p{L}\p{N}]+(?:[.-][\p{L}\p{N}]+)*[ºª]?/gu;
+
+export interface CoverageHunkDiagnostic {
+  kind: ChangeHunk["kind"];
+  chars: number;
 }
 
-/** Linhas substanciais do diff que nenhum excerto das alterações cobre. */
+export interface CoverageDiagnostics {
+  reason: "ok" | "uncovered_edits" | "too_many_changes" | "invalid_audit";
+  hunks: number;
+  covered: number;
+  uncovered: number;
+  add: number;
+  remove: number;
+  replace: number;
+  changeCount: number;
+  limit: number;
+  uncoveredChars: number[];
+  uncoveredKinds: Array<ChangeHunk["kind"]>;
+}
+
+export class LegalReviewValidationError extends Error {
+  readonly code: "too_many_changes" | "uncovered_edits" | "invalid_audit";
+  readonly diagnostics: CoverageDiagnostics;
+
+  constructor(
+    message: string,
+    code: "too_many_changes" | "uncovered_edits" | "invalid_audit",
+    diagnostics: CoverageDiagnostics
+  ) {
+    super(message);
+    this.name = "LegalReviewValidationError";
+    this.code = code;
+    this.diagnostics = diagnostics;
+  }
+}
+
+/** Normaliza só o que não altera palavra, número, data, negação ou marcador estrutural. */
+export function normalizeCoverageComparable(value: string): string {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/[ \t\u00a0]+/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+function stripDecorativeMarkdown(line: string): string {
+  const heading = line.match(/^(#{1,6}\s+)([\s\S]*)$/);
+  const list = line.match(/^((?:[-*+]|\d+[.)])\s+)([\s\S]*)$/);
+  const prefix = heading?.[1] || list?.[1] || "";
+  let body = heading?.[2] ?? list?.[2] ?? line;
+  body = body.replace(/\*\*([^*]+)\*\*/g, "$1");
+  body = body.replace(/__([^_]+)__/g, "$1");
+  body = body.replace(/`([^`]+)`/g, "$1");
+  body = body.replace(/(^|\s)\*(\S(?:.*?\S)?)\*(?=\s|$)/g, "$1$2");
+  body = body.replace(/(^|\s)_(\S(?:.*?\S)?)_(?=\s|$)/g, "$1$2");
+  return `${prefix}${body}`.replace(/[ \t]+/g, " ").trim();
+}
+
+/** Assinatura editorial. Heading e lista permanecem; ênfase pareada sai. */
+export function editorialSignature(value: string): string {
+  return normalizeCoverageComparable(value)
+    .split("\n")
+    .map(stripDecorativeMarkdown)
+    .join("\n")
+    .toLocaleLowerCase("pt-BR");
+}
+
+export function coverageTokens(value: string): string[] {
+  return editorialSignature(value).match(TOKEN_PATTERN) || [];
+}
+
+function requiredTokenMatches(deltaLength: number): number {
+  if (deltaLength <= 0) return 0;
+  if (deltaLength <= SHORT_DELTA_TOKEN_LIMIT) return deltaLength;
+  return Math.ceil(deltaLength * COVERAGE_TOKEN_RATIO);
+}
+
+function orderedMatchCount(delta: string[], excerpt: string[]): number {
+  let matched = 0;
+  for (const token of excerpt) {
+    if (matched < delta.length && token === delta[matched]) matched += 1;
+  }
+  return matched;
+}
+
+function coversTokens(delta: string[], excerpt: string): boolean {
+  if (!delta.length) return true;
+  return orderedMatchCount(delta, coverageTokens(excerpt)) >= requiredTokenMatches(delta.length);
+}
+
+function coversStructural(side: string, excerpt: string): boolean {
+  const hunkSignature = editorialSignature(side);
+  if (!hunkSignature) return true;
+  return editorialSignature(excerpt).includes(hunkSignature);
+}
+
+function tokenDelta(before: string[], after: string[]): { removed: string[]; added: string[] } {
+  if (!before.length && !after.length) return { removed: [], added: [] };
+  if (before.length * after.length > TOKEN_LCS_CELL_LIMIT) {
+    return { removed: before, added: after };
+  }
+  const n = before.length;
+  const m = after.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const row = dp[i];
+    const next = dp[i + 1];
+    for (let j = m - 1; j >= 0; j -= 1) {
+      row[j] = before[i] === after[j] ? next[j + 1] + 1 : Math.max(next[j], row[j + 1]);
+    }
+  }
+  const removed: string[] = [];
+  const added: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (before[i] === after[j]) {
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      removed.push(before[i]);
+      i += 1;
+    } else {
+      added.push(after[j]);
+      j += 1;
+    }
+  }
+  while (i < n) {
+    removed.push(before[i]);
+    i += 1;
+  }
+  while (j < m) {
+    added.push(after[j]);
+    j += 1;
+  }
+  return { removed, added };
+}
+
+function grounded(excerpt: string, side: string): boolean {
+  const excerptTokens = coverageTokens(excerpt);
+  const sideTokens = coverageTokens(side);
+  if (!excerptTokens.length || !sideTokens.length) return false;
+  return orderedMatchCount(excerptTokens, sideTokens) === excerptTokens.length;
+}
+
+function changeCoversHunk(
+  hunk: ChangeHunk,
+  change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">
+): boolean {
+  const delta = tokenDelta(coverageTokens(hunk.original), coverageTokens(hunk.revised));
+  if (delta.removed.length === 0 && delta.added.length === 0) {
+    if (hunk.kind === "add") return coversStructural(hunk.revised, change.revisedExcerpt);
+    if (hunk.kind === "remove") return coversStructural(hunk.original, change.originalExcerpt);
+    return coversStructural(hunk.original, change.originalExcerpt) && coversStructural(hunk.revised, change.revisedExcerpt);
+  }
+  if (hunk.kind === "add") {
+    return grounded(change.revisedExcerpt, hunk.revised) && coversTokens(delta.added, change.revisedExcerpt);
+  }
+  if (hunk.kind === "remove") {
+    return grounded(change.originalExcerpt, hunk.original) && coversTokens(delta.removed, change.originalExcerpt);
+  }
+  if (!grounded(change.originalExcerpt, hunk.original) || !grounded(change.revisedExcerpt, hunk.revised)) return false;
+  const originalOk = delta.removed.length === 0 || coversTokens(delta.removed, change.originalExcerpt);
+  const revisedOk = delta.added.length === 0 || coversTokens(delta.added, change.revisedExcerpt);
+  return originalOk && revisedOk;
+}
+
+function emptyCoverage(reason: CoverageDiagnostics["reason"], changeCount = 0): CoverageDiagnostics {
+  return {
+    reason,
+    hunks: 0,
+    covered: 0,
+    uncovered: 0,
+    add: 0,
+    remove: 0,
+    replace: 0,
+    changeCount,
+    limit: MAX_DECLARED_CHANGES,
+    uncoveredChars: [],
+    uncoveredKinds: [],
+  };
+}
+
+export function assessSubstantiveCoverage(
+  original: string,
+  revised: string,
+  changes: Array<Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">>
+): CoverageDiagnostics {
+  const substantive = changeHunks(original, revised).filter(
+    (hunk) => editorialSignature(hunk.original) !== editorialSignature(hunk.revised)
+  );
+  const used = new Set<number>();
+  const uncovered: CoverageHunkDiagnostic[] = [];
+  let covered = 0;
+  for (const hunk of substantive) {
+    const index = changes.findIndex((change, changeIndex) => !used.has(changeIndex) && changeCoversHunk(hunk, change));
+    if (index >= 0) {
+      used.add(index);
+      covered += 1;
+    } else {
+      const chars = normalizeCoverageComparable(hunk.original).length + normalizeCoverageComparable(hunk.revised).length;
+      uncovered.push({ kind: hunk.kind, chars });
+    }
+  }
+  return {
+    reason: uncovered.length ? "uncovered_edits" : "ok",
+    hunks: substantive.length,
+    covered,
+    uncovered: uncovered.length,
+    add: substantive.filter((hunk) => hunk.kind === "add").length,
+    remove: substantive.filter((hunk) => hunk.kind === "remove").length,
+    replace: substantive.filter((hunk) => hunk.kind === "replace").length,
+    changeCount: changes.length,
+    limit: MAX_DECLARED_CHANGES,
+    uncoveredChars: uncovered.map((hunk) => hunk.chars),
+    uncoveredKinds: uncovered.map((hunk) => hunk.kind),
+  };
+}
+
+/**
+ * Blocos materiais ainda sem change. O retorno é só tipo e tamanho, nunca o texto jurídico.
+ * Cada change cobre no máximo um bloco.
+ */
 export function uncoveredSubstantiveEdits(
   original: string,
   revised: string,
   changes: Array<Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">>
 ): string[] {
-  const excerpts = changes
-    .flatMap((change) => [change.originalExcerpt, change.revisedExcerpt])
-    .map(normalizeCoverageText)
-    .filter((excerpt) => excerpt.length >= 4);
-  const left = original.split("\n").map((line) => line.trim()).join("\n");
-  const right = revised.split("\n").map((line) => line.trim()).join("\n");
-  const uncovered: string[] = [];
-  for (const line of diffOperations(left, right)) {
-    if (line.kind === "same") continue;
-    const text = normalizeCoverageText(line.text);
-    if (!text) continue;
-    const covered = excerpts.some((excerpt) => text.includes(excerpt) || excerpt.includes(text));
-    if (!covered) uncovered.push(text);
-  }
-  return uncovered;
+  const report = assessSubstantiveCoverage(original, revised, changes);
+  return report.uncoveredChars.map((chars, index) => `${report.uncoveredKinds[index] || "replace"}:${chars}`);
 }
 
 export function enforceVerificationLevel(input: {
@@ -355,8 +578,9 @@ export function normalizeLegalAudit(
 
   const consulted = consultedUrlSet(search.consultedUrls || []);
   const consultedSources = describeConsultedSources(search.consultedUrls || []);
-  const changes = (Array.isArray(record.changes) ? record.changes : [])
-    .slice(0, 40)
+  const declared = Array.isArray(record.changes) ? record.changes : [];
+  if (declared.length > MAX_DECLARED_CHANGES) return null;
+  const changes = declared
     .map((item, index) => readChange(item, index, consulted))
     .filter((item): item is LegalReviewChange => Boolean(item));
 
@@ -391,7 +615,7 @@ export function normalizeLegalAudit(
   if (!markersPreserved(original, reviewedMarkdown)) return null;
   if (reviewedMarkdown.trim().length < 20) return null;
   if (reviewedMarkdown.length > Math.max(original.length * 3, original.length + 20_000)) return null;
-  if (uncoveredSubstantiveEdits(original, reviewedMarkdown, changes).length > 0) return null;
+  if (assessSubstantiveCoverage(original, reviewedMarkdown, changes).uncovered > 0) return null;
 
   const material = changes.filter(isMaterialLegalChange);
   const officialSourcesConsulted = consultedSources.some((source) => source.official);
@@ -415,6 +639,48 @@ export function normalizeLegalAudit(
     reviewNotes: clip(record.reviewNotes, 8000),
     consultedSources,
   };
+}
+
+const UNCOVERED_AUDIT_MESSAGE =
+  "A revisão não descreveu todas as alterações do texto. A aula publicada não foi alterada.";
+const TOO_MANY_CHANGES_MESSAGE =
+  "A revisão declarou mais de 40 alterações. Nenhuma foi descartada e a auditoria não foi aceita. A aula publicada não foi alterada.";
+const INVALID_AUDIT_MESSAGE =
+  "A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.";
+
+/** Motivo seguro da recusa. Não devolve aula, excerpt nem Markdown. */
+export function explainLegalAuditFailure(raw: unknown, originalMarkdown: string): LegalReviewValidationError {
+  const invalid = (diagnostics = emptyCoverage("invalid_audit")) =>
+    new LegalReviewValidationError(INVALID_AUDIT_MESSAGE, "invalid_audit", diagnostics);
+  const record = asRecord(raw);
+  if (!record) return invalid();
+  const original = String(originalMarkdown || "");
+  const declared = Array.isArray(record.changes) ? record.changes : [];
+  if (declared.length > MAX_DECLARED_CHANGES) {
+    return new LegalReviewValidationError(
+      TOO_MANY_CHANGES_MESSAGE,
+      "too_many_changes",
+      emptyCoverage("too_many_changes", declared.length)
+    );
+  }
+  const changes = declared
+    .map((item, index) => readChange(item, index, new Set<string>()))
+    .filter((item): item is LegalReviewChange => Boolean(item));
+  let reviewed = clip(record.reviewedMarkdown, 900_000);
+  if (!changes.length) reviewed = original;
+  if (
+    containsHtmlMarkup(reviewed)
+    || !markersPreserved(original, reviewed)
+    || reviewed.trim().length < 20
+    || reviewed.length > Math.max(original.length * 3, original.length + 20_000)
+  ) {
+    return invalid();
+  }
+  const coverage = assessSubstantiveCoverage(original, reviewed, changes);
+  if (coverage.reason === "uncovered_edits") {
+    return new LegalReviewValidationError(UNCOVERED_AUDIT_MESSAGE, "uncovered_edits", coverage);
+  }
+  return invalid(emptyCoverage("invalid_audit", changes.length));
 }
 
 const evidenceSchema = {

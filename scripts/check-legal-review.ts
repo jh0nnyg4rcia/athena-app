@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { createAthenaApiApp } from "../src/api/createAthenaApiApp";
-import { diffLines } from "../src/lib/legalReviewDiff";
+import { changeHunks, diffLines } from "../src/lib/legalReviewDiff";
 import { searchDomainsForLesson } from "../src/lib/legalReviewSources";
 import {
   LEGAL_REVIEW_ALREADY_MESSAGE,
@@ -17,6 +17,12 @@ import {
   enforceVerificationLevel,
   isOfficialLegalUrl,
   normalizeLegalAudit,
+  COVERAGE_TOKEN_RATIO,
+  MAX_DECLARED_CHANGES,
+  SHORT_DELTA_TOKEN_LIMIT,
+  assessSubstantiveCoverage,
+  editorialSignature,
+  explainLegalAuditFailure,
   uncoveredSubstantiveEdits,
 } from "../src/lib/legalReviewValidate";
 import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "../src/services/legalReviewPrompt";
@@ -43,9 +49,11 @@ import {
   OPENAI_AUDIT_BUDGET_MS,
   OPENAI_REVIEW_SDK_MAX_RETRIES,
   reviewFailureForOpenAIError,
+  reviewFollowUpInstruction,
   reviewModelName,
 } from "../src/services/legalReviewServer";
 import {
+  coverageFromUnknown,
   createLegalReviewTrace,
   sanitizeLegalReviewError,
 } from "../src/services/legalReviewTrace";
@@ -379,6 +387,117 @@ async function main() {
     original.replace("O conceito permanece.", "O conceito permanece.\n\nO STF decidiu em segredo que a pena mudou."),
     [change({})]
   ).length > 0, "o diff aponta o trecho não declarado");
+
+  const line = "A pena do art. 1º da Lei 1.521/1951 é de detenção.";
+  const wrapped = "A pena do art. 1º da Lei 1.521/1951\né de reclusão.";
+  const simpleRevised = original.replace(line, "A pena do art. 1º da Lei 1.521/1951 é de reclusão.");
+  assert(normalizeLegalAudit(auditBody(simpleRevised, [change({})]), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] }) !== null, "A: correção dentro da linha, com excerpt do trecho, passa");
+  assert(uncoveredSubstantiveEdits(original, simpleRevised, []).length > 0, "B: a mesma correção sem change falha");
+  assert(normalizeLegalAudit(auditBody(simpleRevised, []), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] })?.reviewedMarkdown === original, "B: sem change o texto publicado na auditoria volta ao original");
+  const spaced = original.replace(line, "A pena do art. 1º da Lei 1.521/1951 é de detenção.  ");
+  const crlf = original.replace(/\n/g, "\r\n");
+  assert(uncoveredSubstantiveEdits(original, spaced, []).length === 0, "C: espaço final não cria uncovered");
+  assert(uncoveredSubstantiveEdits(original, crlf, []).length === 0, "C: CRLF não cria uncovered");
+  const decorated = original.replace(line, "A pena do art. 1º da Lei 1.521/1951 é de **detenção**.");
+  assert(uncoveredSubstantiveEdits(original, decorated, []).length === 0, "D: ênfase decorativa não cria uncovered");
+  const heading = original.replace("## Art. 1º", "Art. 1º");
+  assert(uncoveredSubstantiveEdits(original, heading, []).length > 0, "D: remover heading não é editorial");
+  assert(editorialSignature("é constitucional") !== editorialSignature("não é constitucional"), "negação não é normalizada");
+  const article = original.replace("## Art. 1º", "## Art. 6º");
+  assert(uncoveredSubstantiveEdits(original, article, []).length > 0, "E: troca de artigo sem change falha");
+  assert(uncoveredSubstantiveEdits(original, article, [change({ originalExcerpt: "1º", revisedExcerpt: "6º" })]).length === 0, "E: artigo documentado passa");
+  const negationBase = `${original}\n\nA norma é constitucional.\n`;
+  const negation = negationBase.replace("A norma é constitucional.", "A norma não é constitucional.");
+  assert(uncoveredSubstantiveEdits(negationBase, negation, []).length > 0, "F: inserir não sem change falha");
+  assert(uncoveredSubstantiveEdits(negationBase, negation, [change({
+    originalExcerpt: "é constitucional",
+    revisedExcerpt: "é constitucional",
+  })]).length > 0, "F: excerpt sem a negação não cobre");
+  assert(uncoveredSubstantiveEdits(negationBase, negation, [change({
+    originalExcerpt: "é constitucional",
+    revisedExcerpt: "não é constitucional",
+  })]).length === 0, "F: negação documentada nos dois lados passa");
+  const dated = original.replace("1951", "1952");
+  assert(uncoveredSubstantiveEdits(original, dated, []).length > 0, "G: troca de data sem change falha");
+  assert(uncoveredSubstantiveEdits(original, dated, [change({ originalExcerpt: "1951", revisedExcerpt: "1952" })]).length === 0, "G: data documentada passa");
+  const temaBase = `${original}\n\nO STF firmou o Tema 999.999.\n`;
+  const tema = temaBase.replace("Tema 999.999", "Tema 1.234");
+  assert(uncoveredSubstantiveEdits(temaBase, tema, []).length > 0, "H: troca de tema sem change falha");
+  assert(uncoveredSubstantiveEdits(temaBase, tema, [change({ originalExcerpt: "999.999", revisedExcerpt: "1.234" })]).length === 0, "H: tema documentado passa");
+  const longOriginal = `${original}\n\n${"A regra geral permanece inalterada neste parágrafo de controle. ".repeat(12)}\n`;
+  const longRevised = longOriginal.replace(
+    "A regra geral permanece inalterada neste parágrafo de controle. ".repeat(12),
+    "Outra redação completa substitui o parágrafo e muda o regime, a pena, o prazo e a competência. ".repeat(8)
+  );
+  assert(uncoveredSubstantiveEdits(longOriginal, longRevised, [change({
+    originalExcerpt: "regra geral",
+    revisedExcerpt: "Outra redação",
+  })]).length > 0, "I: frase curta não cobre parágrafo reescrito");
+  const many = original
+    .replace("detenção", "reclusão")
+    .replace("O conceito permanece.", "O conceito foi alterado.")
+    .replace("## Art. 1º", "## Art. 2º");
+  assert(uncoveredSubstantiveEdits(original, many, [change({})]).length > 0, "J: vários blocos e um único change falham");
+  assert(assessSubstantiveCoverage(original, many, [change({})]).uncovered >= 2, "J: mais de um bloco fica sem cobertura");
+  const added = `${original}\n\nInclui-se a regra do art. 5º da Constituição.\n`;
+  assert(uncoveredSubstantiveEdits(original, added, [change({
+    type: "ACRESCIMO",
+    originalExcerpt: "",
+    revisedExcerpt: "Inclui-se a regra do art. 5º da Constituição.",
+  })]).length === 0, "K: acréscimo declarado passa");
+  assert(uncoveredSubstantiveEdits(original, added, []).length > 0, "L: acréscimo não declarado falha");
+  const removed = original.replace("\n\nO conceito permanece.\n", "\n");
+  assert(uncoveredSubstantiveEdits(original, removed, [change({
+    type: "REMOCAO",
+    originalExcerpt: "O conceito permanece.",
+    revisedExcerpt: "",
+  })]).length === 0, "M: remoção declarada passa");
+  assert(uncoveredSubstantiveEdits(original, removed, []).length > 0, "N: remoção não declarada falha");
+  assert(uncoveredSubstantiveEdits(original, simpleRevised, [change({ revisedExcerpt: "multa" })]).length > 0, "O: revisedExcerpt incompatível falha");
+  assert(uncoveredSubstantiveEdits(original, simpleRevised, [change({ originalExcerpt: "multa" })]).length > 0, "P: originalExcerpt incompatível falha");
+  const tooMany = Array.from({ length: MAX_DECLARED_CHANGES + 1 }, () => change({}));
+  const tooManyAudit = normalizeLegalAudit(auditBody(simpleRevised, tooMany), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+  const tooManyReason = explainLegalAuditFailure(auditBody(simpleRevised, tooMany), original);
+  assert(tooManyAudit === null, "Q: mais de 40 changes não vira auditoria");
+  assert(tooManyReason.code === "too_many_changes", "Q: o excesso tem erro explícito");
+  assert(!tooManyReason.message.includes("detenção") && !tooManyReason.message.includes(line), "Q: o erro de excesso não traz a aula");
+  assert(normalizeLegalAudit(auditBody("sem marcadores", [change({})]), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] }) === null, "R: marcadores de bloco continuam obrigatórios");
+  assert(normalizeLegalAudit(auditBody(`${original}\n<script>alert(1)</script>`, [change({})]), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] }) === null, "S: HTML continua rejeitado");
+  assert(uncoveredSubstantiveEdits(longOriginal, longRevised, [change({
+    originalExcerpt: "permanece",
+    revisedExcerpt: "substitui",
+  })]).length > 0, "T: reescrita extensa não passa com excerpt curto coincidente");
+  assert(changeHunks(line, wrapped).length === 1, "linhas consecutivas formam um único bloco");
+  assert(uncoveredSubstantiveEdits(original, original.replace(line, wrapped), [change({
+    originalExcerpt: "detenção",
+    revisedExcerpt: "reclusão",
+  })]).length === 0, "bloco requebrado continua coberto pelo excerpt da correção");
+  assert(COVERAGE_TOKEN_RATIO === 0.9 && SHORT_DELTA_TOKEN_LIMIT === 4, "limiar de cobertura documentado");
+  const coverageFailure = explainLegalAuditFailure(auditBody(longRevised, [change({
+    originalExcerpt: "regra geral",
+    revisedExcerpt: "Outra redação",
+  })]), longOriginal);
+  assert(coverageFailure.code === "uncovered_edits", "falha de cobertura identifica o motivo");
+  const coverageLines: string[] = [];
+  const coverageTrace = createLegalReviewTrace({
+    testMode: true,
+    requestedModel: "gpt-5.6",
+    write: (entry) => coverageLines.push(entry),
+  });
+  coverageTrace.validationEnd(undefined, coverageFailure);
+  coverageTrace.error(coverageFailure);
+  const coverageDump = coverageLines.join("\n");
+  assert(coverageDump.includes("uncovered_edits") && coverageDump.includes("uncoveredChars"), "log traz contagens da cobertura");
+  assert(!coverageDump.includes("Outra redação") && !coverageDump.includes("regra geral"), "log de cobertura não traz o texto jurídico");
+  assert(!coverageDump.includes("OPENAI_API_KEY") && !coverageDump.includes("Authorization"), "log de cobertura não traz segredo");
+  const smuggled = { diagnostics: { ...coverageFailure.diagnostics, lesson: longRevised, excerpt: "Outra redação" } };
+  const safeCoverage = coverageFromUnknown(smuggled);
+  assert(safeCoverage && !JSON.stringify(safeCoverage).includes("Outra redação"), "diagnóstico descarta texto contrabandeado");
+  const followUp = reviewFollowUpInstruction(coverageFailure);
+  assert(followUp.includes("originalExcerpt deve corresponder") && followUp.includes("revisedExcerpt deve corresponder"), "retry de cobertura orienta os dois lados");
+  assert(followUp.includes("Não reescreva trechos") && followUp.includes("Preserve ao máximo o texto original"), "retry pede para preservar o que já está correto");
+  assert(!followUp.includes("Outra redação") && !followUp.includes("regra geral"), "retry não envia o texto da aula");
+  assert(reviewFollowUpInstruction({ code: "too_many_changes" }).includes("mais de 40"), "retry de excesso explica o limite");
 
   const html = normalizeLegalAudit({
     status: "ALTERACOES_NECESSARIAS",
