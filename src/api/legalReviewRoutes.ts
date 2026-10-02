@@ -8,9 +8,10 @@ import {
   rejectLegalReview,
   saveLegalReviewCandidate,
   startLegalReview,
+  startLegalReviewSection,
   startLegalReviewTest,
 } from "../services/legalReviewFlow";
-import { LegalReviewError, isReviewId, readLessonSlot } from "../services/legalReviewRepository";
+import { LegalReviewError, isReviewId, readBlockIndex, readLessonSlot } from "../services/legalReviewRepository";
 import { sanitizeLegalReviewError, sanitizeLegalReviewMessage } from "../services/legalReviewTrace";
 
 function publicFailure(message: string): string {
@@ -48,13 +49,26 @@ export function registerLegalReviewRoutes(
       res.status(400).json({ error: "Informe o dia e o bloco da aula publicada." });
       return;
     }
+    const blockIndex = readBlockIndex(req.body);
+    if (blockIndex === null) {
+      res.status(400).json({ error: "A parte interna da aula é inválida. Nada foi alterado." });
+      return;
+    }
     try {
-      const result = await startLegalReview(repo, auditor, {
-        day: slot.day,
-        part: slot.part,
-        force: req.body?.force === true,
-        uid: req.athenaUser?.uid || "",
-      });
+      const result = typeof blockIndex === "number"
+        ? await startLegalReviewSection(repo, auditor, {
+          day: slot.day,
+          part: slot.part,
+          blockIndex,
+          force: req.body?.force === true,
+          uid: req.athenaUser?.uid || "",
+        })
+        : await startLegalReview(repo, auditor, {
+          day: slot.day,
+          part: slot.part,
+          force: req.body?.force === true,
+          uid: req.athenaUser?.uid || "",
+        });
       res.json(result);
     } catch (error) {
       sendReviewError(res, error);

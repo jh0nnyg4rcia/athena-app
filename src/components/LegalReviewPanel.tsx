@@ -87,6 +87,7 @@ export function LegalReviewPanel({
   onSaveCandidate,
   onReaudit,
   testMode = false,
+  sectionPreview = false,
   testDraft = "",
   onTestDraftChange,
   onEndTest,
@@ -108,6 +109,7 @@ export function LegalReviewPanel({
   onSaveCandidate: (markdown: string) => void;
   onReaudit: () => void;
   testMode?: boolean;
+  sectionPreview?: boolean;
   testDraft?: string;
   onTestDraftChange?: (value: string) => void;
   onEndTest?: () => void;
@@ -126,6 +128,7 @@ export function LegalReviewPanel({
 
   const summary = review?.summary;
   const testing = testMode || review?.testMode === true;
+  const preview = sectionPreview || review?.previewOnly === true || typeof review?.blockIndex === "number";
 
   return (
     <div className="fixed inset-0 z-[170] flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md">
@@ -165,8 +168,8 @@ export function LegalReviewPanel({
 
           {phase === "confirm" && !testing && (
             <div className="space-y-3 text-sm text-slate-300 leading-relaxed">
-              <p>A OpenAI realizará uma auditoria jurídica desta aula e poderá consultar fontes oficiais para verificar legislação e jurisprudência.</p>
-              <p>A aula publicada não será modificada até que você aprove a revisão.</p>
+              <p>A OpenAI realizará uma auditoria jurídica desta parte e poderá consultar fontes oficiais para verificar legislação e jurisprudência.</p>
+              <p>{preview ? "Esta revisão é uma prévia da parte aberta. A aula publicada não será alterada." : "A aula publicada não será modificada até que você aprove a revisão."}</p>
             </div>
           )}
 
@@ -189,6 +192,11 @@ export function LegalReviewPanel({
             <div className="space-y-5">
               {testing && (
                 <p className="text-amber-100 bg-amber-500/10 border border-amber-500/40 rounded-2xl px-4 py-3 font-bold">MODO DE TESTE — este conteúdo não será publicado.</p>
+              )}
+              {preview && !testing && (
+                <p className="text-sky-100 bg-sky-500/10 border border-sky-500/30 rounded-2xl px-4 py-3 text-sm">
+                  Prévia da parte {typeof review.blockIndex === "number" ? review.blockIndex + 1 : ""}. Dia {review.day} · Bloco {review.part + 1}. A aula publicada não foi alterada.
+                </p>
               )}
               <p className="text-sm text-slate-200">{verificationCopy(review)}</p>
               {review.manuallyEdited && (
@@ -327,7 +335,7 @@ export function LegalReviewPanel({
               )}
               {testing ? (
                 <button type="button" onClick={onEndTest} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold cursor-pointer">Encerrar teste</button>
-              ) : (
+              ) : preview ? null : (
                 <button type="button" onClick={onApprove} disabled={busy} className="px-4 py-2.5 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase cursor-pointer flex items-center gap-1.5">
                   <Check size={14} /> Aprovar e substituir
                 </button>

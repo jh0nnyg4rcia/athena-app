@@ -11,8 +11,8 @@ export interface LegalReviewStartResponse {
   review?: LegalReviewView;
 }
 
-export function requestLegalReview(day: number, part: number, force = false): Promise<LegalReviewStartResponse> {
-  return postAthenaApi<LegalReviewStartResponse>("/api/legal-review", { day, part, force }, REVIEW_TIMEOUT_MS);
+export function requestLegalReview(day: number, part: number, blockIndex: number, force = false): Promise<LegalReviewStartResponse> {
+  return postAthenaApi<LegalReviewStartResponse>("/api/legal-review", { day, part, blockIndex, force }, REVIEW_TIMEOUT_MS);
 }
 
 export function requestLegalReviewTest(content: string): Promise<{ review: LegalReviewView }> {

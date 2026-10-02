@@ -130,6 +130,12 @@ export interface LegalReviewView {
   lessonId: string;
   day: number;
   part: number;
+  /** Parte interna [BLOCK_n], índice zero-based. Ausente na revisão do documento inteiro. */
+  blockIndex?: number;
+  /** Documento do catálogo de onde a parte foi extraída. */
+  catalogLessonId?: string;
+  /** Prévia de uma parte. Não pode substituir a aula publicada. */
+  previewOnly?: boolean;
   subject: string;
   topic: string;
   originalHash: string;

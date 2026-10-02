@@ -36,6 +36,7 @@ import {
   reviewCannotBePublished,
   type LegalReviewRepository,
 } from "../src/services/legalReviewRepository";
+import { extractCatalogBlock, sectionReviewKey } from "../src/lib/catalogBlock";
 import { LEGAL_REVIEW_TEST_MATERIAL } from "../src/lib/legalReviewTestMaterial";
 import { reviewAfterManualEdit } from "../src/services/legalReviewPublish";
 import {
@@ -67,6 +68,7 @@ import {
   rejectLegalReview,
   saveLegalReviewCandidate,
   startLegalReview,
+  startLegalReviewSection,
   startLegalReviewTest,
   type LegalReviewAuditor,
   type StartReviewResult,
@@ -1119,6 +1121,8 @@ async function main() {
   assert(panelSource.includes("Esta versão foi editada após a auditoria jurídica"), "aviso de edição manual");
   assert(panelSource.includes("Revisar novamente esta versão"), "botão de nova auditoria");
   assert(panelSource.includes("Evidência oficial") && !panelSource.includes("Fonte oficial consultada"), "painel mostra a evidência da alteração e omite a lista geral de URLs");
+  assert(routeSource.includes("startLegalReviewSection") && routeSource.includes("readBlockIndex"), "revisão real recebe a parte interna");
+  assert(clientSource.includes("blockIndex"), "cliente envia o índice da parte");
   assert(panelSource.includes("MODO DE TESTE — este conteúdo não será publicado.") && panelSource.includes("Encerrar teste"), "painel de teste não oferece publicação");
   assert(appSource.includes("Testar Revisor Jurídico") && appSource.includes("requestLegalReviewTest"), "entrada de teste fica no painel do CEO");
   assert(!promptSource.includes("999.999") && !promptSource.includes("888.888") && !serverSource.includes("legalReviewTestMaterial"), "prompt e servidor não conhecem o gabarito do teste");
@@ -1556,6 +1560,65 @@ async function main() {
     assert(testRepo.lessons.get("day_1_part_0")!.content === original, "7. homologated_lessons permanece inalterada após tentativa de approve");
     assert(testRepo.parts.size === 0, "7. homologated_parts permanece vazia após tentativa de approve");
   }
+
+  const three = "[BLOCK_1]\nAlpha único.\n[BLOCK_2]\nBeta único.\n[BLOCK_3]\nGama único.\n";
+  const blockOne = extractCatalogBlock(original, 0);
+  const blockTwo = extractCatalogBlock(original, 1);
+  const middle = extractCatalogBlock(three, 1);
+  const last = extractCatalogBlock(three, 2);
+  assert(Boolean(blockOne?.startsWith("[BLOCK_1]")) && !blockOne!.includes("[BLOCK_2]") && !blockOne!.includes("O conceito permanece."), "índice 0 extrai somente [BLOCK_1]");
+  assert(Boolean(blockTwo?.startsWith("[BLOCK_2]")) && blockTwo!.includes("O conceito permanece.") && !blockTwo!.includes("[BLOCK_1]") && !blockTwo!.includes("detenção"), "índice 1 extrai somente [BLOCK_2]");
+  assert(Boolean(middle?.includes("Beta único.")) && !middle!.includes("Alpha único.") && !middle!.includes("Gama único.") && !middle!.includes("[BLOCK_1]") && !middle!.includes("[BLOCK_3]"), "parte intermediária não inclui vizinhos");
+  assert(Boolean(last?.startsWith("[BLOCK_3]")) && last!.includes("Gama único.") && !last!.includes("Beta único."), "última parte existente é extraída");
+  assert(extractCatalogBlock(original, 0) !== null && extractCatalogBlock(original, 1) !== null && extractCatalogBlock(original, 2) === null, "aula com menos de seis blocos extrai só as partes existentes");
+  assert(extractCatalogBlock(three, 3) === null && extractCatalogBlock(three, -1) === null && extractCatalogBlock(three, 1.5) === null, "índice inexistente falha fechado");
+
+  const sectionRepo = memoryRepo(lesson());
+  const sectionBefore = sectionRepo.lessons.get("day_1_part_0")!.content;
+  const seenSections: string[] = [];
+  const sectionAuditor: LegalReviewAuditor = {
+    async audit(input) {
+      seenSections.push(input.content);
+      const revised = input.content.includes("detenção") ? input.content.replace("detenção", "reclusão") : input.content;
+      const changes = input.content.includes("detenção") ? [change({})] : [];
+      const audit = normalizeLegalAudit(
+        auditBody(revised, changes),
+        input.content,
+        { webSearchExecuted: true, consultedUrls: [PLANALTO] }
+      );
+      if (!audit) throw new Error("parte inválida");
+      return { ...audit, model: "gpt-5.6", webSearchUsed: true, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+    },
+  };
+  const firstPart = pending(await startLegalReviewSection(sectionRepo, sectionAuditor, {
+    day: 1, part: 0, blockIndex: 0, force: true, uid: "ceo", now: 200_000,
+  }));
+  const secondPart = pending(await startLegalReviewSection(sectionRepo, sectionAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 210_000,
+  }));
+  assert(seenSections[0] === blockOne && seenSections[1] === blockTwo, "a auditoria recebe somente o trecho-fonte da parte");
+  assert(firstPart.day === 1 && firstPart.part === 0 && firstPart.blockIndex === 0 && firstPart.catalogLessonId === "day_1_part_0", "resultado da primeira parte guarda a tripla");
+  assert(secondPart.day === 1 && secondPart.part === 0 && secondPart.blockIndex === 1 && secondPart.lessonId === sectionReviewKey(1, 0, 1), "resultado da segunda parte guarda a tripla");
+  assert(firstPart.lessonId !== secondPart.lessonId && sectionRepo.reviews.get(firstPart.id)?.originalContent === blockOne && sectionRepo.reviews.get(secondPart.id)?.originalContent === blockTwo, "partes da mesma aula não sobrescrevem o resultado");
+  assert(firstPart.previewOnly === true && reviewCannotBePublished(firstPart), "prévia da parte não pode ser publicada");
+  let sectionPublish = 0;
+  try {
+    await approveLegalReview(sectionRepo, firstPart.id, "uid-ceo", CEO, 220_000);
+  } catch (error) {
+    sectionPublish = error instanceof LegalReviewError ? error.status : 0;
+  }
+  assert(sectionPublish === 403, "aprovação da prévia é recusada");
+  assert(sectionRepo.lessons.get("day_1_part_0")!.content === sectionBefore, "prévia não modifica a aula");
+  assert(!sectionRepo.parts.has("day_1_part_0"), "prévia não grava homologated_parts");
+  let missingPart = 0;
+  try {
+    await startLegalReviewSection(sectionRepo, sectionAuditor, {
+      day: 1, part: 0, blockIndex: 2, force: true, uid: "ceo", now: 230_000,
+    });
+  } catch (error) {
+    missingPart = error instanceof LegalReviewError ? error.status : 0;
+  }
+  assert(missingPart === 404 && sectionRepo.lessons.get("day_1_part_0")!.content === sectionBefore, "parte inexistente falha fechado sem alterar a aula");
 
   if (failed) {
     console.error(`${failed} verificações falharam.`);

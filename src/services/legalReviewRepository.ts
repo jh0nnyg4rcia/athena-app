@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isSectionReviewKey } from "../lib/catalogBlock";
 import type { LegalReviewIndex, LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
 
 export function hashLessonContent(content: string): string {
@@ -87,6 +88,15 @@ export function readLessonSlot(body: unknown): { day: number; part: number } | n
   return { day, part };
 }
 
+/** undefined: pedido antigo, sem parte interna. null: índice inválido. */
+export function readBlockIndex(body: unknown): number | null | undefined {
+  if (!body || typeof body !== "object" || !("blockIndex" in body)) return undefined;
+  const value = (body as { blockIndex?: unknown }).blockIndex;
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 99) return null;
+  return value;
+}
+
 export function lessonDocId(day: number, part: number): string {
   return `day_${day}_part_${part}`;
 }
@@ -96,8 +106,11 @@ export const LEGAL_REVIEW_TEST_LESSON_ID = "ceo_review_test";
 export const LEGAL_REVIEW_TEST_PUBLISH_MESSAGE =
   "Revisão de teste não pode ser publicada. Nenhuma aula foi alterada.";
 
-export function reviewCannotBePublished(review: { testMode?: boolean; lessonId?: string }): boolean {
-  return review.testMode === true || review.lessonId === LEGAL_REVIEW_TEST_LESSON_ID;
+export function reviewCannotBePublished(review: { testMode?: boolean; lessonId?: string; previewOnly?: boolean }): boolean {
+  return review.testMode === true
+    || review.previewOnly === true
+    || review.lessonId === LEGAL_REVIEW_TEST_LESSON_ID
+    || isSectionReviewKey(review.lessonId || "");
 }
 
 export function publicReview(review: LegalReviewView): LegalReviewView {
@@ -106,6 +119,9 @@ export function publicReview(review: LegalReviewView): LegalReviewView {
     lessonId: review.lessonId,
     day: review.day,
     part: review.part,
+    blockIndex: review.blockIndex,
+    catalogLessonId: review.catalogLessonId,
+    previewOnly: review.previewOnly === true,
     subject: review.subject,
     topic: review.topic,
     originalHash: review.originalHash,

@@ -1199,7 +1199,7 @@ const ChatMessage = memo(({
   onApproveLesson?: (idx: number) => Promise<any>,
   onApproveAndAdvance?: (idx: number) => Promise<void>,
   onEditLesson?: (idx: number) => void,
-  onReviewLesson?: (day: number, part: number) => void,
+  onReviewLesson?: (day: number, part: number, blockIndex: number) => void,
   isSavingHomologation?: boolean,
   homologatedLessonState?: HomologatedLesson | null,
   onGoHome?: () => void,
@@ -1611,12 +1611,12 @@ const ChatMessage = memo(({
                                   {legalReviewButtonVisible(Boolean(isCEO), isThisPartApproved) && effectiveDay !== undefined && (
                                     <button
                                       type="button"
-                                      onClick={() => onReviewLesson?.(effectiveDay, msgPartIdx)}
+                                      onClick={() => onReviewLesson?.(effectiveDay, msgPartIdx, msg.currentBlockIndex ?? 0)}
                                       className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Auditoria jurídica com fontes oficiais. A aula publicada só muda se você aprovar."
+                                      title="Audita somente a parte aberta. A aula publicada não é alterada."
                                     >
                                       <Search size={13} />
-                                      <span>Revisar com IA</span>
+                                      <span>Revisar esta parte</span>
                                     </button>
                                   )}
                                   <button
@@ -2019,6 +2019,7 @@ export default function App() {
   const [legalReviewBusy, setLegalReviewBusy] = useState(false);
   const [legalReviewDay, setLegalReviewDay] = useState<number | null>(null);
   const [legalReviewPart, setLegalReviewPart] = useState<number | null>(null);
+  const [legalReviewBlock, setLegalReviewBlock] = useState<number | null>(null);
   const [legalReviewTestMode, setLegalReviewTestMode] = useState(false);
   const [legalReviewTestDraft, setLegalReviewTestDraft] = useState(LEGAL_REVIEW_TEST_MATERIAL);
   const [homologationSuccessBanner, setHomologationSuccessBanner] = useState<string | null>(null);
@@ -4655,10 +4656,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setHomologatedLessonState(null);
   };
 
-  const openLegalReview = (day: number, part: number) => {
+  const openLegalReview = (day: number, part: number, blockIndex: number) => {
     setLegalReviewTestMode(false);
     setLegalReviewDay(day);
     setLegalReviewPart(part);
+    setLegalReviewBlock(blockIndex);
     setLegalReviewError(null);
     setLegalReviewNotice(null);
     setLegalReview(null);
@@ -4670,6 +4672,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setLegalReviewTestMode(true);
     setLegalReviewDay(null);
     setLegalReviewPart(null);
+    setLegalReviewBlock(null);
     setLegalReviewError(null);
     setLegalReviewNotice(null);
     setLegalReview(null);
@@ -4765,12 +4768,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
   };
 
   const runLegalReview = async (force: boolean) => {
-    if (legalReviewDay === null || legalReviewPart === null) return;
+    if (legalReviewDay === null || legalReviewPart === null || legalReviewBlock === null) return;
     setLegalReviewBusy(true);
     setLegalReviewError(null);
     setLegalReviewPhase('running');
     try {
-      const result = await requestLegalReview(legalReviewDay, legalReviewPart, force);
+      const result = await requestLegalReview(legalReviewDay, legalReviewPart, legalReviewBlock, force);
       if (result.alreadyReviewed) {
         setLegalReviewNotice({ lastReviewDate: result.lastReviewDate || '' });
         setLegalReviewPhase('notice');
@@ -4791,6 +4794,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     if (!legalReview) return;
     if (legalReview.testMode || legalReviewTestMode) {
       setLegalReviewError('Revisão de teste não pode ser publicada. Nenhuma aula foi alterada.');
+      return;
+    }
+    if (legalReview.previewOnly || typeof legalReview.blockIndex === 'number') {
+      setLegalReviewError('A prévia desta parte não substitui a aula publicada. Nenhuma aula foi alterada.');
       return;
     }
     if (!confirm('Substituir a aula publicada por esta versão revisada? A versão anterior fica guardada no histórico da revisão.')) return;
@@ -7339,12 +7346,12 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                     {legalReviewButtonVisible(Boolean(isCEO), cacheCurrent) && tDay !== undefined && (
                                       <button
                                         type="button"
-                                        onClick={() => openLegalReview(tDay, tMatIdx ?? 0)}
+                                        onClick={() => openLegalReview(tDay, tMatIdx ?? 0, currentBlockIndex)}
                                         className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                        title="Auditoria jurídica com fontes oficiais. A aula publicada só muda se você aprovar."
+                                        title="Audita somente a parte aberta. A aula publicada não é alterada."
                                       >
                                         <Search size={14} />
-                                        Revisar com IA
+                                        Revisar esta parte
                                       </button>
                                     )}
                                     <button
@@ -8012,6 +8019,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
       onSaveCandidate={(markdown) => { void saveOpenLegalReviewCandidate(markdown); }}
       onReaudit={() => { void reauditOpenLegalReview(); }}
       testMode={legalReviewTestMode}
+      sectionPreview={legalReviewBlock !== null && !legalReviewTestMode}
       testDraft={legalReviewTestDraft}
       onTestDraftChange={setLegalReviewTestDraft}
       onEndTest={() => { void endLegalReviewTest(); }}

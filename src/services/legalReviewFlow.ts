@@ -7,6 +7,7 @@ import {
   type LegalReviewView,
   type StoredCatalogLesson,
 } from "../lib/legalReviewTypes";
+import { extractCatalogBlock, sectionReviewKey } from "../lib/catalogBlock";
 import { isCeoEmail } from "../lib/contentProvider";
 import { reviewModelName, type AuditLessonResult } from "./legalReviewServer";
 import {
@@ -220,6 +221,119 @@ export async function startLegalReview(
     trace.error(error);
     const message = failureMessage(error);
     await tracedFirestore(trace, "fail", () => repo.fail(processing.id, lesson.id, message)).catch(() => undefined);
+    if (error instanceof LegalReviewError) throw error;
+    throw new LegalReviewError(message, 502);
+  }
+}
+
+export async function startLegalReviewSection(
+  repo: LegalReviewRepository,
+  auditor: LegalReviewAuditor,
+  input: { day: number; part: number; blockIndex: number; force: boolean; uid: string; now?: number }
+): Promise<StartReviewResult> {
+  const now = input.now ?? Date.now();
+  const catalogId = lessonDocId(input.day, input.part);
+  const lesson = await repo.getLesson(catalogId);
+  if (!lesson || lesson.content.trim().length < 20) {
+    throw new LegalReviewError(
+      "Esta aula ainda não está no catálogo oficial. Publique o bloco antes de revisar.",
+      404
+    );
+  }
+  const slice = extractCatalogBlock(lesson.content, input.blockIndex);
+  if (!slice || slice.trim().length < 20) {
+    throw new LegalReviewError(
+      "Esta parte não existe na aula publicada. A aula não foi alterada.",
+      404
+    );
+  }
+  if (slice.length > MAX_REVIEWABLE_CHARS) {
+    throw new LegalReviewError(
+      "Esta parte é grande demais para a auditoria automática. A aula publicada não foi alterada.",
+      400
+    );
+  }
+  const scopeId = sectionReviewKey(input.day, input.part, input.blockIndex);
+  const sectionLesson: StoredCatalogLesson = { ...lesson, id: scopeId, content: slice };
+  const index = (await repo.getIndex(scopeId)) || emptyReviewIndex(scopeId);
+  const hash = hashCatalogSnapshot(sectionLesson);
+  if (!input.force && index.approvedHash && index.approvedHash === hash && index.approvedReviewDate) {
+    return {
+      alreadyReviewed: true,
+      message: LEGAL_REVIEW_ALREADY_MESSAGE,
+      lastReviewDate: index.approvedReviewDate,
+      reviewId: index.approvedReviewId || "",
+    };
+  }
+  if (processingLockFresh(index, now)) {
+    throw new LegalReviewError(
+      "Já existe uma revisão em andamento para esta parte. Aguarde a conclusão antes de iniciar outra.",
+      409
+    );
+  }
+
+  const reviewDate = formatReviewDate(new Date(now));
+  const processing: LegalReviewView = {
+    ...blankReview(sectionLesson, input.uid, now, reviewDate),
+    lessonId: scopeId,
+    day: lesson.day,
+    part: lesson.part,
+    blockIndex: input.blockIndex,
+    catalogLessonId: lesson.id,
+    previewOnly: true,
+    originalContent: slice,
+    originalHash: hash,
+  };
+  const trace = createLegalReviewTrace({ testMode: false, requestedModel: reviewModelName() });
+  trace.start();
+  try {
+    await tracedFirestore(trace, "begin", () => repo.begin(processing));
+  } catch (error) {
+    trace.error(error);
+    if (error instanceof LegalReviewError) throw error;
+    throw new LegalReviewError(failureMessage(error), 502);
+  }
+
+  try {
+    const audit = await auditor.audit({
+      reviewDate,
+      lessonId: scopeId,
+      day: lesson.day,
+      part: lesson.part,
+      subject: lesson.subject,
+      topic: lesson.topic || lesson.subject,
+      content: slice,
+      trace,
+    });
+    const pending: LegalReviewView = {
+      ...processing,
+      reviewedMarkdown: audit.reviewedMarkdown,
+      changes: audit.changes,
+      unverifiedClaims: audit.unverifiedClaims,
+      summary: audit.summary,
+      reviewNotes: audit.reviewNotes,
+      verificationLevel: audit.verificationLevel,
+      confidence: audit.confidence,
+      outcome: audit.outcome,
+      status: "pending_approval",
+      model: audit.model,
+      webSearchUsed: audit.webSearchUsed,
+      testMode: false,
+      previewOnly: true,
+      usage: audit.usage,
+      consultedSources: audit.consultedSources,
+      manuallyEdited: false,
+      candidateHash: hashLessonContent(audit.reviewedMarkdown),
+      auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
+      sourceHistory: [],
+    };
+    await tracedFirestore(trace, "complete", () => repo.complete(pending));
+    trace.success(reviewCounts(pending));
+    return { alreadyReviewed: false, review: publicReview(pending) };
+  } catch (error) {
+    trace.error(error);
+    const message = failureMessage(error);
+    await tracedFirestore(trace, "fail", () => repo.fail(processing.id, scopeId, message)).catch(() => undefined);
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(message, 502);
   }
