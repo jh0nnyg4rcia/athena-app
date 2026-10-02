@@ -9,8 +9,10 @@ import {
 import { candidateMarkdownAccepted, nextPublishedLesson, reviewAfterManualEdit } from "./legalReviewPublish";
 import {
   LegalReviewError,
+  LEGAL_REVIEW_TEST_PUBLISH_MESSAGE,
   hashCatalogSnapshot,
   processingLockFresh,
+  reviewCannotBePublished,
   type LegalReviewRepository,
 } from "./legalReviewRepository";
 
@@ -281,6 +283,9 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
           const review = asReview(reviewSnap.exists ? reviewSnap.data() : undefined);
           if (!review || review.status !== "pending_approval") {
             throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+          }
+          if (reviewCannotBePublished(review)) {
+            throw new LegalReviewError(LEGAL_REVIEW_TEST_PUBLISH_MESSAGE, 403);
           }
           const lessonRef = db.collection(LESSONS).doc(review.lessonId);
           const lessonSnap = await tx.get(lessonRef);

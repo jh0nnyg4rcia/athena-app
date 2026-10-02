@@ -91,6 +91,15 @@ export function lessonDocId(day: number, part: number): string {
   return `day_${day}_part_${part}`;
 }
 
+export const LEGAL_REVIEW_TEST_LESSON_ID = "ceo_review_test";
+
+export const LEGAL_REVIEW_TEST_PUBLISH_MESSAGE =
+  "Revisão de teste não pode ser publicada. Nenhuma aula foi alterada.";
+
+export function reviewCannotBePublished(review: { testMode?: boolean; lessonId?: string }): boolean {
+  return review.testMode === true || review.lessonId === LEGAL_REVIEW_TEST_LESSON_ID;
+}
+
 export function publicReview(review: LegalReviewView): LegalReviewView {
   return {
     id: review.id,
@@ -120,6 +129,7 @@ export function publicReview(review: LegalReviewView): LegalReviewView {
     rejectedByUid: review.rejectedByUid,
     rejectedAt: review.rejectedAt,
     webSearchUsed: review.webSearchUsed,
+    testMode: review.testMode === true,
     usage: review.usage,
     consultedSources: review.consultedSources || [],
     manuallyEdited: Boolean(review.manuallyEdited),

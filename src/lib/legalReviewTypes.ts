@@ -153,6 +153,7 @@ export interface LegalReviewView {
   rejectedByUid?: string;
   rejectedAt?: number;
   webSearchUsed: boolean;
+  testMode: boolean;
   usage?: LegalReviewUsage;
   consultedSources: ConsultedLegalSource[];
   manuallyEdited: boolean;

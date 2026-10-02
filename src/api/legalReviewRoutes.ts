@@ -8,6 +8,7 @@ import {
   rejectLegalReview,
   saveLegalReviewCandidate,
   startLegalReview,
+  startLegalReviewTest,
 } from "../services/legalReviewFlow";
 import { LegalReviewError, isReviewId, readLessonSlot } from "../services/legalReviewRepository";
 
@@ -42,6 +43,19 @@ export function registerLegalReviewRoutes(
         uid: req.athenaUser?.uid || "",
       });
       res.json(result);
+    } catch (error) {
+      sendReviewError(res, error);
+    }
+  });
+
+  app.post("/api/legal-review/test", rateLimit(6, 60 * 60_000), requireCeo, async (req, res) => {
+    const content = typeof req.body?.content === "string" ? req.body.content : "";
+    try {
+      const review = await startLegalReviewTest(repo, auditor, {
+        content,
+        uid: req.athenaUser?.uid || "",
+      });
+      res.json({ review });
     } catch (error) {
       sendReviewError(res, error);
     }

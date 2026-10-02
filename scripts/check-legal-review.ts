@@ -21,12 +21,16 @@ import {
 import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "../src/services/legalReviewPrompt";
 import { nextPublishedLesson } from "../src/services/legalReviewPublish";
 import {
+  LEGAL_REVIEW_TEST_LESSON_ID,
+  LEGAL_REVIEW_TEST_PUBLISH_MESSAGE,
   LegalReviewError,
   hashCatalogSnapshot,
   hashLessonContent,
   processingLockFresh,
+  reviewCannotBePublished,
   type LegalReviewRepository,
 } from "../src/services/legalReviewRepository";
+import { LEGAL_REVIEW_TEST_MATERIAL } from "../src/lib/legalReviewTestMaterial";
 import { reviewAfterManualEdit } from "../src/services/legalReviewPublish";
 import {
   MODEL_UNAVAILABLE_MESSAGE,
@@ -43,6 +47,7 @@ import {
   rejectLegalReview,
   saveLegalReviewCandidate,
   startLegalReview,
+  startLegalReviewTest,
   type LegalReviewAuditor,
   type StartReviewResult,
 } from "../src/services/legalReviewFlow";
@@ -81,13 +86,16 @@ function lesson(patch: Partial<StoredCatalogLesson> = {}): StoredCatalogLesson {
 
 function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
   lessons: Map<string, StoredCatalogLesson>;
+  parts: Map<string, { id: string }>;
   reviews: Map<string, LegalReviewView>;
 } {
   const lessons = new Map<string, StoredCatalogLesson>([[initial.id, { ...initial }]]);
+  const parts = new Map<string, { id: string }>();
   const reviews = new Map<string, LegalReviewView>();
   const indexes = new Map<string, ReturnType<typeof emptyReviewIndex>>();
   return {
     lessons,
+    parts,
     reviews,
     async getLesson(id) {
       const found = lessons.get(id);
@@ -151,11 +159,15 @@ function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
       if (!current || current.status !== "pending_approval") {
         throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
       }
+      if (reviewCannotBePublished(current)) {
+        throw new LegalReviewError(LEGAL_REVIEW_TEST_PUBLISH_MESSAGE, 403);
+      }
       const currentLesson = lessons.get(current.lessonId);
       if (!currentLesson) throw new LegalReviewError("A aula publicada não foi encontrada. Nada foi substituído.", 404);
       if (hashCatalogSnapshot(currentLesson) !== current.originalHash) return { ok: false, conflict: true };
       const published = nextPublishedLesson(currentLesson, current.reviewedMarkdown, now, email);
       lessons.set(published.id, published);
+      parts.set(published.id, { id: published.id });
       reviews.set(reviewId, { ...current, status: "approved", approvedByUid: uid, approvedAt: now });
       const index = indexes.get(current.lessonId) || emptyReviewIndex(current.lessonId);
       indexes.set(current.lessonId, {
@@ -492,6 +504,7 @@ async function main() {
   assert(repo.reviews.get(again.id)?.approvedByUid === "uid-ceo", "histórico guarda o uid autenticado");
   assert(approved.lesson.id === "day_1_part_0" && approved.lesson.day === 1, "aprovação preserva o identificador");
   assert((approved.lesson.version || 0) > 1, "aprovação versiona");
+  assert(repo.parts.has("day_1_part_0"), "aprovação de aula real grava homologated_parts");
 
   const repeated = await startLegalReview(repo, auditor(true), { day: 1, part: 0, force: false, uid: "ceo", now: 40_000 });
   assert(repeated.alreadyReviewed === true && repeated.message === LEGAL_REVIEW_ALREADY_MESSAGE, "versão igual avisa que já foi revisada");
@@ -593,6 +606,90 @@ async function main() {
     assert([...isolated.reviews.values()].every((item) => item.status === "failed"), `${label} não deixa revisão publicável`);
   }
 
+  const catalog = memoryRepo(lesson());
+  let lessonReads = 0;
+  const readLesson = catalog.getLesson.bind(catalog);
+  catalog.getLesson = async (id) => {
+    lessonReads += 1;
+    return readLesson(id);
+  };
+  let seenContent = "";
+  let seenLessonId = "";
+  const testReview = await startLegalReviewTest(catalog, {
+    async audit(input) {
+      seenContent = input.content;
+      seenLessonId = input.lessonId;
+      const audit = normalizeLegalAudit(
+        auditBody(input.content, []),
+        input.content,
+        { webSearchExecuted: true, consultedUrls: [PLANALTO] }
+      );
+      if (!audit) throw new Error("auditoria de teste inválida");
+      return { ...audit, model: "gpt-5.6", webSearchUsed: true };
+    },
+  }, { content: LEGAL_REVIEW_TEST_MATERIAL, uid: "ceo", now: 100_000 });
+  assert(lessonReads === 0, "teste não lê homologated_lessons");
+  assert(seenContent === LEGAL_REVIEW_TEST_MATERIAL, "teste envia o material ao mesmo auditor");
+  assert(seenLessonId === LEGAL_REVIEW_TEST_LESSON_ID, "teste não usa identificador de aula da trilha");
+  assert(testReview.testMode === true, "revisão de teste fica marcada");
+  assert(testReview.lessonId === LEGAL_REVIEW_TEST_LESSON_ID, "revisão de teste não aponta aula homologada");
+  assert(catalog.lessons.get("day_1_part_0")!.content === original, "teste não grava homologated_lessons");
+  assert(!catalog.lessons.has(LEGAL_REVIEW_TEST_LESSON_ID), "identificador de teste não vira aula");
+  assert(catalog.parts.size === 0, "teste não grava homologated_parts");
+  let blocked = false;
+  try {
+    await approveLegalReview(catalog, testReview.id, "uid-ceo", CEO, 101_000);
+  } catch (error) {
+    blocked = error instanceof LegalReviewError
+      && error.status === 403
+      && error.message === LEGAL_REVIEW_TEST_PUBLISH_MESSAGE;
+  }
+  assert(blocked, "approve de revisão de teste é recusado");
+  let direct = false;
+  try {
+    await catalog.approve(testReview.id, "uid-ceo", CEO, 102_000);
+  } catch (error) {
+    direct = error instanceof LegalReviewError && error.status === 403;
+  }
+  assert(direct, "repositório recusa publicar revisão de teste");
+  assert(catalog.reviews.get(testReview.id)?.status === "pending_approval", "recusa não marca a revisão como aprovada");
+  assert(catalog.lessons.get("day_1_part_0")!.content === original, "approve de teste não escreve homologated_lessons");
+  assert(catalog.parts.size === 0, "approve de teste não escreve homologated_parts");
+  const savedTest = await saveLegalReviewCandidate(catalog, testReview.id, `${LEGAL_REVIEW_TEST_MATERIAL}\n\nAjuste local.`);
+  assert(savedTest.testMode === true, "edição da candidata de teste preserva o isolamento");
+  let editedBlocked = false;
+  try {
+    await catalog.approve(testReview.id, "uid-ceo", CEO, 103_000);
+  } catch (error) {
+    editedBlocked = error instanceof LegalReviewError && error.status === 403;
+  }
+  assert(editedBlocked, "candidata editada de teste continua impossível de publicar");
+  assert(catalog.parts.size === 0 && catalog.lessons.get("day_1_part_0")!.content === original, "edição de teste não publica");
+
+  const planted = memoryRepo(lesson());
+  const plantedReview = pending(await startLegalReview(planted, auditor(true), {
+    day: 1, part: 0, force: true, uid: "ceo", now: 110_000,
+  }));
+  const storedPlant = planted.reviews.get(plantedReview.id);
+  if (!storedPlant) throw new Error("revisão plantada ausente");
+  planted.reviews.set(plantedReview.id, { ...storedPlant, testMode: true });
+  let plantedBlocked = false;
+  try {
+    await approveLegalReview(planted, plantedReview.id, "uid-ceo", CEO, 111_000);
+  } catch (error) {
+    plantedBlocked = error instanceof LegalReviewError && error.status === 403;
+  }
+  assert(plantedBlocked, "testMode true bloqueia approve de uma aula real");
+  let plantedDirect = false;
+  try {
+    await planted.approve(plantedReview.id, "uid-ceo", CEO, 112_000);
+  } catch (error) {
+    plantedDirect = error instanceof LegalReviewError && error.status === 403;
+  }
+  assert(plantedDirect, "testMode true bloqueia a escrita do repositório");
+  assert(planted.lessons.get("day_1_part_0")!.content === original, "testMode true não escreve homologated_lessons");
+  assert(planted.parts.size === 0, "testMode true não escreve homologated_parts");
+
   const serverApp = createAthenaApiApp();
   const server = createServer(serverApp);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -606,6 +703,12 @@ async function main() {
   const body = await response.json();
   assert(response.status === 401, "sem login a revisão é recusada");
   assert(!JSON.stringify(body).includes("sk-") && !JSON.stringify(body).includes("OPENAI_API_KEY"), "erro não vaza segredo");
+  const testResponse = await fetch(`http://127.0.0.1:${port}/api/legal-review/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: LEGAL_REVIEW_TEST_MATERIAL, day: 1, part: 0 }),
+  });
+  assert(testResponse.status === 401, "sem login o teste do revisor é recusado");
   server.close();
 
   const appSource = readFileSync("src/App.tsx", "utf8");
@@ -613,6 +716,8 @@ async function main() {
   const serverSource = readFileSync("src/services/legalReviewServer.ts", "utf8");
   const routeSource = readFileSync("src/api/legalReviewRoutes.ts", "utf8");
   const panelSource = readFileSync("src/components/LegalReviewPanel.tsx", "utf8");
+  const promptSource = readFileSync("src/services/legalReviewPrompt.ts", "utf8");
+  const storeSource = readFileSync("src/services/legalReviewStore.ts", "utf8");
   assert(!appSource.includes("legalReviewServer") && !clientSource.includes("OPENAI_API_KEY"), "cliente não importa o servidor nem a chave");
   assert(!clientSource.includes("api.openai.com") && !appSource.includes("api.openai.com"), "o frontend não chama a OpenAI");
   assert(serverSource.includes("process.env.OPENAI_API_KEY") && !serverSource.includes("sk-"), "chave só por variável de ambiente");
@@ -622,6 +727,13 @@ async function main() {
   assert(panelSource.includes("Esta versão foi editada após a auditoria jurídica"), "aviso de edição manual");
   assert(panelSource.includes("Revisar novamente esta versão"), "botão de nova auditoria");
   assert(panelSource.includes("Evidência oficial") && panelSource.includes("Fonte oficial consultada"), "painel separa evidência e fonte consultada");
+  assert(panelSource.includes("MODO DE TESTE — este conteúdo não será publicado.") && panelSource.includes("Encerrar teste"), "painel de teste não oferece publicação");
+  assert(appSource.includes("Testar Revisor Jurídico") && appSource.includes("requestLegalReviewTest"), "entrada de teste fica no painel do CEO");
+  assert(!promptSource.includes("999.999") && !promptSource.includes("888.888") && !serverSource.includes("legalReviewTestMaterial"), "prompt e servidor não conhecem o gabarito do teste");
+  assert(routeSource.includes("startLegalReviewTest") && routeSource.includes("const auditor = { audit: auditLessonWithOpenAI }"), "teste usa a mesma função e o mesmo auditor");
+  const approveSlice = storeSource.slice(storeSource.indexOf("async approve"));
+  const guardAt = approveSlice.indexOf("reviewCannotBePublished");
+  assert(guardAt > 0 && guardAt < approveSlice.indexOf("LESSONS") && guardAt < approveSlice.indexOf("PARTS"), "Firestore recusa teste antes de escrever aulas ou partes");
   assert(readFileSync("firestore.rules", "utf8").includes("match /legal_reviews/{reviewId}"), "rules negam a coleção ao cliente");
 
   if (failed) {

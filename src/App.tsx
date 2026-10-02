@@ -114,7 +114,8 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { LegalReviewPanel } from './components/LegalReviewPanel';
-import { approveLegalReview, reauditLegalReview, rejectLegalReview, requestLegalReview, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { approveLegalReview, reauditLegalReview, rejectLegalReview, requestLegalReview, requestLegalReviewTest, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { LEGAL_REVIEW_TEST_MATERIAL } from './lib/legalReviewTestMaterial';
 import { legalReviewButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
@@ -2018,6 +2019,8 @@ export default function App() {
   const [legalReviewBusy, setLegalReviewBusy] = useState(false);
   const [legalReviewDay, setLegalReviewDay] = useState<number | null>(null);
   const [legalReviewPart, setLegalReviewPart] = useState<number | null>(null);
+  const [legalReviewTestMode, setLegalReviewTestMode] = useState(false);
+  const [legalReviewTestDraft, setLegalReviewTestDraft] = useState(LEGAL_REVIEW_TEST_MATERIAL);
   const [homologationSuccessBanner, setHomologationSuccessBanner] = useState<string | null>(null);
   const [homologationBannerTone, setHomologationBannerTone] = useState<'ok' | 'warn'>('ok');
   const homologationBannerTimer = useRef<number | null>(null);
@@ -4648,8 +4651,20 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
   };
 
   const openLegalReview = (day: number, part: number) => {
+    setLegalReviewTestMode(false);
     setLegalReviewDay(day);
     setLegalReviewPart(part);
+    setLegalReviewError(null);
+    setLegalReviewNotice(null);
+    setLegalReview(null);
+    setLegalReviewPhase('confirm');
+    setLegalReviewOpen(true);
+  };
+
+  const openLegalReviewTest = () => {
+    setLegalReviewTestMode(true);
+    setLegalReviewDay(null);
+    setLegalReviewPart(null);
     setLegalReviewError(null);
     setLegalReviewNotice(null);
     setLegalReview(null);
@@ -4709,6 +4724,41 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }, currentSessionId);
   };
 
+  const runLegalReviewTest = async () => {
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewPhase('running');
+    try {
+      const result = await requestLegalReviewTest(legalReviewTestDraft);
+      if (!result.review?.testMode) {
+        throw new Error('A auditoria de teste não foi isolada. Nenhuma aula foi alterada.');
+      }
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A auditoria falhou. Nenhuma aula foi alterada.');
+      setLegalReviewPhase('confirm');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const endLegalReviewTest = async () => {
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      if (legalReview) await rejectLegalReview(legalReview.id);
+      setLegalReview(null);
+      setLegalReviewTestMode(false);
+      setLegalReviewOpen(false);
+      showHomologationBanner('Teste encerrado. Nenhuma aula foi alterada.', 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'Não foi possível encerrar o teste. Nenhuma aula foi alterada.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
   const runLegalReview = async (force: boolean) => {
     if (legalReviewDay === null || legalReviewPart === null) return;
     setLegalReviewBusy(true);
@@ -4734,6 +4784,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const approveOpenLegalReview = async () => {
     if (!legalReview) return;
+    if (legalReview.testMode || legalReviewTestMode) {
+      setLegalReviewError('Revisão de teste não pode ser publicada. Nenhuma aula foi alterada.');
+      return;
+    }
     if (!confirm('Substituir a aula publicada por esta versão revisada? A versão anterior fica guardada no histórico da revisão.')) return;
     setLegalReviewBusy(true);
     setLegalReviewError(null);
@@ -7279,6 +7333,14 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                       </button>
                                     )}
                                     <button
+                                      type="button"
+                                      onClick={openLegalReviewTest}
+                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                      title="Testa o revisor com material sintético. O catálogo dos alunos não é alterado."
+                                    >
+                                      Testar Revisor Jurídico
+                                    </button>
+                                    <button
                                       onClick={handleCeoRegenerateQuestions}
                                       disabled={isLoading || isRegeneratingQuestions}
                                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
@@ -7934,7 +7996,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
       review={legalReview}
       busy={legalReviewBusy}
       onClose={() => setLegalReviewOpen(false)}
-      onStart={() => { void runLegalReview(false); }}
+      onStart={() => { void (legalReviewTestMode ? runLegalReviewTest() : runLegalReview(false)); }}
       onForce={() => { void runLegalReview(true); }}
       onApprove={() => { void approveOpenLegalReview(); }}
       onReject={() => { void rejectOpenLegalReview(); }}
@@ -7942,6 +8004,10 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
       onBack={() => setLegalReviewPhase('result')}
       onSaveCandidate={(markdown) => { void saveOpenLegalReviewCandidate(markdown); }}
       onReaudit={() => { void reauditOpenLegalReview(); }}
+      testMode={legalReviewTestMode}
+      testDraft={legalReviewTestDraft}
+      onTestDraftChange={setLegalReviewTestDraft}
+      onEndTest={() => { void endLegalReviewTest(); }}
     />
     <AnimatePresence>
       {isEditingLesson && (

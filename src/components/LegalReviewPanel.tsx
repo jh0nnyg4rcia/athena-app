@@ -86,6 +86,10 @@ export function LegalReviewPanel({
   onBack,
   onSaveCandidate,
   onReaudit,
+  testMode = false,
+  testDraft = "",
+  onTestDraftChange,
+  onEndTest,
 }: {
   open: boolean;
   phase: Phase;
@@ -103,6 +107,10 @@ export function LegalReviewPanel({
   onBack: () => void;
   onSaveCandidate: (markdown: string) => void;
   onReaudit: () => void;
+  testMode?: boolean;
+  testDraft?: string;
+  onTestDraftChange?: (value: string) => void;
+  onEndTest?: () => void;
 }) {
   const [view, setView] = useState<"side" | "diff">("side");
   const [draft, setDraft] = useState("");
@@ -118,6 +126,7 @@ export function LegalReviewPanel({
 
   const summary = review?.summary;
   const consulted = review?.consultedSources || [];
+  const testing = testMode || review?.testMode === true;
 
   return (
     <div className="fixed inset-0 z-[170] flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md">
@@ -126,7 +135,7 @@ export function LegalReviewPanel({
           <div>
             <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-brand-gold">Auditoria jurídica com fontes oficiais</p>
             <h3 className="text-lg font-serif font-bold text-slate-100 mt-1">
-              {phase === "confirm" && "Revisão Jurídica com IA"}
+              {phase === "confirm" && (testing ? "Teste do Revisor Jurídico" : "Revisão Jurídica com IA")}
               {phase === "running" && "Auditando conteúdo jurídico..."}
               {phase === "notice" && "Esta versão já foi revisada."}
               {phase === "result" && "Revisão Jurídica concluída"}
@@ -143,7 +152,19 @@ export function LegalReviewPanel({
             <p className="text-sm text-rose-200 bg-rose-500/10 border border-rose-500/30 rounded-2xl px-4 py-3">{error}</p>
           )}
 
-          {phase === "confirm" && (
+          {phase === "confirm" && testing && (
+            <div className="space-y-3 text-sm text-slate-300 leading-relaxed">
+              <p className="text-amber-100 bg-amber-500/10 border border-amber-500/40 rounded-2xl px-4 py-3 font-bold">MODO DE TESTE — este conteúdo não será publicado.</p>
+              <p>O mesmo auditor das aulas vai pesquisar este material. Nada é gravado no catálogo dos alunos.</p>
+              <textarea
+                value={testDraft}
+                onChange={(event) => onTestDraftChange?.(event.target.value)}
+                className="w-full min-h-[40vh] bg-slate-950 border border-white/10 rounded-2xl p-4 text-xs font-mono text-slate-200 outline-none focus:border-brand-gold/50 resize-y leading-relaxed"
+              />
+            </div>
+          )}
+
+          {phase === "confirm" && !testing && (
             <div className="space-y-3 text-sm text-slate-300 leading-relaxed">
               <p>A OpenAI realizará uma auditoria jurídica desta aula e poderá consultar fontes oficiais para verificar legislação e jurisprudência.</p>
               <p>A aula publicada não será modificada até que você aprove a revisão.</p>
@@ -167,6 +188,9 @@ export function LegalReviewPanel({
 
           {phase === "result" && review && summary && (
             <div className="space-y-5">
+              {testing && (
+                <p className="text-amber-100 bg-amber-500/10 border border-amber-500/40 rounded-2xl px-4 py-3 font-bold">MODO DE TESTE — este conteúdo não será publicado.</p>
+              )}
               <p className="text-sm text-slate-200">{verificationCopy(review)}</p>
               {review.manuallyEdited && (
                 <p className="text-sm text-amber-100 bg-amber-500/10 border border-amber-500/40 rounded-2xl px-4 py-3">
@@ -193,7 +217,7 @@ export function LegalReviewPanel({
                 <div className="grid md:grid-cols-2 gap-3">
                   <section className="rounded-2xl border border-white/10 p-3 bg-slate-950/60 min-h-40">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Original</h4>
-                    <p className="text-[11px] text-slate-500 mb-2">versão atualmente publicada</p>
+                    <p className="text-[11px] text-slate-500 mb-2">{testing ? "material enviado ao teste" : "versão atualmente publicada"}</p>
                     <div className="prose prose-invert prose-sm max-w-none text-slate-200"><ReactMarkdown>{review.originalContent}</ReactMarkdown></div>
                   </section>
                   <section className="rounded-2xl border border-emerald-500/20 p-3 bg-slate-950/60 min-h-40">
@@ -299,7 +323,7 @@ export function LegalReviewPanel({
             <>
               <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer">Cancelar</button>
               <button type="button" onClick={onStart} disabled={busy} className="px-4 py-2.5 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase cursor-pointer flex items-center gap-1.5">
-                <Search size={14} /> Iniciar revisão
+                <Search size={14} /> {testing ? "Iniciar teste" : "Iniciar revisão"}
               </button>
             </>
           )}
@@ -311,14 +335,20 @@ export function LegalReviewPanel({
           )}
           {phase === "result" && review && (
             <>
-              <button type="button" onClick={onReject} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer">Rejeitar revisão</button>
+              {!testing && (
+                <button type="button" onClick={onReject} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer">Rejeitar revisão</button>
+              )}
               <button type="button" onClick={() => onEdit()} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold cursor-pointer">Editar versão revisada</button>
               {review.manuallyEdited && (
                 <button type="button" onClick={onReaudit} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-sky-200 text-xs font-bold cursor-pointer">Revisar novamente esta versão</button>
               )}
-              <button type="button" onClick={onApprove} disabled={busy} className="px-4 py-2.5 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase cursor-pointer flex items-center gap-1.5">
-                <Check size={14} /> Aprovar e substituir
-              </button>
+              {testing ? (
+                <button type="button" onClick={onEndTest} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold cursor-pointer">Encerrar teste</button>
+              ) : (
+                <button type="button" onClick={onApprove} disabled={busy} className="px-4 py-2.5 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase cursor-pointer flex items-center gap-1.5">
+                  <Check size={14} /> Aprovar e substituir
+                </button>
+              )}
             </>
           )}
           {phase === "edit" && (

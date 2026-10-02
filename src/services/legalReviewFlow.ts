@@ -14,10 +14,13 @@ import {
   LegalReviewError,
   hashCatalogSnapshot,
   hashLessonContent,
+  LEGAL_REVIEW_TEST_LESSON_ID,
+  LEGAL_REVIEW_TEST_PUBLISH_MESSAGE,
   lessonDocId,
   newReviewId,
   processingLockFresh,
   publicReview,
+  reviewCannotBePublished,
   type LegalReviewRepository,
 } from "./legalReviewRepository";
 
@@ -38,7 +41,13 @@ export type StartReviewResult =
   | { alreadyReviewed: true; message: string; lastReviewDate: string; reviewId: string }
   | { alreadyReviewed: false; review: LegalReviewView };
 
-function blankReview(lesson: StoredCatalogLesson, uid: string, now: number, reviewDate: string): LegalReviewView {
+function blankReview(
+  lesson: StoredCatalogLesson,
+  uid: string,
+  now: number,
+  reviewDate: string,
+  testMode = false
+): LegalReviewView {
   return {
     id: newReviewId(),
     lessonId: lesson.id,
@@ -71,6 +80,7 @@ function blankReview(lesson: StoredCatalogLesson, uid: string, now: number, revi
     requestedByUid: uid,
     requestedAt: now,
     webSearchUsed: false,
+    testMode,
     consultedSources: [],
     manuallyEdited: false,
     candidateHash: "",
@@ -143,6 +153,7 @@ export async function startLegalReview(
       status: "pending_approval",
       model: audit.model,
       webSearchUsed: audit.webSearchUsed,
+      testMode: false,
       usage: audit.usage,
       consultedSources: audit.consultedSources,
       manuallyEdited: false,
@@ -159,6 +170,74 @@ export async function startLegalReview(
         ? error.message
         : "A auditoria falhou. A aula publicada não foi alterada.";
     await repo.fail(processing.id, lesson.id, message);
+    if (error instanceof LegalReviewError) throw error;
+    throw new LegalReviewError(message, 502);
+  }
+}
+
+export async function startLegalReviewTest(
+  repo: LegalReviewRepository,
+  auditor: LegalReviewAuditor,
+  input: { content: string; uid: string; now?: number }
+): Promise<LegalReviewView> {
+  const content = String(input.content || "");
+  if (content.trim().length < 20) {
+    throw new LegalReviewError("Informe o material de teste. Nenhuma aula foi alterada.", 400);
+  }
+  if (content.length > MAX_REVIEWABLE_CHARS) {
+    throw new LegalReviewError("O material de teste é grande demais. Nenhuma aula foi alterada.", 400);
+  }
+  const now = input.now ?? Date.now();
+  const reviewDate = formatReviewDate(new Date(now));
+  const processing = blankReview({
+    id: LEGAL_REVIEW_TEST_LESSON_ID,
+    day: 0,
+    part: 0,
+    subject: "Teste do revisor",
+    topic: "Material sintético",
+    content,
+  }, input.uid, now, reviewDate, true);
+  await repo.begin(processing);
+  try {
+    const audit = await auditor.audit({
+      reviewDate,
+      lessonId: LEGAL_REVIEW_TEST_LESSON_ID,
+      day: 0,
+      part: 0,
+      subject: processing.subject,
+      topic: processing.topic,
+      content,
+    });
+    const pending: LegalReviewView = {
+      ...processing,
+      reviewedMarkdown: audit.reviewedMarkdown,
+      changes: audit.changes,
+      unverifiedClaims: audit.unverifiedClaims,
+      summary: audit.summary,
+      reviewNotes: audit.reviewNotes,
+      verificationLevel: audit.verificationLevel,
+      confidence: audit.confidence,
+      outcome: audit.outcome,
+      status: "pending_approval",
+      model: audit.model,
+      webSearchUsed: audit.webSearchUsed,
+      testMode: true,
+      usage: audit.usage,
+      consultedSources: audit.consultedSources,
+      manuallyEdited: false,
+      candidateHash: hashLessonContent(audit.reviewedMarkdown),
+      auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
+      sourceHistory: [],
+    };
+    await repo.complete(pending);
+    return publicReview(pending);
+  } catch (error) {
+    const message = error instanceof LegalReviewError
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : "A auditoria falhou. A aula publicada não foi alterada.";
+    await repo.fail(processing.id, LEGAL_REVIEW_TEST_LESSON_ID, message);
     if (error instanceof LegalReviewError) throw error;
     throw new LegalReviewError(message, 502);
   }
@@ -261,6 +340,10 @@ export async function approveLegalReview(
 ): Promise<{ reviewId: string; lesson: StoredCatalogLesson }> {
   if (!isCeoEmail(email)) {
     throw new LegalReviewError("A aprovação exige a identidade autenticada do CEO.", 403);
+  }
+  const current = await repo.get(reviewId);
+  if (current && reviewCannotBePublished(current)) {
+    throw new LegalReviewError(LEGAL_REVIEW_TEST_PUBLISH_MESSAGE, 403);
   }
   const result = await repo.approve(reviewId, uid, email, now);
   if (!result.ok) {

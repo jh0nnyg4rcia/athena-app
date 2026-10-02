@@ -15,6 +15,10 @@ export function requestLegalReview(day: number, part: number, force = false): Pr
   return postAthenaApi<LegalReviewStartResponse>("/api/legal-review", { day, part, force }, REVIEW_TIMEOUT_MS);
 }
 
+export function requestLegalReviewTest(content: string): Promise<{ review: LegalReviewView }> {
+  return postAthenaApi("/api/legal-review/test", { content }, REVIEW_TIMEOUT_MS);
+}
+
 export function saveLegalReviewCandidate(reviewId: string, reviewedMarkdown: string): Promise<{ review: LegalReviewView }> {
   return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/candidate`, { reviewedMarkdown }, 60_000);
 }
