@@ -24,6 +24,7 @@ import {
   coverageTokens,
   editorialSignature,
   explainLegalAuditFailure,
+  INVALID_AUDIT_MESSAGE,
   mergePatchAudits,
   outsidePatchBytesIdentical,
   revertAppliedLiteralPatches,
@@ -75,6 +76,7 @@ import {
   createLegalReviewTrace,
   sanitizeLegalReviewError,
 } from "../src/services/legalReviewTrace";
+import { sanitizeValidationLog } from "../src/lib/legalReviewDiagnostics";
 import {
   approveLegalReview,
   reauditLegalReview,
@@ -3000,6 +3002,464 @@ async function main() {
   assert(mergedFollow !== null && mergedFollow.reviewedMarkdown.includes("reclusão") && !mergedFollow.reviewedMarkdown.includes("<script>"), "follow-up passa pelo mesmo aplicador e não injeta HTML");
   assert(mergedFollow?.changes.some((item) => item.id === "ausente" && item.confirmation === "NAO_CONFIRMADO") === true, "follow-up recusado permanece visível");
   assert(mergedFollow?.changes.some((item) => item.id === "ok" && item.confirmation === "CONFIRMADO") === true, "follow-up não refaz o patch já validado");
+
+  const SECRET = "CONTEUDO_JURIDICO_SECRETO";
+  const SENSITIVE = "TRECHO_SENSIVEL_NAO_PODE_LOGAR";
+  const TOO_MANY_MESSAGE = "A revisão declarou mais de 40 alterações. Nenhuma foi descartada e a auditoria não foi aceita. A aula publicada não foi alterada.";
+
+  function diagnosticEvents(lines: string[]) {
+    return lines.flatMap((line) => {
+      const parsed = JSON.parse(line) as {
+        message?: string;
+        validation?: {
+          validationOutcome?: string;
+          validationReasonCodes?: string[];
+          followUpEligible?: boolean;
+          responseStatus?: string;
+          incompleteReason?: string;
+          rawChangeCount?: number;
+          acceptedPatchCount?: number;
+          rejectedPatchCount?: number;
+          repairablePatchCount?: number;
+          unverifiedClaimCount?: number;
+          hasConsultedSources?: boolean;
+          consultedSourceCount?: number;
+          status?: string;
+          verificationLevel?: string;
+          rejectedPatches?: Array<{ changeId?: string; reasonCodes?: string[] }>;
+        };
+        error?: { message?: string; stage?: string };
+      };
+      return parsed.validation ? [{ event: parsed.message, validation: parsed.validation, error: parsed.error }] : [];
+    });
+  }
+
+  function assertDiagnosticClean(lines: string[], label: string) {
+    const dump = lines.join("\n");
+    for (const banned of [SECRET, SENSITIVE, "originalExcerpt", "revisedExcerpt", "beforeContext", "afterContext", "[BLOCK_", "detenção", "reclusão", "9.999"]) {
+      assert(!dump.includes(banned), `${label} não registra conteúdo sensível`);
+    }
+  }
+
+  async function captureDiagnostic(response: ReviewModelResponse, lessonText = original, elapsedMs = 200_000) {
+    const lines: string[] = [];
+    const trace = createLegalReviewTrace({
+      testMode: false,
+      requestedModel: "gpt-5.6",
+      write: (line) => lines.push(line),
+    });
+    const originalNow = Date.now;
+    let now = 8_000_000;
+    Date.now = () => now;
+    let thrown: unknown;
+    let result: AuditLessonResult | undefined;
+    let calls = 0;
+    try {
+      result = await auditLessonWithOpenAI({
+        reviewDate: "2026-10-02",
+        lessonId: "day_1_part_0",
+        day: 1,
+        part: 0,
+        subject: "Direito Penal",
+        topic: "Lei 1.521/1951",
+        content: lessonText,
+        trace,
+        callModel: async () => {
+          calls += 1;
+          now += elapsedMs;
+          return response;
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    } finally {
+      Date.now = originalNow;
+    }
+    if (thrown) trace.error(thrown);
+    return { lines, thrown, result, calls };
+  }
+
+  function searchedBody(body: unknown, urls: string[] = [PLANALTO]): ReviewModelResponse {
+    return {
+      model: "gpt-5.6-sol",
+      status: "completed",
+      output_text: JSON.stringify(body),
+      output: urls.map((url) => ({
+        type: "web_search_call",
+        status: "completed",
+        action: { type: "search", sources: [{ type: "url", url }] },
+      })),
+    };
+  }
+
+  function endValidation(lines: string[]) {
+    const found = diagnosticEvents(lines).find((item) => item.event === "LEGAL_REVIEW_VALIDATION_END");
+    assert(Boolean(found?.validation), "VALIDATION_END traz o diagnóstico");
+    return found!.validation!;
+  }
+
+  {
+    const response: ReviewModelResponse = {
+      model: "gpt-5.6-sol",
+      status: "incomplete",
+      incomplete_details: { reason: "max_output_tokens" },
+      output_text: `{"changes":[{"originalExcerpt":"${SECRET}"`,
+      error: undefined,
+    };
+    const seen = await captureDiagnostic(response, original, 0);
+    const validation = endValidation(seen.lines);
+    const errorEvent = diagnosticEvents(seen.lines).find((item) => item.event === "LEGAL_REVIEW_ERROR");
+    assert(seen.thrown instanceof Error && seen.thrown.message === INVALID_AUDIT_MESSAGE, "resposta incompleta conserva a mensagem sanitizada");
+    assert(validation.validationOutcome === "rejected" && validation.validationReasonCodes?.[0] === "RESPONSE_INCOMPLETE", "incompleta registra RESPONSE_INCOMPLETE");
+    assert(validation.responseStatus === "incomplete" && validation.incompleteReason === "max_output_tokens", "incompleta registra max_output_tokens");
+    assert(validation.followUpEligible === false && errorEvent?.validation?.followUpEligible === false, "recusa de resposta não habilita follow-up");
+    assert(errorEvent?.error?.stage === "validation" && errorEvent.error?.message === INVALID_AUDIT_MESSAGE, "ERROR de validação conserva etapa e mensagem");
+    assertDiagnosticClean(seen.lines, "incompleta");
+    assert(seen.calls === 1, "incompleta não dispara outra chamada");
+  }
+
+  {
+    const failedResponse = await captureDiagnostic({
+      model: "gpt-5.6-sol",
+      status: "failed",
+      output_text: SECRET,
+    });
+    const validation = endValidation(failedResponse.lines);
+    assert(failedResponse.thrown instanceof Error && failedResponse.thrown.message === INVALID_AUDIT_MESSAGE, "status failed conserva a mensagem");
+    assert(validation.validationReasonCodes?.[0] === "RESPONSE_FAILED" && validation.responseStatus === "failed", "status failed registra RESPONSE_FAILED");
+    assertDiagnosticClean(failedResponse.lines, "failed");
+  }
+
+  {
+    const providerError = await captureDiagnostic({
+      model: "gpt-5.6-sol",
+      status: "completed",
+      error: { message: SECRET, reason: SENSITIVE },
+      output_text: SECRET,
+    });
+    const validation = endValidation(providerError.lines);
+    assert(providerError.thrown instanceof Error && providerError.thrown.message === INVALID_AUDIT_MESSAGE, "erro do provedor conserva a mensagem");
+    assert(validation.validationReasonCodes?.[0] === "RESPONSE_ERROR", "erro do provedor registra RESPONSE_ERROR");
+    assertDiagnosticClean(providerError.lines, "erro do provedor");
+  }
+
+  {
+    const emptyOutput = await captureDiagnostic({ model: "gpt-5.6-sol", status: "completed", output_text: "   " });
+    const validation = endValidation(emptyOutput.lines);
+    assert(emptyOutput.thrown instanceof Error && emptyOutput.thrown.message === INVALID_AUDIT_MESSAGE, "saída vazia conserva a mensagem");
+    assert(validation.validationReasonCodes?.[0] === "EMPTY_OUTPUT" && validation.responseStatus === "completed", "saída vazia registra EMPTY_OUTPUT");
+    assertDiagnosticClean(emptyOutput.lines, "saída vazia");
+  }
+
+  {
+    const badJson = await captureDiagnostic({
+      model: "gpt-5.6-sol",
+      status: "completed",
+      output_text: `{${SECRET}`,
+    });
+    const validation = endValidation(badJson.lines);
+    assert(badJson.thrown instanceof Error && badJson.thrown.message === INVALID_AUDIT_MESSAGE, "JSON inválido conserva a mensagem");
+    assert(validation.validationReasonCodes?.[0] === "JSON_PARSE_FAILED", "JSON inválido registra JSON_PARSE_FAILED");
+    assertDiagnosticClean(badJson.lines, "JSON inválido");
+  }
+
+  {
+    const schema = await captureDiagnostic({ model: "gpt-5.6-sol", status: "completed", output_text: "[]" });
+    const validation = endValidation(schema.lines);
+    assert(schema.thrown instanceof Error && schema.thrown.message === INVALID_AUDIT_MESSAGE, "JSON que não é objeto conserva a mensagem");
+    assert(validation.validationReasonCodes?.[0] === "SCHEMA_INVALID" && validation.responseStatus === "completed", "JSON que não é objeto registra SCHEMA_INVALID");
+    assertDiagnosticClean(schema.lines, "schema");
+  }
+
+  {
+    const short = await captureDiagnostic(
+      searchedBody(auditBody("SIGILO_CURTO", [])),
+      "SIGILO_CURTO"
+    );
+    const validation = endValidation(short.lines);
+    assert(short.thrown instanceof Error && short.thrown.message === INVALID_AUDIT_MESSAGE, "aula curta conserva a mensagem");
+    assert(validation.validationReasonCodes?.[0] === "INVALID_LENGTH", "aula curta registra INVALID_LENGTH");
+    assert(!short.lines.join("\n").includes("SIGILO_CURTO"), "aula curta não entra no log");
+    assertDiagnosticClean(short.lines, "aula curta");
+  }
+
+  {
+    const many = await captureDiagnostic(searchedBody(auditBody(original, Array.from({ length: 41 }, (_, index) => change({
+      id: `c-${index}`,
+    })))));
+    const validation = endValidation(many.lines);
+    assert(many.thrown instanceof Error && many.thrown.message === TOO_MANY_MESSAGE, "excesso de alterações usa a mensagem própria");
+    assert(many.thrown instanceof Error && many.thrown.message !== INVALID_AUDIT_MESSAGE, "excesso de alterações não usa a mensagem genérica");
+    assert(validation.validationReasonCodes?.[0] === "TOO_MANY_CHANGES" && validation.rawChangeCount === 41, "excesso registra TOO_MANY_CHANGES");
+    assertDiagnosticClean(many.lines, "excesso");
+  }
+
+  {
+    const hidden = await captureDiagnostic({
+      model: "gpt-5.6-sol",
+      status: "incomplete",
+      incomplete_details: { reason: SECRET },
+      output_text: SECRET,
+    });
+    const validation = endValidation(hidden.lines);
+    assert(validation.incompleteReason === "unlisted" && validation.validationReasonCodes?.[0] === "RESPONSE_INCOMPLETE", "motivo fora da lista vira unlisted");
+    assertDiagnosticClean(hidden.lines, "motivo não listado");
+  }
+
+  {
+    const filtered = await captureDiagnostic({
+      model: "gpt-5.6-sol",
+      status: "incomplete",
+      incomplete_details: { reason: "content_filter" },
+      output_text: "",
+    });
+    const validation = endValidation(filtered.lines);
+    assert(validation.incompleteReason === "content_filter" && validation.validationReasonCodes?.[0] === "RESPONSE_INCOMPLETE", "content_filter fica só como código");
+    assertDiagnosticClean(filtered.lines, "content_filter");
+  }
+
+  {
+    const missing = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: `${SENSITIVE} id`,
+      originalExcerpt: SECRET,
+      revisedExcerpt: SENSITIVE,
+      beforeContext: SECRET,
+      afterContext: SENSITIVE,
+    })])));
+    const validation = endValidation(missing.lines);
+    assert(!(missing.thrown instanceof Error), "excerpt ausente não rejeita a auditoria inteira");
+    assert(missing.result?.reviewedMarkdown === original, "excerpt ausente não altera o Markdown");
+    assert(validation.validationOutcome === "accepted", "excerpt ausente ainda aceita a auditoria");
+    assert(validation.validationReasonCodes?.includes("EXCERPT_NOT_FOUND") === true, "excerpt ausente registra EXCERPT_NOT_FOUND");
+    assert(validation.validationReasonCodes?.includes("NO_APPLICABLE_PATCH") === true, "nenhum patch aplicável registra NO_APPLICABLE_PATCH");
+    assert(validation.rejectedPatches?.[0]?.changeId === "index-0", "id inseguro vira índice");
+    assert(validation.rejectedPatches?.[0]?.reasonCodes?.includes("EXCERPT_NOT_FOUND") === true, "patch recusado traz o código");
+    assert(validation.repairablePatchCount === 1 && validation.followUpEligible === false, "follow-up só é elegível com orçamento");
+    assert(!("validationLog" in (missing.result || {})), "diagnóstico não permanece na auditoria devolvida");
+    assertDiagnosticClean(missing.lines, "excerpt ausente");
+  }
+
+  {
+    const doubled = `${original}\nA pena do art. 1º da Lei 1.521/1951 é de detenção.\n`;
+    const ambiguous = await captureDiagnostic(searchedBody(auditBody(doubled, [change({
+      originalExcerpt: "detenção",
+      revisedExcerpt: "reclusão",
+      beforeContext: "",
+      afterContext: "",
+    })])), doubled);
+    const validation = endValidation(ambiguous.lines);
+    assert(!(ambiguous.thrown instanceof Error) && ambiguous.result?.reviewedMarkdown === doubled, "excerpt ambíguo não altera o Markdown");
+    assert(validation.validationReasonCodes?.includes("EXCERPT_AMBIGUOUS") === true, "excerpt ambíguo registra EXCERPT_AMBIGUOUS");
+    assertDiagnosticClean(ambiguous.lines, "ambíguo");
+  }
+
+  {
+    const overlap = await captureDiagnostic(searchedBody(auditBody(original, [
+      change({ id: "overlap-a", originalExcerpt: "detenção", revisedExcerpt: "reclusão" }),
+      change({ id: "overlap-b", originalExcerpt: "de detenção", revisedExcerpt: "de reclusão" }),
+      change({ id: "independente", originalExcerpt: "O conceito permanece.", revisedExcerpt: "O conceito permanece intacto." }),
+    ])));
+    const validation = endValidation(overlap.lines);
+    assert(overlap.result?.reviewedMarkdown.includes("intacto.") === true, "patch independente continua aplicado");
+    assert(validation.acceptedPatchCount === 1, "só o patch independente é aceito");
+    assert(validation.validationReasonCodes?.includes("PATCH_OVERLAP") === true, "sobreposição registra PATCH_OVERLAP");
+    assert(validation.rejectedPatches?.filter((item) => item.reasonCodes?.includes("PATCH_OVERLAP")).length === 2, "os dois conflitantes trazem PATCH_OVERLAP");
+    assertDiagnosticClean(overlap.lines, "sobreposição");
+  }
+
+  {
+    const evidence = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      category: "CONCEITO",
+      reason: "Ajustar a redação do conceito.",
+      evidence: [],
+      sources: [],
+    })])));
+    const validation = endValidation(evidence.lines);
+    assert(!(evidence.thrown instanceof Error), "evidência insuficiente não rejeita a auditoria");
+    assert(validation.validationReasonCodes?.includes("EVIDENCE_INSUFFICIENT") === true, "evidência insuficiente registra EVIDENCE_INSUFFICIENT");
+    assertDiagnosticClean(evidence.lines, "evidência");
+  }
+
+  {
+    const court = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      category: "JURISPRUDENCIA",
+      reason: "O STJ entende que a pena é de reclusão.",
+      evidence: [evidence(STF, "ACORDAO")],
+    })]), [STF]));
+    const validation = endValidation(court.lines);
+    assert(validation.validationReasonCodes?.includes("COURT_FAMILY_FAILED") === true, "família de tribunal diverge registra COURT_FAMILY_FAILED");
+    assert(validation.validationReasonCodes?.includes("EVIDENCE_INSUFFICIENT") !== true, "família de tribunal não é mascarada como evidência genérica");
+    assertDiagnosticClean(court.lines, "tribunal");
+  }
+
+  {
+    const specific = "caberá ao Supremo Tribunal Federal apreciar o caráter da infração";
+    const generic = "caberá à autoridade judiciária competente apreciar o caráter da infração";
+    const lessonText = original.replace("O conceito permanece.", specific);
+    const diluted = await captureDiagnostic(searchedBody(auditBody(lessonText, [change({
+      category: "CONCEITO",
+      reason: "Definir competência para apreciar o caráter da infração com base no STF.",
+      originalExcerpt: specific,
+      revisedExcerpt: generic,
+      evidence: [evidence(STF, "ACORDAO")],
+    })]), [STF]), lessonText);
+    const validation = endValidation(diluted.lines);
+    assert(validation.validationReasonCodes?.includes("SOURCE_SPECIFICITY_FAILED") === true, "diluição normativa registra SOURCE_SPECIFICITY_FAILED");
+    assertDiagnosticClean(diluted.lines, "especificidade");
+  }
+
+  {
+    const diploma = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      originalExcerpt: "detenção",
+      revisedExcerpt: "reclusão prevista na Lei 9.999/2020",
+    })])));
+    const validation = endValidation(diploma.lines);
+    assert(validation.validationReasonCodes?.includes("DIPLOMA_EVIDENCE_FAILED") === true, "diploma sem fonte registra DIPLOMA_EVIDENCE_FAILED");
+    assertDiagnosticClean(diploma.lines, "diploma");
+  }
+
+  {
+    const invented = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      originalExcerpt: "detenção",
+      revisedExcerpt: "reclusão cabe recurso extraordinário",
+    })])));
+    const validation = endValidation(invented.lines);
+    assert(validation.validationReasonCodes?.includes("NORMATIVE_INVENTION") === true, "recurso inventado registra NORMATIVE_INVENTION");
+    assertDiagnosticClean(invented.lines, "invenção");
+  }
+
+  {
+    const html = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      originalExcerpt: "detenção",
+      revisedExcerpt: `<p>${SECRET}</p>`,
+    })])));
+    const validation = endValidation(html.lines);
+    assert(html.result?.reviewedMarkdown === original, "HTML não é aplicado");
+    assert(validation.validationReasonCodes?.includes("HTML_VIOLATION") === true, "HTML registra HTML_VIOLATION");
+    assertDiagnosticClean(html.lines, "html");
+  }
+
+  {
+    const marker = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      originalExcerpt: "[BLOCK_1]",
+      revisedExcerpt: SECRET,
+    })])));
+    const validation = endValidation(marker.lines);
+    assert(marker.result?.reviewedMarkdown === original, "remoção de marcador não é aplicada");
+    assert(validation.validationReasonCodes?.includes("MARKER_VIOLATION") === true, "marcador registra MARKER_VIOLATION");
+    assertDiagnosticClean(marker.lines, "marcador");
+  }
+
+  {
+    const anchors = Array.from({ length: 7 }, (_, index) => `ANCORA${index}FIM`);
+    const sizedLesson = `[BLOCK_1]\n${anchors.join("\n")}\nTexto estavel da aula de teste jurídico.\n`;
+    const sized = await captureDiagnostic(searchedBody(auditBody(sizedLesson, anchors.map((anchor, index) => change({
+      id: `tamanho-${index}`,
+      originalExcerpt: anchor,
+      revisedExcerpt: "y".repeat(4000),
+      reason: "Ampliar o trecho.",
+    })))), sizedLesson);
+    const validation = endValidation(sized.lines);
+    assert(!(sized.thrown instanceof Error), "estouro de tamanho não rejeita a auditoria inteira");
+    assert((validation.acceptedPatchCount || 0) < 7, "o conjunto que estoura o teto não é aplicado por inteiro");
+    assert(validation.validationReasonCodes?.includes("PATCH_SIZE_INVALID") === true, "tamanho registra PATCH_SIZE_INVALID");
+    assert(!sized.lines.join("\n").includes("yyyyy"), "patch grande não entra no log");
+    assertDiagnosticClean(sized.lines, "tamanho");
+  }
+
+  {
+    const unreadable = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      id: `${SENSITIVE} cru`,
+      type: "REMOCAO",
+      originalExcerpt: "",
+      revisedExcerpt: SECRET,
+    })])));
+    const validation = endValidation(unreadable.lines);
+    assert(validation.validationReasonCodes?.includes("UNREADABLE_CHANGE") === true, "alteração material ilegível registra UNREADABLE_CHANGE");
+    assert(validation.rejectedPatches?.[0]?.changeId === "index-0", "alteração ilegível não usa o id cru");
+    assertDiagnosticClean(unreadable.lines, "ilegível");
+  }
+
+  {
+    const unconfirmed = await captureDiagnostic(searchedBody(auditBody(original, [change({
+      confirmation: "NAO_CONFIRMADO",
+      verified: false,
+    })])));
+    const validation = endValidation(unconfirmed.lines);
+    assert(validation.validationReasonCodes?.includes("MODEL_UNCONFIRMED") === true, "não confirmado pelo modelo registra MODEL_UNCONFIRMED");
+    assert(validation.validationReasonCodes?.includes("EVIDENCE_INSUFFICIENT") !== true, "não confirmado pelo modelo não vira falta de evidência");
+    assertDiagnosticClean(unconfirmed.lines, "modelo");
+  }
+
+  {
+    const absentSearch = await captureDiagnostic({
+      model: "gpt-5.6-sol",
+      status: "completed",
+      output_text: JSON.stringify(auditBody(original, [])),
+      output: [],
+    });
+    const validation = endValidation(absentSearch.lines);
+    assert(!(absentSearch.thrown instanceof Error), "pesquisa ausente não gera auditoria inválida");
+    assert(validation.validationReasonCodes?.includes("MISSING_REQUIRED_SEARCH") === true, "pesquisa ausente registra MISSING_REQUIRED_SEARCH");
+    assert(validation.hasConsultedSources === false && validation.consultedSourceCount === 0, "pesquisa ausente zera as fontes");
+    assert(absentSearch.result?.reviewedMarkdown === original, "pesquisa ausente conserva o Markdown");
+    assertDiagnosticClean(absentSearch.lines, "pesquisa");
+  }
+
+  {
+    const applied = await captureDiagnostic(searchedBody(auditBody(original.replace("detenção", "reclusão"), [change({})])), original, 0);
+    const validation = endValidation(applied.lines);
+    assert(!(applied.thrown instanceof Error), "patch literal único não é recusado");
+    assert(applied.result?.reviewedMarkdown.includes("reclusão") === true, "patch literal único é aplicado");
+    assert(validation.validationOutcome === "accepted" && validation.acceptedPatchCount === 1, "patch literal único conta como aceito");
+    assert(validation.validationReasonCodes?.includes("EXCERPT_NOT_FOUND") !== true, "patch literal único não registra EXCERPT_NOT_FOUND");
+    assert(validation.followUpEligible === false, "patch aceito com fonte não pede follow-up");
+    assertDiagnosticClean(applied.lines, "patch literal");
+  }
+
+  {
+    const poisoned = sanitizeValidationLog({
+      validationOutcome: "rejected",
+      validationReasonCodes: ["JSON_PARSE_FAILED", "STATUS_CHANGES_CONFLICT", SECRET],
+      rawChangeCount: 2,
+      originalExcerpt: SECRET,
+      revisedExcerpt: SENSITIVE,
+      beforeContext: SECRET,
+      afterContext: SENSITIVE,
+      prompt: SECRET,
+      output_text: SECRET,
+      markdown: original,
+      rejectedPatches: [{
+        changeId: `${SENSITIVE} cru`,
+        reasonCodes: ["EXCERPT_NOT_FOUND"],
+        originalExcerpt: SECRET,
+        revisedExcerpt: SENSITIVE,
+        beforeContext: SECRET,
+        afterContext: SENSITIVE,
+      }],
+    });
+    const lines: string[] = [];
+    const trace = createLegalReviewTrace({
+      testMode: false,
+      requestedModel: "gpt-5.6",
+      write: (line) => lines.push(line),
+    });
+    trace.validationStart();
+    trace.validationEnd(undefined, undefined, {
+      ...poisoned,
+      originalExcerpt: SECRET,
+      prompt: SECRET,
+    });
+    trace.noteFailure(Object.assign(new Error(INVALID_AUDIT_MESSAGE), { validationLog: poisoned }), "validation");
+    trace.error(new Error(INVALID_AUDIT_MESSAGE));
+    const dumped = JSON.stringify(poisoned);
+    assert(poisoned?.validationReasonCodes.length === 1 && poisoned.validationReasonCodes[0] === "JSON_PARSE_FAILED", "código inexistente é descartado");
+    assert(poisoned?.rejectedPatches[0]?.changeId === "index-0", "sanitizador troca id inseguro");
+    assert(!dumped.includes(SECRET) && !dumped.includes(SENSITIVE) && !dumped.includes("originalExcerpt"), "sanitizador remove excerpt e prompt");
+    assertDiagnosticClean(lines, "sanitizador no trace");
+    assert(lines.some((line) => line.includes("LEGAL_REVIEW_VALIDATION_END") && line.includes("JSON_PARSE_FAILED")), "VALIDATION_END publica o código permitido");
+    assert(lines.some((line) => line.includes("LEGAL_REVIEW_ERROR") && line.includes("JSON_PARSE_FAILED")), "ERROR publica o mesmo diagnóstico");
+  }
 
   if (failed) {
     console.error(`${failed} verificações falharam.`);

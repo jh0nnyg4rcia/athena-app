@@ -20,6 +20,7 @@ import type {
   LegalUnverifiedClaim,
   LegalVerificationLevel,
 } from "./legalReviewTypes";
+import type { LegalAuditValidationLog, ValidationReasonCode } from "./legalReviewDiagnostics";
 
 const CHANGE_TYPES: LegalChangeType[] = [
   "CORRECAO",
@@ -626,6 +627,30 @@ export function changeLacksNormativeSpecificity(
   return false;
 }
 
+function legalRefusalCodes(
+  change: Omit<LegalReviewChange, "verified" | "confirmation">,
+  modelConfirmation: LegalConfirmation
+): ValidationReasonCode[] {
+  if (modelConfirmation === "NAO_CONFIRMADO") return ["MODEL_UNCONFIRMED"];
+  if (changeLacksNormativeSpecificity(change)) return ["SOURCE_SPECIFICITY_FAILED"];
+  if (changeContainsUngroundedInvention(change)) return ["NORMATIVE_INVENTION"];
+  const introducedStatutes = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
+  if (introducedStatutes.length > 0) {
+    const covered = introducedStatutes.every((statute) =>
+      change.evidence.some((item) => evidenceSupportsStatute(item, statute.number))
+    );
+    if (!covered) return ["DIPLOMA_EVIDENCE_FAILED"];
+  }
+  const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
+  const required = institutionsNamedInClaim(claim, change.category);
+  if (required.length) {
+    const covered = required.every((family) => change.evidence.some((item) => evidenceSupportsFamily(item, family)));
+    return covered ? [] : ["COURT_FAMILY_FAILED"];
+  }
+  if (!isMaterialLegalChange(change)) return [];
+  return change.evidence.some(evidenceConfirmsMaterialClaim) ? [] : ["EVIDENCE_INSUFFICIENT"];
+}
+
 function confirmChange(
   change: Omit<LegalReviewChange, "verified" | "confirmation">,
   modelConfirmation: LegalConfirmation
@@ -778,6 +803,7 @@ export class LegalReviewValidationError extends Error {
   readonly code: "too_many_changes" | "uncovered_edits" | "invalid_audit";
   readonly auditFailure: AuditFailureCode;
   readonly diagnostics: CoverageDiagnostics;
+  validationLog?: LegalAuditValidationLog;
 
   constructor(
     message: string,
@@ -1289,6 +1315,8 @@ export interface NormalizedAudit {
   repairablePatches?: RepairablePatch[];
   /** Transitório. Não entra em legal_reviews. */
   appliedPatchInputs?: AppliedPatchInput[];
+  /** Transitório. Não entra em legal_reviews. */
+  validationLog?: LegalAuditValidationLog;
 }
 
 export type LiteralRejectReason =
@@ -1530,12 +1558,44 @@ export type ClassifiedLegalAudit =
   | { ok: true; audit: NormalizedAudit }
   | { ok: false; error: LegalReviewValidationError };
 
+function safeDiagnosticChangeId(value: unknown, index: number): string {
+  if (typeof value !== "string") return `index-${index}`;
+  const token = value.trim();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(token)) return `index-${index}`;
+  return token;
+}
+
+function rejectedValidationLog(
+  diagnostics: CoverageDiagnostics
+): LegalAuditValidationLog {
+  const reason: ValidationReasonCode = diagnostics.failureReasonCode === "TOO_MANY_CHANGES"
+    ? "TOO_MANY_CHANGES"
+    : diagnostics.failureReasonCode === "INVALID_LENGTH"
+      ? "INVALID_LENGTH"
+      : "SCHEMA_INVALID";
+  return {
+    validationOutcome: "rejected",
+    validationReasonCodes: [reason],
+    rawChangeCount: reason === "TOO_MANY_CHANGES" ? diagnostics.changeCount : 0,
+    acceptedPatchCount: 0,
+    rejectedPatchCount: 0,
+    unverifiedClaimCount: 0,
+    hasConsultedSources: false,
+    consultedSourceCount: 0,
+    repairablePatchCount: 0,
+    followUpEligible: false,
+    rejectedPatches: [],
+  };
+}
+
 function validationFailure(
   message: string,
   code: "too_many_changes" | "uncovered_edits" | "invalid_audit",
   diagnostics: CoverageDiagnostics
 ): ClassifiedLegalAudit {
-  return { ok: false, error: new LegalReviewValidationError(message, code, diagnostics) };
+  const error = new LegalReviewValidationError(message, code, diagnostics);
+  error.validationLog = rejectedValidationLog(diagnostics);
+  return { ok: false, error };
 }
 
 /** Classifica a auditoria e preserva o motivo. O texto jurídico não entra no erro. */
@@ -1575,17 +1635,27 @@ export function classifyLegalAudit(
     const change = readChange(item, index, consulted);
     if (!change) return [];
     const source = asRecord(item);
+    const modelConfirmation: LegalConfirmation = source?.confirmation === "NAO_CONFIRMADO" || source?.verified === false
+      ? "NAO_CONFIRMADO"
+      : "CONFIRMADO";
     return [{
       change,
       beforeContext: literalContext(source?.beforeContext),
       afterContext: literalContext(source?.afterContext),
       key: `${index}:${change.id}`,
+      refusalCodes: legalRefusalCodes(change, modelConfirmation),
     }];
   });
-  const unreadMaterial = declared.some((item, index) => {
+  const unreadable = declared.flatMap((item, index) => {
     const kept = drafts.some((draft) => draft.key.startsWith(`${index}:`));
-    return !kept && rawMaterialChange(item);
+    if (kept || !rawMaterialChange(item)) return [];
+    const source = asRecord(item);
+    return [{
+      changeId: safeDiagnosticChangeId(source?.id, index),
+      reasonCodes: ["UNREADABLE_CHANGE" as const],
+    }];
   });
+  const unreadMaterial = unreadable.length > 0;
 
   return {
     ok: true,
@@ -1599,6 +1669,8 @@ export function classifyLegalAudit(
       confidence: oneOf(record.confidence, CONFIDENCE, "MEDIA"),
       modelClaims: Array.isArray(record.unverifiedClaims) ? record.unverifiedClaims : [],
       unreadMaterial,
+      rawChangeCount: declared.length,
+      unreadable,
     }),
   };
 }
@@ -1617,6 +1689,23 @@ interface PatchDraft {
   beforeContext: string;
   afterContext: string;
   key: string;
+  refusalCodes: ValidationReasonCode[];
+}
+
+const LOCATION_REASON_CODES: Record<LiteralRejectReason, ValidationReasonCode> = {
+  excerpt_missing: "EXCERPT_NOT_FOUND",
+  ambiguous: "EXCERPT_AMBIGUOUS",
+  overlap: "PATCH_OVERLAP",
+  html: "HTML_VIOLATION",
+  marker: "MARKER_VIOLATION",
+  length: "PATCH_SIZE_INVALID",
+};
+
+function declaredDraftIndex(key: string, fallback: number): number {
+  const match = /^(\d+):/.exec(key);
+  if (!match) return fallback;
+  const index = Number(match[1]);
+  return Number.isInteger(index) ? index : fallback;
 }
 
 function finalizePatchAudit(input: {
@@ -1629,6 +1718,8 @@ function finalizePatchAudit(input: {
   confidence: LegalReviewConfidence;
   modelClaims: unknown[];
   unreadMaterial: boolean;
+  rawChangeCount: number;
+  unreadable: Array<{ changeId: string; reasonCodes: ValidationReasonCode[] }>;
 }): NormalizedAudit {
   const applicable = input.drafts.filter((draft) => draft.change.confirmation === "CONFIRMADO");
   const appliedResult = applyLiteralPatches(input.original, applicable.map((draft) => ({
@@ -1716,6 +1807,28 @@ function finalizePatchAudit(input: {
     diffConsistent: reviewedMarkdown === input.original || outsidePatchBytesIdentical(input.original, reviewedMarkdown, appliedResult.applied),
     manuallyEdited: false,
   });
+  const limitedClaims = unverifiedClaims.slice(0, 40);
+  const rejectedPatches = [
+    ...input.unreadable,
+    ...input.drafts.flatMap((draft, position) => {
+      const location = rejectedByKey.get(draft.key);
+      const reasonCodes = location ? [LOCATION_REASON_CODES[location]] : draft.refusalCodes;
+      if (!reasonCodes.length) return [];
+      return [{
+        changeId: safeDiagnosticChangeId(draft.change.id, declaredDraftIndex(draft.key, position)),
+        reasonCodes,
+      }];
+    }),
+  ];
+  const validationReasonCodes: ValidationReasonCode[] = [];
+  const pushReason = (code: ValidationReasonCode) => {
+    if (!validationReasonCodes.includes(code)) validationReasonCodes.push(code);
+  };
+  for (const patch of rejectedPatches) {
+    for (const code of patch.reasonCodes) pushReason(code);
+  }
+  if (input.rawChangeCount > 0 && appliedResult.applied.length === 0) pushReason("NO_APPLICABLE_PATCH");
+  if (!input.search.webSearchExecuted || input.consultedSources.length === 0) pushReason("MISSING_REQUIRED_SEARCH");
 
   return {
     outcome,
@@ -1723,12 +1836,27 @@ function finalizePatchAudit(input: {
     verificationLevel,
     summary: summarizeChanges(changes),
     changes,
-    unverifiedClaims: unverifiedClaims.slice(0, 40),
+    unverifiedClaims: limitedClaims,
     reviewedMarkdown,
     reviewNotes: input.reviewNotes,
     consultedSources: input.consultedSources,
     repairablePatches,
     appliedPatchInputs,
+    validationLog: {
+      validationOutcome: "accepted",
+      validationReasonCodes,
+      rawChangeCount: input.rawChangeCount,
+      acceptedPatchCount: appliedResult.applied.length,
+      rejectedPatchCount: rejectedPatches.length,
+      unverifiedClaimCount: limitedClaims.length,
+      status: outcome,
+      verificationLevel,
+      hasConsultedSources: input.consultedSources.length > 0,
+      consultedSourceCount: input.consultedSources.length,
+      repairablePatchCount: repairablePatches.length,
+      followUpEligible: false,
+      rejectedPatches,
+    },
   };
 }
 
@@ -1765,7 +1893,7 @@ export function mergePatchAudits(
   const pushDraft = (change: LegalReviewChange, beforeContext: string, afterContext: string, key: string) => {
     if (seenDraft.has(change.id)) return;
     seenDraft.add(change.id);
-    drafts.push({ change, beforeContext, afterContext, key });
+    drafts.push({ change, beforeContext, afterContext, key, refusalCodes: [] });
   };
 
   for (const change of current.changes) {
@@ -1809,6 +1937,8 @@ export function mergePatchAudits(
     confidence: follow.confidence,
     modelClaims,
     unreadMaterial: false,
+    rawChangeCount: drafts.length + held.length,
+    unreadable: [],
   });
 }
 
@@ -1825,18 +1955,20 @@ const UNCOVERED_AUDIT_MESSAGE =
   "A revisão não descreveu todas as alterações do texto. A aula publicada não foi alterada.";
 const TOO_MANY_CHANGES_MESSAGE =
   "A revisão declarou mais de 40 alterações. Nenhuma foi descartada e a auditoria não foi aceita. A aula publicada não foi alterada.";
-const INVALID_AUDIT_MESSAGE =
+export const INVALID_AUDIT_MESSAGE =
   "A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.";
 
 /** Motivo seguro da recusa. Não devolve aula, excerpt nem Markdown. */
 export function explainLegalAuditFailure(raw: unknown, originalMarkdown: string): LegalReviewValidationError {
   const classified = classifyLegalAudit(raw, originalMarkdown, { webSearchExecuted: false });
   if (classified.ok === false) return classified.error;
-  return new LegalReviewValidationError(
+  const error = new LegalReviewValidationError(
     INVALID_AUDIT_MESSAGE,
     "invalid_audit",
     emptyCoverage("invalid_audit", 0, "INVALID_SCHEMA", "INVALID_SCHEMA")
   );
+  error.validationLog = rejectedValidationLog(error.diagnostics);
+  return error;
 }
 
 const evidenceSchema = {

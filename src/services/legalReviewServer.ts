@@ -4,6 +4,7 @@
  */
 import OpenAI from "openai";
 import {
+  INVALID_AUDIT_MESSAGE,
   LEGAL_REVIEW_JSON_SCHEMA,
   describeConsultedSources,
   explainLegalAuditFailure,
@@ -12,6 +13,7 @@ import {
   type NormalizedAudit,
   type RepairablePatch,
 } from "../lib/legalReviewValidate";
+import type { LegalAuditValidationLog, ValidationIncompleteReason, ValidationReasonCode, ValidationResponseStatus } from "../lib/legalReviewDiagnostics";
 import { searchDomainsForLesson } from "../lib/legalReviewSources";
 import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "./legalReviewPrompt";
 import { redactProviderError } from "./openaiServerService";
@@ -87,7 +89,46 @@ export interface ReviewModelResponse {
   output?: unknown;
   status?: string;
   error?: unknown;
+  incomplete_details?: { reason?: string } | null;
   usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null;
+}
+
+function responseStatusOf(status: unknown): ValidationResponseStatus {
+  if (status === "completed" || status === "incomplete" || status === "failed") return status;
+  return "absent";
+}
+
+function incompleteReasonOf(response: ReviewModelResponse): ValidationIncompleteReason | undefined {
+  const reason = response.incomplete_details?.reason;
+  if (typeof reason !== "string" || !reason.trim()) return undefined;
+  if (reason === "max_output_tokens" || reason === "content_filter") return reason;
+  return "unlisted";
+}
+
+function rejectedResponseLog(
+  code: ValidationReasonCode,
+  response: ReviewModelResponse,
+  incompleteReason?: ValidationIncompleteReason
+): LegalAuditValidationLog {
+  return {
+    validationOutcome: "rejected",
+    validationReasonCodes: [code],
+    rawChangeCount: 0,
+    acceptedPatchCount: 0,
+    rejectedPatchCount: 0,
+    unverifiedClaimCount: 0,
+    hasConsultedSources: false,
+    consultedSourceCount: 0,
+    repairablePatchCount: 0,
+    followUpEligible: false,
+    responseStatus: responseStatusOf(response.status),
+    ...(incompleteReason ? { incompleteReason } : {}),
+    rejectedPatches: [],
+  };
+}
+
+function invalidAuditError(log: LegalAuditValidationLog): Error {
+  return Object.assign(new Error(INVALID_AUDIT_MESSAGE), { validationLog: log });
 }
 
 function requireKey(): string {
@@ -246,23 +287,31 @@ export function interpretReviewResponse(
       `O modelo que respondeu (${response.model || "desconhecido"}) não é o modelo solicitado (${requestedModel}). A revisão não foi concluída. A aula publicada não foi alterada.`
     );
   }
-  if (response.error || response.status === "incomplete" || response.status === "failed") {
-    throw new Error("A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.");
+  if (response.error) throw invalidAuditError(rejectedResponseLog("RESPONSE_ERROR", response));
+  if (response.status === "incomplete") {
+    throw invalidAuditError(rejectedResponseLog("RESPONSE_INCOMPLETE", response, incompleteReasonOf(response)));
   }
+  if (response.status === "failed") throw invalidAuditError(rejectedResponseLog("RESPONSE_FAILED", response));
   const text = (response.output_text || "").trim();
-  if (!text) throw new Error("A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.");
+  if (!text) throw invalidAuditError(rejectedResponseLog("EMPTY_OUTPUT", response));
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new Error("A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.");
+    throw invalidAuditError(rejectedResponseLog("JSON_PARSE_FAILED", response));
   }
   const consultedUrls = extractConsultedSourceUrls(response.output);
   const audit = normalizeLegalAudit(raw, originalMarkdown, {
     webSearchExecuted: consultedUrls.length > 0,
     consultedUrls,
   });
-  if (!audit) throw explainLegalAuditFailure(raw, originalMarkdown);
+  if (!audit) {
+    const error = explainLegalAuditFailure(raw, originalMarkdown);
+    if (error.validationLog) {
+      error.validationLog = { ...error.validationLog, responseStatus: responseStatusOf(response.status) };
+    }
+    throw error;
+  }
   return {
     ...audit,
     model: response.model || requestedModel,
@@ -410,7 +459,16 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
     trace.validationStart();
     try {
       const audit = interpretReviewResponse(current, baseline, requestedModel);
-      trace.validationEnd(traceCounts(audit));
+      const validation = audit.validationLog
+        ? {
+          ...audit.validationLog,
+          followUpEligible:
+            ((audit.repairablePatches?.length || 0) > 0 || !audit.webSearchUsed)
+            && remaining() >= MIN_FOLLOW_UP_REMAINING_MS,
+        }
+        : undefined;
+      trace.validationEnd(traceCounts(audit), undefined, validation);
+      delete audit.validationLog;
       return audit;
     } catch (error) {
       trace.validationEnd(undefined, error);
@@ -518,5 +576,6 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
 
   delete parsed.repairablePatches;
   delete parsed.appliedPatchInputs;
+  delete parsed.validationLog;
   return parsed;
 }

@@ -2,6 +2,11 @@
  * Telemetria da auditoria jurídica.
  * Cada linha é JSON só com campos permitidos. Não recebe aula, prompt, Markdown, raciocínio nem segredo.
  */
+import {
+  sanitizeValidationLog,
+  validationLogFromUnknown,
+  type LegalAuditValidationLog,
+} from "../lib/legalReviewDiagnostics";
 
 export const LEGAL_REVIEW_LOG_EVENTS = [
   "LEGAL_REVIEW_START",
@@ -43,7 +48,7 @@ export interface LegalReviewTrace {
   openaiEnd(servedModel?: string): void;
   retry(reason: LegalReviewRetryReason): void;
   validationStart(): void;
-  validationEnd(counts?: LegalReviewTraceCounts, failure?: unknown): void;
+  validationEnd(counts?: LegalReviewTraceCounts, failure?: unknown, validation?: unknown): void;
   firestoreStart(step: LegalReviewFirestoreStep): void;
   firestoreEnd(): void;
   success(counts: LegalReviewTraceCounts): void;
@@ -232,6 +237,7 @@ export function createLegalReviewTrace(input: {
   let unverifiedClaims: number | undefined;
   let pending: SafeLegalReviewError | undefined;
   let coverageLog: Record<string, unknown> | undefined;
+  let validationLog: LegalAuditValidationLog | undefined;
   const testMode = input.testMode === true;
   const requestedModel = safeReviewModel(input.requestedModel) || "gpt-5.6";
   const write = input.write ?? defaultWrite;
@@ -284,6 +290,12 @@ export function createLegalReviewTrace(input: {
     ) {
       payload.coverage = coverageLog;
     }
+    if (
+      validationLog
+      && (event === "LEGAL_REVIEW_VALIDATION_END" || event === "LEGAL_REVIEW_ERROR")
+    ) {
+      payload.validation = validationLog;
+    }
     if (extra?.error) {
       payload.error = {
         message: extra.error.message,
@@ -321,6 +333,7 @@ export function createLegalReviewTrace(input: {
       stage = "openai";
       attempt += 1;
       coverageLog = undefined;
+      validationLog = undefined;
       emit("LEGAL_REVIEW_OPENAI_START");
     },
     openaiEnd(model) {
@@ -342,10 +355,11 @@ export function createLegalReviewTrace(input: {
       stage = "validation";
       emit("LEGAL_REVIEW_VALIDATION_START");
     },
-    validationEnd(counts, failure) {
+    validationEnd(counts, failure, validation) {
       stage = "validation";
       applyCounts(counts);
       coverageLog = coverageFromUnknown(failure);
+      validationLog = sanitizeValidationLog(validation) ?? validationLogFromUnknown(failure);
       emit("LEGAL_REVIEW_VALIDATION_END");
     },
     firestoreStart(step) {
@@ -367,6 +381,8 @@ export function createLegalReviewTrace(input: {
       pending = sanitizeLegalReviewError(error, stage);
       const safeCoverage = coverageFromUnknown(error);
       if (safeCoverage) coverageLog = safeCoverage;
+      const safeValidation = validationLogFromUnknown(error);
+      if (safeValidation) validationLog = safeValidation;
     },
     clearFailure() {
       pending = undefined;
