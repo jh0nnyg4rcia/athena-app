@@ -429,10 +429,24 @@ function coversStructural(side: string, excerpt: string): boolean {
   return editorialSignature(excerpt).includes(hunkSignature);
 }
 
-function tokenDelta(before: string[], after: string[]): { removed: string[]; added: string[] } {
-  if (!before.length && !after.length) return { removed: [], added: [] };
+export interface TokenDeltaResult {
+  removed: string[];
+  added: string[];
+  removedMap: Map<number, number>;
+  addedMap: Map<number, number>;
+  commonCount: number;
+}
+
+export function tokenDeltaWithPositions(before: string[], after: string[]): TokenDeltaResult {
+  if (!before.length && !after.length) {
+    return { removed: [], added: [], removedMap: new Map(), addedMap: new Map(), commonCount: 0 };
+  }
   if (before.length * after.length > TOKEN_LCS_CELL_LIMIT) {
-    return { removed: before, added: after };
+    const removedMap = new Map<number, number>();
+    for (let i = 0; i < before.length; i += 1) removedMap.set(i, i);
+    const addedMap = new Map<number, number>();
+    for (let j = 0; j < after.length; j += 1) addedMap.set(j, j);
+    return { removed: before, added: after, removedMap, addedMap, commonCount: 0 };
   }
   const n = before.length;
   const m = after.length;
@@ -446,29 +460,42 @@ function tokenDelta(before: string[], after: string[]): { removed: string[]; add
   }
   const removed: string[] = [];
   const added: string[] = [];
+  const removedMap = new Map<number, number>();
+  const addedMap = new Map<number, number>();
+  let commonCount = 0;
   let i = 0;
   let j = 0;
   while (i < n && j < m) {
     if (before[i] === after[j]) {
+      commonCount += 1;
       i += 1;
       j += 1;
     } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      removedMap.set(i, removed.length);
       removed.push(before[i]);
       i += 1;
     } else {
+      addedMap.set(j, added.length);
       added.push(after[j]);
       j += 1;
     }
   }
   while (i < n) {
+    removedMap.set(i, removed.length);
     removed.push(before[i]);
     i += 1;
   }
   while (j < m) {
+    addedMap.set(j, added.length);
     added.push(after[j]);
     j += 1;
   }
-  return { removed, added };
+  return { removed, added, removedMap, addedMap, commonCount };
+}
+
+function tokenDelta(before: string[], after: string[]): { removed: string[]; added: string[] } {
+  const result = tokenDeltaWithPositions(before, after);
+  return { removed: result.removed, added: result.added };
 }
 
 function grounded(excerpt: string, side: string): boolean {
@@ -476,6 +503,131 @@ function grounded(excerpt: string, side: string): boolean {
   const sideTokens = coverageTokens(side);
   if (!excerptTokens.length || !sideTokens.length) return false;
   return orderedMatchCount(excerptTokens, sideTokens) === excerptTokens.length;
+}
+
+function findExcerptSideIndices(excerptTokens: string[], sideTokens: string[]): number[] | null {
+  if (!excerptTokens.length || !sideTokens.length) return null;
+  for (let start = 0; start <= sideTokens.length - excerptTokens.length; start += 1) {
+    let matches = true;
+    for (let k = 0; k < excerptTokens.length; k += 1) {
+      if (sideTokens[start + k] !== excerptTokens[k]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return Array.from({ length: excerptTokens.length }, (_, k) => start + k);
+    }
+  }
+
+  const matchedIndices: number[] = [];
+  let eIdx = 0;
+  for (let sIdx = 0; sIdx < sideTokens.length && eIdx < excerptTokens.length; sIdx += 1) {
+    if (sideTokens[sIdx] === excerptTokens[eIdx]) {
+      matchedIndices.push(sIdx);
+      eIdx += 1;
+    }
+  }
+  if (eIdx === excerptTokens.length) {
+    return matchedIndices;
+  }
+  return null;
+}
+
+function coveredDeltaPositionsForChange(
+  hunk: ChangeHunk,
+  change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">,
+  deltaInfo: TokenDeltaResult
+): { coveredRemoved: Set<number>; coveredAdded: Set<number> } | null {
+  const origTokens = coverageTokens(hunk.original);
+  const revTokens = coverageTokens(hunk.revised);
+  const chOrigTokens = coverageTokens(change.originalExcerpt);
+  const chRevTokens = coverageTokens(change.revisedExcerpt);
+
+  if (chOrigTokens.length > 0 && !grounded(change.originalExcerpt, hunk.original)) {
+    return null;
+  }
+  if (chRevTokens.length > 0 && !grounded(change.revisedExcerpt, hunk.revised)) {
+    return null;
+  }
+  if (chOrigTokens.length === 0 && chRevTokens.length === 0) {
+    return null;
+  }
+
+  const coveredRemoved = new Set<number>();
+  const coveredAdded = new Set<number>();
+
+  if (chOrigTokens.length > 0) {
+    const sideIndices = findExcerptSideIndices(chOrigTokens, origTokens);
+    if (!sideIndices) return null;
+    for (const idx of sideIndices) {
+      const deltaIdx = deltaInfo.removedMap.get(idx);
+      if (deltaIdx !== undefined) {
+        coveredRemoved.add(deltaIdx);
+      }
+    }
+  }
+
+  if (chRevTokens.length > 0) {
+    const sideIndices = findExcerptSideIndices(chRevTokens, revTokens);
+    if (!sideIndices) return null;
+    for (const idx of sideIndices) {
+      const deltaIdx = deltaInfo.addedMap.get(idx);
+      if (deltaIdx !== undefined) {
+        coveredAdded.add(deltaIdx);
+      }
+    }
+  }
+
+  return { coveredRemoved, coveredAdded };
+}
+
+function evaluateHunkCompositeCoverage(
+  hunk: ChangeHunk,
+  candidateChanges: Array<{ change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">; originalIndex: number }>,
+  deltaInfo: TokenDeltaResult
+): { covered: boolean; usedChangeIndices: number[] } {
+  if (deltaInfo.removed.length === 0 && deltaInfo.added.length === 0) {
+    return { covered: false, usedChangeIndices: [] };
+  }
+  if (deltaInfo.commonCount === 0 && deltaInfo.removed.length > 0 && deltaInfo.added.length > 0) {
+    return { covered: false, usedChangeIndices: [] };
+  }
+  if (!candidateChanges.length) {
+    return { covered: false, usedChangeIndices: [] };
+  }
+
+  const allCoveredRemoved = new Set<number>();
+  const allCoveredAdded = new Set<number>();
+  const usedChangeIndices: number[] = [];
+
+  for (const item of candidateChanges) {
+    const pos = coveredDeltaPositionsForChange(hunk, item.change, deltaInfo);
+    if (!pos) continue;
+
+    let contributes = false;
+    for (const r of pos.coveredRemoved) {
+      if (!allCoveredRemoved.has(r)) contributes = true;
+      allCoveredRemoved.add(r);
+    }
+    for (const a of pos.coveredAdded) {
+      if (!allCoveredAdded.has(a)) contributes = true;
+      allCoveredAdded.add(a);
+    }
+
+    if (contributes) {
+      usedChangeIndices.push(item.originalIndex);
+    }
+  }
+
+  const removed100 = allCoveredRemoved.size === deltaInfo.removed.length;
+  const added100 = allCoveredAdded.size === deltaInfo.added.length;
+  const ok = removed100 && added100 && usedChangeIndices.length > 0;
+
+  return {
+    covered: ok,
+    usedChangeIndices: ok ? usedChangeIndices : [],
+  };
 }
 
 function changeCoversHunk(
@@ -511,7 +663,8 @@ function classifyUncoveredHunk(
   changes: Array<Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">>,
   others: ChangeHunk[]
 ): { reason: AuditFailureCode; removed: number; added: number; structural: boolean } {
-  const delta = tokenDelta(coverageTokens(hunk.original), coverageTokens(hunk.revised));
+  const deltaInfo = tokenDeltaWithPositions(coverageTokens(hunk.original), coverageTokens(hunk.revised));
+  const delta = { removed: deltaInfo.removed, added: deltaInfo.added };
   const removed = delta.removed.length;
   const added = delta.added.length;
   if (removed === 0 && added === 0) {
@@ -523,8 +676,11 @@ function classifyUncoveredHunk(
   for (const change of changes) {
     const removal = sidePrefix(delta.removed, change.originalExcerpt, hunk.original);
     const addition = sidePrefix(delta.added, change.revisedExcerpt, hunk.revised);
-    bestRemoval = Math.max(bestRemoval, removal);
-    bestAddition = Math.max(bestAddition, addition);
+    const pos = coveredDeltaPositionsForChange(hunk, change, deltaInfo);
+    const posRemoval = pos ? pos.coveredRemoved.size : 0;
+    const posAddition = pos ? pos.coveredAdded.size : 0;
+    bestRemoval = Math.max(bestRemoval, removal, posRemoval);
+    bestAddition = Math.max(bestAddition, addition, posAddition);
     const removedOnRevised = sidePrefix(delta.removed, change.revisedExcerpt, hunk.original);
     const addedOnOriginal = sidePrefix(delta.added, change.originalExcerpt, hunk.revised);
     if ((removed > 0 && removedOnRevised > removal) || (added > 0 && addedOnOriginal > addition)) wrongSide = true;
@@ -615,9 +771,21 @@ export function assessSubstantiveCoverage(
       used.add(index);
       covered += 1;
     } else {
-      const chars = normalizeCoverageComparable(hunk.original).length + normalizeCoverageComparable(hunk.revised).length;
-      uncovered.push({ kind: hunk.kind, chars });
-      uncoveredHunks.push(hunk);
+      const deltaInfo = tokenDeltaWithPositions(coverageTokens(hunk.original), coverageTokens(hunk.revised));
+      const candidates = changes
+        .map((change, originalIndex) => ({ change, originalIndex }))
+        .filter((item) => !used.has(item.originalIndex));
+      const composite = evaluateHunkCompositeCoverage(hunk, candidates, deltaInfo);
+      if (composite.covered) {
+        for (const idx of composite.usedChangeIndices) {
+          used.add(idx);
+        }
+        covered += 1;
+      } else {
+        const chars = normalizeCoverageComparable(hunk.original).length + normalizeCoverageComparable(hunk.revised).length;
+        uncovered.push({ kind: hunk.kind, chars });
+        uncoveredHunks.push(hunk);
+      }
     }
   }
   const details = uncoveredHunks.map((hunk) => classifyUncoveredHunk(hunk, changes, substantive));

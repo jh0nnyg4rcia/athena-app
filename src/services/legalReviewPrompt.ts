@@ -89,7 +89,7 @@ Não melhore a redação de texto juridicamente correto.
 
 Não reescreva parágrafos corretos simplesmente por preferência estilística.
 
-Cada modificação feita em reviewedMarkdown precisa ter um item correspondente em changes[]. originalExcerpt reproduz integralmente o trecho original alterado. revisedExcerpt reproduz integralmente o trecho correspondente da versão revisada.
+Cada modificação feita em reviewedMarkdown precisa ter um item correspondente em changes[]. originalExcerpt reproduz integralmente o trecho original alterado. revisedExcerpt reproduz integralmente o trecho correspondente da versão revisada. Os trechos originalExcerpt e revisedExcerpt devem ser estritamente literais (idênticos caractere a caractere ao texto, sem adicionar 'nº', abreviações, números por extenso alterados para dígitos ou pontuações inexistentes). Quando várias correções atingirem o mesmo parágrafo, é preferível um único change abrangendo integralmente todo o trecho alterado do parágrafo.
 
 Não crie alterações artificiais. Se não houver erro material nem omissão relevante, devolva status SEM_ALTERACOES_RELEVANTES, changes vazio e reviewedMarkdown idêntico ao original.
 

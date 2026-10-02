@@ -258,6 +258,77 @@ for (const count of [5, 10, 20, 50]) {
   }
 }
 
+// --- COBERTURA COMPOSTA DETERMINÍSTICA DE HUNKS ---
+// 1. Dois changes legítimos cobrindo partes distintas de um mesmo hunk -> aceitar
+const comp1Orig = "O artigo 121 prevê pena de seis a vinte anos de reclusão.";
+const comp1Rev = "O artigo 121 prevê pena de 6 a 20 anos de reclusão.";
+expectAccept("composta 1: dois changes cobrindo partes distintas", comp1Orig, comp1Rev, [
+  { originalExcerpt: "pena de seis a", revisedExcerpt: "pena de 6 a" },
+  { originalExcerpt: "a vinte anos", revisedExcerpt: "a 20 anos" },
+]);
+
+// 2. Dois changes repetindo a cobertura dos mesmos tokens, deixando outro token do hunk descoberto -> rejeitar
+expectReject("composta 2: repetindo mesmos tokens sem cobrir todo delta", comp1Orig, comp1Rev, [
+  { originalExcerpt: "pena de seis a", revisedExcerpt: "pena de 6 a" },
+  { originalExcerpt: "pena de seis a", revisedExcerpt: "pena de 6 a" },
+]);
+
+// 3. Três changes cuja união cubra exatamente 100% dos tokens removidos e 100% dos adicionados -> aceitar
+const comp3Orig = "marco primeiro de abril e dois de maio e tres de junho fim";
+const comp3Rev = "marco 1 de abril e 2 de maio e 3 de junho fim";
+expectAccept("composta 3: tres changes com uniao 100%", comp3Orig, comp3Rev, [
+  { originalExcerpt: "marco primeiro de abril", revisedExcerpt: "marco 1 de abril" },
+  { originalExcerpt: "abril e dois de maio", revisedExcerpt: "abril e 2 de maio" },
+  { originalExcerpt: "maio e tres de junho", revisedExcerpt: "maio e 3 de junho" },
+]);
+
+// 4. União que cubra 100% do removido mas 99% do adicionado (ex: falta 1 token) -> rejeitar
+expectReject("composta 4: 100% removido mas falta 1 token adicionado", comp3Orig, comp3Rev, [
+  { originalExcerpt: "marco primeiro de abril", revisedExcerpt: "marco 1 de abril" },
+  { originalExcerpt: "abril e dois de maio", revisedExcerpt: "abril e 2 de maio" },
+  { originalExcerpt: "maio e tres de junho", revisedExcerpt: "maio e de junho" },
+]);
+
+// 5. Um change com excerpt não literal (ex: 'artigo 121, nº 2' quando o texto diz 'artigo 121, 2') -> não contribui
+const comp5Orig = "artigo 121, 2 e pena de seis a vinte anos";
+const comp5Rev = "artigo 121, 2 e pena de 6 a 20 anos";
+expectReject("composta 5: change com excerpt nao literal nao contribui", comp5Orig, comp5Rev, [
+  { originalExcerpt: "artigo 121, nº 2 e pena de seis a", revisedExcerpt: "artigo 121, nº 2 e pena de 6 a" },
+  { originalExcerpt: "a vinte anos", revisedExcerpt: "a 20 anos" },
+]);
+
+// 6. Change grounded no hunk errado -> não contribui
+const comp6Orig = "pena de seis anos de prisao\n\nmulta de vinte reais";
+const comp6Rev = "pena de 6 anos de prisao\n\nmulta de 20 reais";
+expectReject("composta 6: change grounded no hunk errado nao contribui", comp6Orig, comp6Rev, [
+  { originalExcerpt: "multa de vinte reais", revisedExcerpt: "multa de 20 reais" },
+  { originalExcerpt: "multa de vinte reais", revisedExcerpt: "multa de 20 reais" },
+]);
+
+// 7. Dois changes com sobreposição parcial de tokens -> apenas posições efetivamente cobertas contam
+const comp7Orig = "pena de dez e vinte e trinta anos";
+const comp7Rev = "pena de 10 e 20 e 30 anos";
+expectReject("composta 7: sobreposicao parcial sem cobrir todas posicoes", comp7Orig, comp7Rev, [
+  { originalExcerpt: "pena de dez e vinte", revisedExcerpt: "pena de 10 e 20" },
+  { originalExcerpt: "dez e vinte e", revisedExcerpt: "10 e 20 e" },
+]);
+
+// 8. Substituição de '§ 1º' por '§ 2º' dividida em changes -> aceita apenas se a união cobrir integralmente
+const comp8Orig = "nos termos do § 1º e § 3º aplicaveis";
+const comp8Rev = "nos termos do § 2º e § 4º aplicaveis";
+expectAccept("composta 8: delta com § e ordinais aceito com uniao integral", comp8Orig, comp8Rev, [
+  { originalExcerpt: "nos termos do § 1º", revisedExcerpt: "nos termos do § 2º" },
+  { originalExcerpt: "e § 3º aplicaveis", revisedExcerpt: "e § 4º aplicaveis" },
+]);
+
+// 9. Múltiplos changes de um hunk não podem ser reutilizados para outro hunk
+const comp9Orig = "pena de seis a vinte anos\n\npena de seis a vinte anos";
+const comp9Rev = "pena de 6 a 20 anos\n\npena de 6 a 20 anos";
+expectReject("composta 9: changes de um hunk nao podem ser reutilizados em outro", comp9Orig, comp9Rev, [
+  { originalExcerpt: "pena de seis a", revisedExcerpt: "pena de 6 a" },
+  { originalExcerpt: "a vinte anos", revisedExcerpt: "a 20 anos" },
+]);
+
 console.log(JSON.stringify({
   executados: executed,
   rejeitados: dangerousRejected,

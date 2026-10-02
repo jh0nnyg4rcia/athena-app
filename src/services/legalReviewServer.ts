@@ -248,6 +248,8 @@ const COVERAGE_REPAIR_FOLLOW_UP = [
   "Para cada alteração feita em reviewedMarkdown, inclua exatamente um item adequado em changes[].",
   "originalExcerpt deve reproduzir integralmente o trecho original que foi efetivamente alterado.",
   "revisedExcerpt deve reproduzir integralmente o trecho correspondente da versão revisada.",
+  "Os trechos originalExcerpt e revisedExcerpt devem ser estritamente literais, exatamente como constam do texto original e revisado, sem adicionar 'nº', abreviações ou caracteres inexistentes.",
+  "Quando várias correções atingirem o mesmo parágrafo, é preferível incluir um único change abrangendo integralmente todo o trecho alterado do parágrafo.",
   "Não faça alterações silenciosas.",
   "Não melhore estilo, pontuação, headings, listas ou formatação se isso não for necessário para corrigir conteúdo jurídico.",
   "Preserve literalmente todo texto que não necessite correção.",
