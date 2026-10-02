@@ -140,6 +140,43 @@ function defaultWrite(line: string): void {
 
 const COVERAGE_REASONS = new Set(["uncovered_edits", "too_many_changes", "invalid_audit"]);
 const HUNK_KINDS = new Set(["add", "remove", "replace"]);
+const AUDIT_FAILURE_CODES = new Set([
+  "UNDECLARED_ADDITION",
+  "UNDECLARED_REMOVAL",
+  "INCOMPLETE_ADDITION_EXCERPT",
+  "INCOMPLETE_REMOVAL_EXCERPT",
+  "STRUCTURAL_CHANGE_UNDECLARED",
+  "CHANGE_WRONG_HUNK",
+  "CHANGE_WRONG_SIDE",
+  "TOO_MANY_CHANGES",
+  "MARKER_MISMATCH",
+  "INVALID_SCHEMA",
+  "HTML_REJECTED",
+  "INVALID_LENGTH",
+  "COVERAGE_FAILURE",
+  "EMPTY_SOURCE",
+]);
+const COVERAGE_COUNTS = [
+  "hunks",
+  "covered",
+  "uncovered",
+  "add",
+  "remove",
+  "replace",
+  "changeCount",
+  "limit",
+  "totalHunks",
+  "coveredHunks",
+  "uncoveredHunks",
+  "totalChanges",
+  "usedChanges",
+  "unusedChanges",
+  "uncoveredRemovedTokenCount",
+  "uncoveredAddedTokenCount",
+  "uncoveredStructuralCount",
+  "maxUncoveredRemovedTokens",
+  "maxUncoveredAddedTokens",
+];
 
 function finiteCount(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000) return undefined;
@@ -155,9 +192,15 @@ export function coverageFromUnknown(error: unknown): Record<string, unknown> | u
   const reason = typeof record.reason === "string" && COVERAGE_REASONS.has(record.reason) ? record.reason : undefined;
   if (!reason) return undefined;
   const coverage: Record<string, unknown> = { reason };
-  for (const key of ["hunks", "covered", "uncovered", "add", "remove", "replace", "changeCount", "limit"]) {
+  for (const key of COVERAGE_COUNTS) {
     const value = finiteCount(record[key]);
     if (value !== undefined) coverage[key] = value;
+  }
+  if (typeof record.failureReasonCode === "string" && AUDIT_FAILURE_CODES.has(record.failureReasonCode)) {
+    coverage.failureReasonCode = record.failureReasonCode;
+  }
+  if (typeof record.auditFailure === "string" && AUDIT_FAILURE_CODES.has(record.auditFailure)) {
+    coverage.auditFailure = record.auditFailure;
   }
   if (Array.isArray(record.uncoveredChars)) {
     coverage.uncoveredChars = record.uncoveredChars
@@ -237,7 +280,7 @@ export function createLegalReviewTrace(input: {
     if (extra?.retryReason && RETRY_REASONS.has(extra.retryReason)) payload.retryReason = extra.retryReason;
     if (
       coverageLog
-      && (event === "LEGAL_REVIEW_VALIDATION_END" || event === "LEGAL_REVIEW_ERROR")
+      && (event === "LEGAL_REVIEW_VALIDATION_END" || event === "LEGAL_REVIEW_ERROR" || event === "LEGAL_REVIEW_RETRY")
     ) {
       payload.coverage = coverageLog;
     }

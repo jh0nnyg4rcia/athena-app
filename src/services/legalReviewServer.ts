@@ -48,6 +48,14 @@ export interface AuditLessonInput {
   content: string;
   publishedContent?: string;
   trace?: LegalReviewTrace;
+  /** Só testes locais. Produção usa a Responses API. */
+  callModel?: (input: {
+    model: string;
+    instructions: string;
+    userInput: string;
+    lessonText: string;
+    timeoutMs: number;
+  }) => Promise<ReviewModelResponse>;
 }
 
 export interface AuditLessonResult extends NormalizedAudit {
@@ -234,13 +242,19 @@ async function createResponse(
   );
 }
 
-const UNCOVERED_FOLLOW_UP = [
-  "A resposta anterior não pôde ser aceita porque o reviewedMarkdown contém mudanças materiais que não estão todas descritas em changes.",
-  "Cada mudança material precisa de um item em changes.",
-  "originalExcerpt deve corresponder a um trecho do texto original.",
-  "revisedExcerpt deve corresponder ao trecho equivalente do texto revisado.",
-  "Não reescreva trechos que não precisem de correção.",
-  "Preserve ao máximo o texto original fora das correções necessárias.",
+const COVERAGE_REPAIR_FOLLOW_UP = [
+  "A resposta anterior foi recusada porque reviewedMarkdown contém alterações que não estão integralmente descritas em changes[].",
+  "Refaça a resposta completa.",
+  "REGRA OBRIGATÓRIA:",
+  "Para cada alteração feita em reviewedMarkdown, inclua exatamente um item adequado em changes[].",
+  "originalExcerpt deve reproduzir integralmente o trecho original que foi efetivamente alterado.",
+  "revisedExcerpt deve reproduzir integralmente o trecho correspondente da versão revisada.",
+  "Não faça alterações silenciosas.",
+  "Não melhore estilo, pontuação, headings, listas ou formatação se isso não for necessário para corrigir conteúdo jurídico.",
+  "Preserve literalmente todo texto que não necessite correção.",
+  "Se não puder justificar uma modificação, mantenha o texto original.",
+  "Antes de responder, faça uma autoconsistência entre reviewedMarkdown e changes[].",
+  "A validação do servidor exige cobertura integral e recusará novamente qualquer alteração não declarada.",
   "Devolva somente o JSON do schema.",
   "Não invente URLs.",
   "Se não houver comprovação, use NAO_CONFIRMADO.",
@@ -269,9 +283,16 @@ const GENERIC_FOLLOW_UP = [
   "Preserve os marcadores [BLOCK_n].",
 ].join(" ");
 
+export function isCoverageFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; auditFailure?: unknown; diagnostics?: { auditFailure?: unknown; reason?: unknown } };
+  if (record.auditFailure === "COVERAGE_FAILURE" || record.code === "uncovered_edits") return true;
+  return record.diagnostics?.auditFailure === "COVERAGE_FAILURE" || record.diagnostics?.reason === "uncovered_edits";
+}
+
 export function reviewFollowUpInstruction(error: unknown): string {
+  if (isCoverageFailure(error)) return COVERAGE_REPAIR_FOLLOW_UP;
   const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : "";
-  if (code === "uncovered_edits") return UNCOVERED_FOLLOW_UP;
   if (code === "too_many_changes") return TOO_MANY_FOLLOW_UP;
   return GENERIC_FOLLOW_UP;
 }
@@ -287,8 +308,9 @@ function traceCounts(audit: AuditLessonResult): LegalReviewTraceCounts {
 }
 
 export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<AuditLessonResult> {
-  const apiKey = requireKey();
-  const client = new OpenAI({ apiKey, maxRetries: OPENAI_REVIEW_SDK_MAX_RETRIES });
+  const client = input.callModel
+    ? undefined
+    : new OpenAI({ apiKey: requireKey(), maxRetries: OPENAI_REVIEW_SDK_MAX_RETRIES });
   const requestedModel = reviewModelName();
   const trace = input.trace ?? createLegalReviewTrace({ testMode: false, requestedModel, write: () => {} });
   const instructions = buildLegalReviewInstructions(input.reviewDate);
@@ -325,7 +347,9 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
     if (timeoutMs < 15_000) break;
     trace.openaiStart();
     try {
-      response = await createResponse(client, requestedModel, instructions, userInput, input.content, timeoutMs);
+      response = input.callModel
+        ? await input.callModel({ model: requestedModel, instructions, userInput, lessonText: input.content, timeoutMs })
+        : await createResponse(client as OpenAI, requestedModel, instructions, userInput, input.content, timeoutMs);
       trace.openaiEnd(response.model);
       break;
     } catch (error) {
@@ -346,13 +370,22 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   let parsed = read(response);
   const canFollowUp = remaining() > 20_000;
   const lacksSources = !(parsed instanceof Error) && !parsed.webSearchUsed;
+  // Uma resposta de cobertura gera no máximo este reparo. Se ele também falhar, não há terceira chamada.
   if ((parsed instanceof Error || lacksSources) && canFollowUp) {
     trace.retry(lacksSources ? "missing_sources" : "invalid_audit");
     userInput = `${userInput}\n\n${reviewFollowUpInstruction(parsed)}`;
     trace.openaiStart();
     try {
-      response = await createResponse(
-        client,
+      response = input.callModel
+        ? await input.callModel({
+          model: requestedModel,
+          instructions,
+          userInput,
+          lessonText: input.content,
+          timeoutMs: Math.min(OPENAI_FOLLOW_UP_TIMEOUT_MS, remaining()),
+        })
+        : await createResponse(
+        client as OpenAI,
         requestedModel,
         instructions,
         userInput,

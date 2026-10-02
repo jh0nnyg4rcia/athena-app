@@ -304,6 +304,25 @@ export interface CoverageHunkDiagnostic {
   chars: number;
 }
 
+export const AUDIT_FAILURE_CODES = [
+  "UNDECLARED_ADDITION",
+  "UNDECLARED_REMOVAL",
+  "INCOMPLETE_ADDITION_EXCERPT",
+  "INCOMPLETE_REMOVAL_EXCERPT",
+  "STRUCTURAL_CHANGE_UNDECLARED",
+  "CHANGE_WRONG_HUNK",
+  "CHANGE_WRONG_SIDE",
+  "TOO_MANY_CHANGES",
+  "MARKER_MISMATCH",
+  "INVALID_SCHEMA",
+  "HTML_REJECTED",
+  "INVALID_LENGTH",
+  "COVERAGE_FAILURE",
+  "EMPTY_SOURCE",
+] as const;
+
+export type AuditFailureCode = (typeof AUDIT_FAILURE_CODES)[number];
+
 export interface CoverageDiagnostics {
   reason: "ok" | "uncovered_edits" | "too_many_changes" | "invalid_audit";
   hunks: number;
@@ -316,10 +335,24 @@ export interface CoverageDiagnostics {
   limit: number;
   uncoveredChars: number[];
   uncoveredKinds: Array<ChangeHunk["kind"]>;
+  totalHunks: number;
+  coveredHunks: number;
+  uncoveredHunks: number;
+  totalChanges: number;
+  usedChanges: number;
+  unusedChanges: number;
+  uncoveredRemovedTokenCount: number;
+  uncoveredAddedTokenCount: number;
+  uncoveredStructuralCount: number;
+  maxUncoveredRemovedTokens: number;
+  maxUncoveredAddedTokens: number;
+  failureReasonCode?: AuditFailureCode;
+  auditFailure?: AuditFailureCode;
 }
 
 export class LegalReviewValidationError extends Error {
   readonly code: "too_many_changes" | "uncovered_edits" | "invalid_audit";
+  readonly auditFailure: AuditFailureCode;
   readonly diagnostics: CoverageDiagnostics;
 
   constructor(
@@ -331,6 +364,7 @@ export class LegalReviewValidationError extends Error {
     this.name = "LegalReviewValidationError";
     this.code = code;
     this.diagnostics = diagnostics;
+    this.auditFailure = diagnostics.auditFailure || "INVALID_SCHEMA";
   }
 }
 
@@ -466,7 +500,63 @@ function changeCoversHunk(
   return originalOk && revisedOk;
 }
 
-function emptyCoverage(reason: CoverageDiagnostics["reason"], changeCount = 0): CoverageDiagnostics {
+function sidePrefix(delta: string[], excerpt: string, side: string): number {
+  if (!delta.length || !excerpt.trim()) return 0;
+  if (!grounded(excerpt, side)) return 0;
+  return orderedMatchCount(delta, coverageTokens(excerpt));
+}
+
+function classifyUncoveredHunk(
+  hunk: ChangeHunk,
+  changes: Array<Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">>,
+  others: ChangeHunk[]
+): { reason: AuditFailureCode; removed: number; added: number; structural: boolean } {
+  const delta = tokenDelta(coverageTokens(hunk.original), coverageTokens(hunk.revised));
+  const removed = delta.removed.length;
+  const added = delta.added.length;
+  if (removed === 0 && added === 0) {
+    return { reason: "STRUCTURAL_CHANGE_UNDECLARED", removed: 0, added: 0, structural: true };
+  }
+  let bestRemoval = 0;
+  let bestAddition = 0;
+  let wrongSide = false;
+  for (const change of changes) {
+    const removal = sidePrefix(delta.removed, change.originalExcerpt, hunk.original);
+    const addition = sidePrefix(delta.added, change.revisedExcerpt, hunk.revised);
+    bestRemoval = Math.max(bestRemoval, removal);
+    bestAddition = Math.max(bestAddition, addition);
+    const removedOnRevised = sidePrefix(delta.removed, change.revisedExcerpt, hunk.original);
+    const addedOnOriginal = sidePrefix(delta.added, change.originalExcerpt, hunk.revised);
+    if ((removed > 0 && removedOnRevised > removal) || (added > 0 && addedOnOriginal > addition)) wrongSide = true;
+  }
+  if (removed > 0 && bestRemoval > 0 && bestRemoval < removed) {
+    return { reason: "INCOMPLETE_REMOVAL_EXCERPT", removed, added, structural: false };
+  }
+  if (added > 0 && bestAddition > 0 && bestAddition < added) {
+    return { reason: "INCOMPLETE_ADDITION_EXCERPT", removed, added, structural: false };
+  }
+  if (wrongSide && bestRemoval < removed && bestAddition < added) {
+    return { reason: "CHANGE_WRONG_SIDE", removed, added, structural: false };
+  }
+  const misplaced = changes.some((change) => others.some((other) => {
+    if (other === hunk || changeCoversHunk(other, change)) return false;
+    const otherDelta = tokenDelta(coverageTokens(other.original), coverageTokens(other.revised));
+    return sidePrefix(otherDelta.removed, change.originalExcerpt, other.original) > 0
+      || sidePrefix(otherDelta.added, change.revisedExcerpt, other.revised) > 0;
+  }));
+  if (misplaced && bestRemoval === 0 && bestAddition === 0) {
+    return { reason: "CHANGE_WRONG_HUNK", removed, added, structural: false };
+  }
+  if (removed > 0 && bestRemoval === 0) return { reason: "UNDECLARED_REMOVAL", removed, added, structural: false };
+  return { reason: "UNDECLARED_ADDITION", removed, added, structural: false };
+}
+
+function emptyCoverage(
+  reason: CoverageDiagnostics["reason"],
+  changeCount = 0,
+  failureReasonCode?: AuditFailureCode,
+  auditFailure?: AuditFailureCode
+): CoverageDiagnostics {
   return {
     reason,
     hunks: 0,
@@ -479,6 +569,19 @@ function emptyCoverage(reason: CoverageDiagnostics["reason"], changeCount = 0): 
     limit: MAX_DECLARED_CHANGES,
     uncoveredChars: [],
     uncoveredKinds: [],
+    totalHunks: 0,
+    coveredHunks: 0,
+    uncoveredHunks: 0,
+    totalChanges: changeCount,
+    usedChanges: 0,
+    unusedChanges: changeCount,
+    uncoveredRemovedTokenCount: 0,
+    uncoveredAddedTokenCount: 0,
+    uncoveredStructuralCount: 0,
+    maxUncoveredRemovedTokens: 0,
+    maxUncoveredAddedTokens: 0,
+    ...(failureReasonCode ? { failureReasonCode } : {}),
+    ...(auditFailure ? { auditFailure } : {}),
   };
 }
 
@@ -504,6 +607,7 @@ export function assessSubstantiveCoverage(
   const substantive = changeHunks(original, revised).filter(requiresDeclaredChange);
   const used = new Set<number>();
   const uncovered: CoverageHunkDiagnostic[] = [];
+  const uncoveredHunks: ChangeHunk[] = [];
   let covered = 0;
   for (const hunk of substantive) {
     const index = changes.findIndex((change, changeIndex) => !used.has(changeIndex) && changeCoversHunk(hunk, change));
@@ -513,8 +617,12 @@ export function assessSubstantiveCoverage(
     } else {
       const chars = normalizeCoverageComparable(hunk.original).length + normalizeCoverageComparable(hunk.revised).length;
       uncovered.push({ kind: hunk.kind, chars });
+      uncoveredHunks.push(hunk);
     }
   }
+  const details = uncoveredHunks.map((hunk) => classifyUncoveredHunk(hunk, changes, substantive));
+  const removedCounts = details.map((item) => item.removed);
+  const addedCounts = details.map((item) => item.added);
   return {
     reason: uncovered.length ? "uncovered_edits" : "ok",
     hunks: substantive.length,
@@ -527,6 +635,18 @@ export function assessSubstantiveCoverage(
     limit: MAX_DECLARED_CHANGES,
     uncoveredChars: uncovered.map((hunk) => hunk.chars),
     uncoveredKinds: uncovered.map((hunk) => hunk.kind),
+    totalHunks: substantive.length,
+    coveredHunks: covered,
+    uncoveredHunks: uncovered.length,
+    totalChanges: changes.length,
+    usedChanges: used.size,
+    unusedChanges: Math.max(0, changes.length - used.size),
+    uncoveredRemovedTokenCount: removedCounts.reduce((sum, count) => sum + count, 0),
+    uncoveredAddedTokenCount: addedCounts.reduce((sum, count) => sum + count, 0),
+    uncoveredStructuralCount: details.filter((item) => item.structural).length,
+    maxUncoveredRemovedTokens: removedCounts.reduce((max, count) => Math.max(max, count), 0),
+    maxUncoveredAddedTokens: addedCounts.reduce((max, count) => Math.max(max, count), 0),
+    ...(details[0] ? { failureReasonCode: details[0].reason, auditFailure: "COVERAGE_FAILURE" as const } : {}),
   };
 }
 
@@ -575,20 +695,51 @@ export interface NormalizedAudit {
   consultedSources: ConsultedLegalSource[];
 }
 
-export function normalizeLegalAudit(
+export type ClassifiedLegalAudit =
+  | { ok: true; audit: NormalizedAudit }
+  | { ok: false; error: LegalReviewValidationError };
+
+function validationFailure(
+  message: string,
+  code: "too_many_changes" | "uncovered_edits" | "invalid_audit",
+  diagnostics: CoverageDiagnostics
+): ClassifiedLegalAudit {
+  return { ok: false, error: new LegalReviewValidationError(message, code, diagnostics) };
+}
+
+/** Classifica a auditoria e preserva o motivo. O texto jurídico não entra no erro. */
+export function classifyLegalAudit(
   raw: unknown,
   originalMarkdown: string,
   search: { webSearchExecuted: boolean; consultedUrls?: string[] }
-): NormalizedAudit | null {
+): ClassifiedLegalAudit {
   const record = asRecord(raw);
-  if (!record) return null;
+  if (!record) {
+    return validationFailure(
+      INVALID_AUDIT_MESSAGE,
+      "invalid_audit",
+      emptyCoverage("invalid_audit", 0, "INVALID_SCHEMA", "INVALID_SCHEMA")
+    );
+  }
   const original = String(originalMarkdown || "");
-  if (original.trim().length < 20) return null;
+  if (original.trim().length < 20) {
+    return validationFailure(
+      INVALID_AUDIT_MESSAGE,
+      "invalid_audit",
+      emptyCoverage("invalid_audit", 0, "INVALID_LENGTH", "INVALID_LENGTH")
+    );
+  }
 
   const consulted = consultedUrlSet(search.consultedUrls || []);
   const consultedSources = describeConsultedSources(search.consultedUrls || []);
   const declared = Array.isArray(record.changes) ? record.changes : [];
-  if (declared.length > MAX_DECLARED_CHANGES) return null;
+  if (declared.length > MAX_DECLARED_CHANGES) {
+    return validationFailure(
+      TOO_MANY_CHANGES_MESSAGE,
+      "too_many_changes",
+      emptyCoverage("too_many_changes", declared.length, "TOO_MANY_CHANGES", "TOO_MANY_CHANGES")
+    );
+  }
   const changes = declared
     .map((item, index) => readChange(item, index, consulted))
     .filter((item): item is LegalReviewChange => Boolean(item));
@@ -616,15 +767,39 @@ export function normalizeLegalAudit(
 
   let reviewedMarkdown = clip(record.reviewedMarkdown, 900_000);
   let outcome = oneOf(record.outcome || record.status, OUTCOMES, "ALTERACOES_NECESSARIAS");
+  if (containsHtmlMarkup(reviewedMarkdown)) {
+    return validationFailure(
+      INVALID_AUDIT_MESSAGE,
+      "invalid_audit",
+      emptyCoverage("invalid_audit", changes.length, "HTML_REJECTED", "HTML_REJECTED")
+    );
+  }
+  if (!markersPreserved(original, reviewedMarkdown)) {
+    return validationFailure(
+      INVALID_AUDIT_MESSAGE,
+      "invalid_audit",
+      emptyCoverage("invalid_audit", changes.length, "MARKER_MISMATCH", "MARKER_MISMATCH")
+    );
+  }
+  if (reviewedMarkdown.trim().length < 20 || reviewedMarkdown.length > Math.max(original.length * 3, original.length + 20_000)) {
+    return validationFailure(
+      INVALID_AUDIT_MESSAGE,
+      "invalid_audit",
+      emptyCoverage("invalid_audit", changes.length, "INVALID_LENGTH", "INVALID_LENGTH")
+    );
+  }
+  const coverage = assessSubstantiveCoverage(original, reviewedMarkdown, changes);
+  if (coverage.uncovered > 0) {
+    return validationFailure(UNCOVERED_AUDIT_MESSAGE, "uncovered_edits", {
+      ...coverage,
+      auditFailure: "COVERAGE_FAILURE",
+      failureReasonCode: coverage.failureReasonCode || "COVERAGE_FAILURE",
+    });
+  }
   if (!changes.length) {
     reviewedMarkdown = original;
     outcome = "SEM_ALTERACOES_RELEVANTES";
   }
-  if (containsHtmlMarkup(reviewedMarkdown)) return null;
-  if (!markersPreserved(original, reviewedMarkdown)) return null;
-  if (reviewedMarkdown.trim().length < 20) return null;
-  if (reviewedMarkdown.length > Math.max(original.length * 3, original.length + 20_000)) return null;
-  if (assessSubstantiveCoverage(original, reviewedMarkdown, changes).uncovered > 0) return null;
 
   const material = changes.filter(isMaterialLegalChange);
   const officialSourcesConsulted = consultedSources.some((source) => source.official);
@@ -638,16 +813,28 @@ export function normalizeLegalAudit(
   });
 
   return {
-    outcome,
-    confidence: oneOf(record.confidence, CONFIDENCE, "MEDIA"),
-    verificationLevel,
-    summary: summarizeChanges(changes),
-    changes,
-    unverifiedClaims: unverifiedClaims.slice(0, 40),
-    reviewedMarkdown,
-    reviewNotes: clip(record.reviewNotes, 8000),
-    consultedSources,
+    ok: true,
+    audit: {
+      outcome,
+      confidence: oneOf(record.confidence, CONFIDENCE, "MEDIA"),
+      verificationLevel,
+      summary: summarizeChanges(changes),
+      changes,
+      unverifiedClaims: unverifiedClaims.slice(0, 40),
+      reviewedMarkdown,
+      reviewNotes: clip(record.reviewNotes, 8000),
+      consultedSources,
+    },
   };
+}
+
+export function normalizeLegalAudit(
+  raw: unknown,
+  originalMarkdown: string,
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] }
+): NormalizedAudit | null {
+  const classified = classifyLegalAudit(raw, originalMarkdown, search);
+  return classified.ok ? classified.audit : null;
 }
 
 const UNCOVERED_AUDIT_MESSAGE =
@@ -659,37 +846,13 @@ const INVALID_AUDIT_MESSAGE =
 
 /** Motivo seguro da recusa. Não devolve aula, excerpt nem Markdown. */
 export function explainLegalAuditFailure(raw: unknown, originalMarkdown: string): LegalReviewValidationError {
-  const invalid = (diagnostics = emptyCoverage("invalid_audit")) =>
-    new LegalReviewValidationError(INVALID_AUDIT_MESSAGE, "invalid_audit", diagnostics);
-  const record = asRecord(raw);
-  if (!record) return invalid();
-  const original = String(originalMarkdown || "");
-  const declared = Array.isArray(record.changes) ? record.changes : [];
-  if (declared.length > MAX_DECLARED_CHANGES) {
-    return new LegalReviewValidationError(
-      TOO_MANY_CHANGES_MESSAGE,
-      "too_many_changes",
-      emptyCoverage("too_many_changes", declared.length)
-    );
-  }
-  const changes = declared
-    .map((item, index) => readChange(item, index, new Set<string>()))
-    .filter((item): item is LegalReviewChange => Boolean(item));
-  let reviewed = clip(record.reviewedMarkdown, 900_000);
-  if (!changes.length) reviewed = original;
-  if (
-    containsHtmlMarkup(reviewed)
-    || !markersPreserved(original, reviewed)
-    || reviewed.trim().length < 20
-    || reviewed.length > Math.max(original.length * 3, original.length + 20_000)
-  ) {
-    return invalid();
-  }
-  const coverage = assessSubstantiveCoverage(original, reviewed, changes);
-  if (coverage.reason === "uncovered_edits") {
-    return new LegalReviewValidationError(UNCOVERED_AUDIT_MESSAGE, "uncovered_edits", coverage);
-  }
-  return invalid(emptyCoverage("invalid_audit", changes.length));
+  const classified = classifyLegalAudit(raw, originalMarkdown, { webSearchExecuted: false });
+  if (classified.ok === false) return classified.error;
+  return new LegalReviewValidationError(
+    INVALID_AUDIT_MESSAGE,
+    "invalid_audit",
+    emptyCoverage("invalid_audit", 0, "INVALID_SCHEMA", "INVALID_SCHEMA")
+  );
 }
 
 const evidenceSchema = {

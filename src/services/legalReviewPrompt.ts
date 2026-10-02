@@ -73,9 +73,23 @@ A profundidade deve servir a concursos de Magistratura, Ministério Público, De
 
 ## PRESERVAÇÃO
 
-Preserve tudo aquilo que estiver correto.
+Preserve literalmente o texto que estiver juridicamente correto.
+
+Altere somente o necessário para corrigir erro, omissão juridicamente relevante ou desatualização.
+
+Não reescreva por estilo.
+
+Não troque sinônimos sem necessidade jurídica.
+
+Não reorganize parágrafos corretos.
+
+Não altere headings nem listas sem necessidade jurídica.
+
+Não melhore a redação de texto juridicamente correto.
 
 Não reescreva parágrafos corretos simplesmente por preferência estilística.
+
+Cada modificação feita em reviewedMarkdown precisa ter um item correspondente em changes[]. originalExcerpt reproduz integralmente o trecho original alterado. revisedExcerpt reproduz integralmente o trecho correspondente da versão revisada.
 
 Não crie alterações artificiais. Se não houver erro material nem omissão relevante, devolva status SEM_ALTERACOES_RELEVANTES, changes vazio e reviewedMarkdown idêntico ao original.
 
