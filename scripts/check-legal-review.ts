@@ -49,9 +49,11 @@ import {
   OPENAI_REVIEW_SDK_MAX_RETRIES,
   auditLessonWithOpenAI,
   isCoverageFailure,
+  isTimeout,
   reviewFailureForOpenAIError,
   reviewFollowUpInstruction,
   reviewModelName,
+  type AuditLessonResult,
   type ReviewModelResponse,
 } from "../src/services/legalReviewServer";
 import {
@@ -1060,6 +1062,7 @@ async function main() {
   assert(OPENAI_REVIEW_SDK_MAX_RETRIES === 0, "o SDK não repete a chamada por conta própria");
   assert(serverSource.includes("tryNumber < 2") && serverSource.includes("trace.retry("), "o retry da auditoria continua e fica registrado");
   assert(!serverSource.includes("console.log") && !serverSource.includes("console.error"), "o servidor da auditoria não grava log solto");
+  assert(!serverSource.includes("OPENAI_FOLLOW_UP_TIMEOUT_MS"), "o teto fixo de 90s do follow-up foi removido do servidor");
 
   const secret = "sk-test-secret-value-1234567890";
   const bearer = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
@@ -1187,6 +1190,298 @@ async function main() {
   const credentialDump = credentialLines.join("\n");
   assert(!credentialDump.includes("OPENAI_API_KEY") && !credentialDump.includes("GEMINI_API_KEY"), "log não repete o nome da variável secreta");
   assert(credentialDump.includes("A credencial do provedor não está disponível no servidor."), "ausência de credencial vira mensagem segura");
+
+  // --- Testes determinísticos da política de timeout do follow-up e cobertura 100% ---
+  function mockModelResponse(text: string, urls: string[] = [PLANALTO]): ReviewModelResponse {
+    return {
+      model: "gpt-5.6",
+      status: "completed",
+      output_text: text,
+      output: urls.map((url) => ({
+        type: "web_search_call",
+        action: { type: "open_page", url },
+      })),
+      usage: { input_tokens: 100, output_tokens: 200, total_tokens: 300 },
+    };
+  }
+
+  const invalidCoverageText = JSON.stringify(
+    auditBody(original.replace("detenção", "prisão simples"), [])
+  );
+  const invalidCoverageResponse = mockModelResponse(invalidCoverageText);
+
+  const validCoverageText = JSON.stringify(
+    auditBody(original.replace("detenção", "reclusão"), [change({})])
+  );
+  const validCoverageResponse = mockModelResponse(validCoverageText);
+
+  // 1. primeira resposta inválida em cobertura + orçamento restante superior a 90 s → follow-up recebe todo o orçamento restante até o teto de 200 s;
+  {
+    const originalDateNow = Date.now;
+    let fakeTime = 1_000_000;
+    Date.now = () => fakeTime;
+    const timeoutsReceived: number[] = [];
+    try {
+      const result = await auditLessonWithOpenAI({
+        reviewDate: "2026-10-02",
+        lessonId: "day_1_part_0",
+        day: 1,
+        part: 0,
+        subject: "Direito Penal",
+        topic: "Lei 1.521/1951",
+        content: original,
+        callModel: async ({ timeoutMs }) => {
+          timeoutsReceived.push(timeoutMs);
+          if (timeoutsReceived.length === 1) {
+            fakeTime += 10_000; // 10s gastos, restam 240s (> 90s e > 200s)
+            return invalidCoverageResponse;
+          }
+          return validCoverageResponse;
+        },
+      });
+      assert(timeoutsReceived.length === 2, "1. follow-up foi acionado na tentativa 1");
+      assert(
+        timeoutsReceived[1] === OPENAI_ATTEMPT_TIMEOUT_MS && timeoutsReceived[1] === 200_000,
+        "1. com orçamento restante superior a 90s (240s), follow-up recebe o teto de 200s"
+      );
+      assert(result.verificationLevel === "VERIFICADO_COM_FONTES", "1. auditoria concluiu com sucesso");
+    } finally {
+      Date.now = originalDateNow;
+    }
+  }
+
+  // 2. orçamento restante inferior a 200 s → recebe exatamente o restante;
+  {
+    const originalDateNow = Date.now;
+    let fakeTime = 1_000_000;
+    Date.now = () => fakeTime;
+    const timeoutsReceived: number[] = [];
+    try {
+      const result = await auditLessonWithOpenAI({
+        reviewDate: "2026-10-02",
+        lessonId: "day_1_part_0",
+        day: 1,
+        part: 0,
+        subject: "Direito Penal",
+        topic: "Lei 1.521/1951",
+        content: original,
+        callModel: async ({ timeoutMs }) => {
+          timeoutsReceived.push(timeoutMs);
+          if (timeoutsReceived.length === 1) {
+            fakeTime += 70_000; // 70s gastos, restam 180s (< 200s, > 90s)
+            return invalidCoverageResponse;
+          }
+          return validCoverageResponse;
+        },
+      });
+      assert(timeoutsReceived.length === 2, "2. follow-up foi acionado");
+      assert(
+        timeoutsReceived[1] === 180_000,
+        "2. com orçamento restante inferior a 200s (180s), follow-up recebe exatamente o restante (180s)"
+      );
+      assert(result.verificationLevel === "VERIFICADO_COM_FONTES", "2. auditoria concluiu com sucesso");
+    } finally {
+      Date.now = originalDateNow;
+    }
+  }
+
+  // 3. menos de 15 s restantes → não inicia follow-up;
+  {
+    const originalDateNow = Date.now;
+    let fakeTime = 1_000_000;
+    Date.now = () => fakeTime;
+    const timeoutsReceived: number[] = [];
+    let thrownError: unknown;
+    try {
+      await auditLessonWithOpenAI({
+        reviewDate: "2026-10-02",
+        lessonId: "day_1_part_0",
+        day: 1,
+        part: 0,
+        subject: "Direito Penal",
+        topic: "Lei 1.521/1951",
+        content: original,
+        callModel: async ({ timeoutMs }) => {
+          timeoutsReceived.push(timeoutMs);
+          fakeTime += 238_000; // 238s gastos, restam 12s (< 15s)
+          return invalidCoverageResponse;
+        },
+      });
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      Date.now = originalDateNow;
+    }
+    assert(timeoutsReceived.length === 1, "3. menos de 15s restantes não inicia follow-up");
+    assert(isCoverageFailure(thrownError), "3. encerra lançando o erro de cobertura da primeira resposta");
+  }
+
+  // 4. timeout do follow-up → causa terminal registrada como timeout/OpenAI, e não como a antiga falha de cobertura;
+  {
+    const originalDateNow = Date.now;
+    let fakeTime = 1_000_000;
+    Date.now = () => fakeTime;
+    const timeoutsReceived: number[] = [];
+    const traceLines: string[] = [];
+    const customTrace = createLegalReviewTrace({
+      testMode: false,
+      requestedModel: "gpt-5.6",
+      write: (line) => traceLines.push(line),
+    });
+    let terminalError: unknown;
+    try {
+      await auditLessonWithOpenAI({
+        reviewDate: "2026-10-02",
+        lessonId: "day_1_part_0",
+        day: 1,
+        part: 0,
+        subject: "Direito Penal",
+        topic: "Lei 1.521/1951",
+        content: original,
+        trace: customTrace,
+        callModel: async ({ timeoutMs }) => {
+          timeoutsReceived.push(timeoutMs);
+          if (timeoutsReceived.length === 1) {
+            fakeTime += 10_000;
+            return invalidCoverageResponse;
+          }
+          fakeTime += 10_000;
+          throw Object.assign(new Error("Request timed out"), {
+            name: "APIConnectionTimeoutError",
+            code: "timeout",
+          });
+        },
+      });
+    } catch (err) {
+      terminalError = err;
+      customTrace.error(err);
+    } finally {
+      Date.now = originalDateNow;
+    }
+    assert(timeoutsReceived.length === 2, "4. follow-up foi iniciado antes do timeout");
+    assert(!isCoverageFailure(terminalError), "4. causa terminal NÃO é falha de cobertura da primeira resposta");
+    assert(isTimeout(terminalError), "4. causa terminal é erro da OpenAI por timeout");
+    const errorLogLine = traceLines.find((line) => line.includes("LEGAL_REVIEW_ERROR"));
+    assert(Boolean(errorLogLine), "4. há log de erro no trace");
+    const parsedLog = JSON.parse(errorLogLine || "{}") as { error?: { stage?: string } };
+    assert(parsedLog.error?.stage === "openai", "4. etapa terminal registrada no trace é 'openai', não 'validation'");
+
+    // Validar via startLegalReview completo: status failed e nenhuma publicação
+    const repoTimeout = memoryRepo(lesson());
+    let flowError: unknown;
+    try {
+      await startLegalReview(
+        repoTimeout,
+        {
+          audit: (input) =>
+            auditLessonWithOpenAI({
+              ...input,
+              callModel: async () => {
+                if (timeoutsReceived.length === 2) {
+                  timeoutsReceived.push(0);
+                  return invalidCoverageResponse;
+                }
+                throw Object.assign(new Error("Request timed out"), {
+                  name: "APIConnectionTimeoutError",
+                  code: "timeout",
+                });
+              },
+            }),
+        },
+        { day: 1, part: 0, force: true, uid: "ceo", now: 120_000 }
+      );
+    } catch (err) {
+      flowError = err;
+    }
+    assert(flowError instanceof LegalReviewError && flowError.status === 502, "4. startLegalReview falha com status 502");
+    assert(
+      repoTimeout.lessons.get("day_1_part_0")!.content === original,
+      "4. timeout do follow-up mantém a aula publicada inalterada"
+    );
+    assert(
+      [...repoTimeout.reviews.values()].every((r) => r.status === "failed"),
+      "4. revisão permanece como status failed"
+    );
+  }
+
+  // 5. segundo retorno válido → auditoria conclui normalmente;
+  {
+    const originalDateNow = Date.now;
+    let fakeTime = 1_000_000;
+    Date.now = () => fakeTime;
+    const timeoutsReceived: number[] = [];
+    let auditResult: AuditLessonResult | undefined;
+    try {
+      auditResult = await auditLessonWithOpenAI({
+        reviewDate: "2026-10-02",
+        lessonId: "day_1_part_0",
+        day: 1,
+        part: 0,
+        subject: "Direito Penal",
+        topic: "Lei 1.521/1951",
+        content: original,
+        callModel: async ({ timeoutMs }) => {
+          timeoutsReceived.push(timeoutMs);
+          if (timeoutsReceived.length === 1) {
+            fakeTime += 10_000;
+            return invalidCoverageResponse;
+          }
+          fakeTime += 10_000;
+          return validCoverageResponse;
+        },
+      });
+    } finally {
+      Date.now = originalDateNow;
+    }
+    assert(timeoutsReceived.length === 2, "5. follow-up foi executado");
+    assert(Boolean(auditResult), "5. segundo retorno válido conclui a auditoria normalmente");
+    assert(auditResult?.verificationLevel === "VERIFICADO_COM_FONTES", "5. nível verificado com fontes");
+    assert(auditResult?.changes.length === 1, "5. alterações descritas corretamente");
+  }
+
+  // 6. cobertura continua exigindo 100%;
+  {
+    const altered = original.replace("detenção", "prisão");
+    const diag = assessSubstantiveCoverage(original, altered, []);
+    assert(diag.uncovered > 0 && diag.reason === "uncovered_edits", "6. cobertura detecta alteração substantiva não declarada");
+    const result = normalizeLegalAudit(auditBody(altered, []), original, {
+      webSearchExecuted: true,
+      consultedUrls: [PLANALTO],
+    });
+    assert(result === null, "6. cobertura continua exigindo 100% (recusa retorno com trecho descoberto)");
+  }
+
+  // 7. testMode continua sem escrita em homologated_lessons e homologated_parts;
+  {
+    const testRepo = memoryRepo(lesson());
+    const testReview = await startLegalReviewTest(
+      testRepo,
+      {
+        async audit(input) {
+          const audit = normalizeLegalAudit(
+            auditBody(input.content, []),
+            input.content,
+            { webSearchExecuted: true, consultedUrls: [PLANALTO] }
+          );
+          if (!audit) throw new Error("falha");
+          return { ...audit, model: "gpt-5.6", webSearchUsed: true };
+        },
+      },
+      { content: LEGAL_REVIEW_TEST_MATERIAL, uid: "ceo", now: 300_000 }
+    );
+    assert(testReview.testMode === true, "7. revisão de teste com testMode === true");
+    assert(testRepo.lessons.get("day_1_part_0")!.content === original, "7. testMode não escreve em homologated_lessons");
+    assert(testRepo.parts.size === 0, "7. testMode não escreve em homologated_parts");
+    let testApproveBlocked = false;
+    try {
+      await approveLegalReview(testRepo, testReview.id, "uid-ceo", CEO, 301_000);
+    } catch (err) {
+      testApproveBlocked = err instanceof LegalReviewError && err.status === 403;
+    }
+    assert(testApproveBlocked, "7. aprovação de revisão com testMode: true é recusada com 403");
+    assert(testRepo.lessons.get("day_1_part_0")!.content === original, "7. homologated_lessons permanece inalterada após tentativa de approve");
+    assert(testRepo.parts.size === 0, "7. homologated_parts permanece vazia após tentativa de approve");
+  }
 
   if (failed) {
     console.error(`${failed} verificações falharam.`);

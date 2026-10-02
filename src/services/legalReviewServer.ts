@@ -18,7 +18,6 @@ const DEFAULT_OPENAI_REVIEW_MODEL = "gpt-5.6";
 /** A Function tem 600s. Este orçamento deixa validação, Firestore e a resposta HTTP de fora da espera da OpenAI. */
 export const OPENAI_AUDIT_BUDGET_MS = 250_000;
 export const OPENAI_ATTEMPT_TIMEOUT_MS = 200_000;
-export const OPENAI_FOLLOW_UP_TIMEOUT_MS = 90_000;
 /** O laço da auditoria continua capaz de repetir. O SDK não repete por conta própria. */
 export const OPENAI_REVIEW_SDK_MAX_RETRIES = 0;
 const MISSING_KEY =
@@ -79,7 +78,7 @@ function requireKey(): string {
   return apiKey;
 }
 
-function isTimeout(error: unknown): boolean {
+export function isTimeout(error: unknown): boolean {
   const name = error instanceof Error ? error.name : "";
   const message = error instanceof Error ? error.message : String(error || "");
   return name === "AbortError" || name === "APIConnectionTimeoutError" || /timeout|timed out|aborted/i.test(message);
@@ -368,36 +367,37 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   }
 
   let parsed = read(response);
-  const canFollowUp = remaining() > 20_000;
   const lacksSources = !(parsed instanceof Error) && !parsed.webSearchUsed;
   // Uma resposta de cobertura gera no máximo este reparo. Se ele também falhar, não há terceira chamada.
-  if ((parsed instanceof Error || lacksSources) && canFollowUp) {
-    trace.retry(lacksSources ? "missing_sources" : "invalid_audit");
-    userInput = `${userInput}\n\n${reviewFollowUpInstruction(parsed)}`;
-    trace.openaiStart();
-    try {
-      response = input.callModel
-        ? await input.callModel({
-          model: requestedModel,
+  if (parsed instanceof Error || lacksSources) {
+    const followUpTimeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
+    if (followUpTimeoutMs >= 15_000) {
+      trace.retry(lacksSources ? "missing_sources" : "invalid_audit");
+      userInput = `${userInput}\n\n${reviewFollowUpInstruction(parsed)}`;
+      trace.openaiStart();
+      try {
+        response = input.callModel
+          ? await input.callModel({
+            model: requestedModel,
+            instructions,
+            userInput,
+            lessonText: input.content,
+            timeoutMs: followUpTimeoutMs,
+          })
+          : await createResponse(
+          client as OpenAI,
+          requestedModel,
           instructions,
           userInput,
-          lessonText: input.content,
-          timeoutMs: Math.min(OPENAI_FOLLOW_UP_TIMEOUT_MS, remaining()),
-        })
-        : await createResponse(
-        client as OpenAI,
-        requestedModel,
-        instructions,
-        userInput,
-        input.content,
-        Math.min(OPENAI_FOLLOW_UP_TIMEOUT_MS, remaining())
-      );
-      trace.openaiEnd(response.model);
-      parsed = read(response);
-    } catch (error) {
-      trace.noteFailure(error, "openai");
-      if (!isTimeout(error)) throw reviewFailureForOpenAIError(error);
-      trace.clearFailure();
+          input.content,
+          followUpTimeoutMs
+        );
+        trace.openaiEnd(response.model);
+        parsed = read(response);
+      } catch (error) {
+        trace.noteFailure(error, "openai");
+        throw reviewFailureForOpenAIError(error);
+      }
     }
   }
 
