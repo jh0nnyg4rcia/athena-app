@@ -1,0 +1,2336 @@
+import { changeHunks, type ChangeHunk } from "./legalReviewDiff";
+import {
+  institutionsNamedInClaim,
+  isConfiguredOfficialUrl,
+  matchOfficialHost,
+} from "./legalReviewSources";
+import type {
+  ConsultedLegalSource,
+  LegalChangeCategory,
+  LegalChangeType,
+  LegalConfirmation,
+  LegalReviewChange,
+  LegalReviewConfidence,
+  LegalReviewEvidence,
+  LegalReviewOutcome,
+  LegalReviewSource,
+  LegalReviewSummary,
+  LegalSeverity,
+  LegalSourceType,
+  LegalUnverifiedClaim,
+  LegalVerificationLevel,
+} from "./legalReviewTypes";
+import type {
+  DiagnosticHostFamily,
+  DiagnosticSourceFamily,
+  DiagnosticSourceType,
+  DiagnosticStatuteType,
+  EvidenceRefusalDiagnostic,
+  LegalAuditValidationLog,
+  MissingStatuteDiagnostic,
+  RefusalPredicateDiagnostic,
+  ValidationReasonCode,
+} from "./legalReviewDiagnostics";
+
+const CHANGE_TYPES: LegalChangeType[] = [
+  "CORRECAO",
+  "ATUALIZACAO",
+  "ACRESCIMO",
+  "REMOCAO",
+  "PRECISAO",
+  "REESTRUTURACAO",
+];
+const CATEGORIES: LegalChangeCategory[] = [
+  "LEGISLACAO",
+  "JURISPRUDENCIA",
+  "SUMULA",
+  "DOUTRINA",
+  "CONCEITO",
+  "ATUALIZACAO",
+  "OMISSAO_RELEVANTE",
+  "DIDATICA",
+];
+const SEVERITIES: LegalSeverity[] = ["ALTA", "MEDIA", "BAIXA"];
+const OUTCOMES: LegalReviewOutcome[] = ["ALTERACOES_NECESSARIAS", "SEM_ALTERACOES_RELEVANTES"];
+const CONFIDENCE: LegalReviewConfidence[] = ["ALTA", "MEDIA", "BAIXA"];
+const LEVELS: LegalVerificationLevel[] = [
+  "VERIFICADO_COM_FONTES",
+  "VERIFICACAO_PARCIAL",
+  "FALHA_NA_VERIFICACAO",
+];
+const SOURCE_TYPES: LegalSourceType[] = [
+  "LEI",
+  "CONSTITUICAO",
+  "DECRETO",
+  "RESOLUCAO",
+  "SUMULA",
+  "ACORDAO",
+  "REPERCUSSAO_GERAL",
+  "REPETITIVO",
+  "INFORMATIVO",
+  "ATO_NORMATIVO",
+  "OUTRO_OFICIAL",
+];
+const MATERIAL_TYPES = new Set<LegalChangeType>(["CORRECAO", "ATUALIZACAO", "REMOCAO", "ACRESCIMO", "PRECISAO"]);
+const MATERIAL_CATEGORIES = new Set<LegalChangeCategory>([
+  "LEGISLACAO",
+  "JURISPRUDENCIA",
+  "SUMULA",
+  "ATUALIZACAO",
+  "OMISSAO_RELEVANTE",
+  "CONCEITO",
+]);
+
+export function safeHttpsUrl(raw: string): string | null {
+  try {
+    const url = new URL(String(raw || "").trim());
+    if (url.protocol !== "https:") return null;
+    if (!url.hostname || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** @deprecated Use safeHttpsUrl. Mantido para chamadas antigas; só aceita https. */
+export function safeHttpUrl(raw: string): string | null {
+  return safeHttpsUrl(raw);
+}
+
+export function canonicalSourceUrl(raw: string): string | null {
+  let url: URL;
+  try {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return null;
+    url = new URL(trimmed);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (!url.hostname || url.username || url.password) return null;
+  } catch {
+    return null;
+  }
+  url.hash = "";
+
+  let hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (hostname.startsWith("www.")) {
+    hostname = hostname.slice(4);
+  }
+
+  let pathname = url.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    // preserve if malformed
+  }
+  pathname = pathname.toLowerCase().replace(/\/+$/, "") || "/";
+
+  // Normalização de variações do Planalto:
+  // ex.: /ccivil_03/constituicao/constituicaocompilado.htm -> /ccivil_03/constituicao/constituicao.htm
+  // ex.: /ccivil_03/constituicao/constituicao_compilado.htm -> /ccivil_03/constituicao/constituicao.htm
+  // ex.: /ccivil_03/leis/l9474compilado.htm -> /ccivil_03/leis/l9474.htm
+  if (hostname === "planalto.gov.br" || hostname.endsWith(".planalto.gov.br")) {
+    pathname = pathname
+      .replace(/_compilad[oa]\.htm$/i, ".htm")
+      .replace(/compilad[oa]\.htm$/i, ".htm");
+  }
+
+  // Documentos estáticos de legislação/jurisprudência (.htm, .html, .pdf)
+  // não usam query parameters para identificar o ato normativo.
+  // Limpar busca/âncoras geradas por motores de busca.
+  const isStaticDocument = /\.(?:html?|pdf)$/i.test(pathname);
+  let search = url.search;
+  if (isStaticDocument || !search) {
+    search = "";
+  } else {
+    // Se for URL dinâmica, remove parâmetros comuns de rastreamento/sessão
+    const sp = new URLSearchParams(search);
+    const keysToRemove: string[] = [];
+    for (const key of sp.keys()) {
+      if (/^(?:utm_|ref|source|search_context)/i.test(key)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      sp.delete(key);
+    }
+    sp.sort();
+    const qs = sp.toString();
+    search = qs ? `?${qs}` : "";
+  }
+
+  return `https://${hostname}${pathname}${search}`;
+}
+
+export function isOfficialLegalUrl(raw: string): boolean {
+  return isConfiguredOfficialUrl(raw);
+}
+
+export function blockMarkers(text: string): number[] {
+  const found = new Set<number>();
+  const re = /\[BLOCK_(\d+)\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text || ""))) found.add(Number(match[1]));
+  return [...found].sort((a, b) => a - b);
+}
+
+export function markersPreserved(original: string, revised: string): boolean {
+  const before = blockMarkers(original);
+  return before.every((marker) => blockMarkers(revised).includes(marker));
+}
+
+export function containsHtmlMarkup(text: string): boolean {
+  return /<\/?(?:p|div|br|span|html|body|script|style|table|h[1-6]|a)\b/i.test(text || "");
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function clip(value: unknown, max: number): string {
+  return String(value ?? "").replace(/\u0000/g, "").slice(0, max);
+}
+
+/** Contexto literal. Não remove espaços: eles distinguem a ocorrência. */
+function literalContext(value: unknown): string {
+  return String(value ?? "").replace(/\u0000/g, "").slice(0, 2000);
+}
+
+function oneOf<T extends string>(value: unknown, allowed: T[], fallback: T): T {
+  const text = String(value ?? "").trim() as T;
+  return allowed.includes(text) ? text : fallback;
+}
+
+export function consultedUrlSet(urls: string[]): Set<string> {
+  const found = new Set<string>();
+  for (const raw of urls) {
+    const canonical = canonicalSourceUrl(raw);
+    if (canonical) found.add(canonical);
+  }
+  return found;
+}
+
+export function describeConsultedSources(urls: string[]): ConsultedLegalSource[] {
+  const seen = new Set<string>();
+  const out: ConsultedLegalSource[] = [];
+  for (const raw of urls) {
+    const href = safeHttpsUrl(raw);
+    const canonical = canonicalSourceUrl(raw);
+    if (!href || !canonical || seen.has(canonical)) continue;
+    seen.add(canonical);
+    const host = matchOfficialHost(href);
+    out.push({
+      url: href,
+      official: Boolean(host),
+      institution: host?.label || "",
+    });
+  }
+  return out;
+}
+
+function sourceTypeFits(sourceType: LegalSourceType, family: string): boolean {
+  if (sourceType === "REPERCUSSAO_GERAL") return family === "STF";
+  if (sourceType === "REPETITIVO") return family === "STJ";
+  if (sourceType === "LEI" || sourceType === "CONSTITUICAO" || sourceType === "DECRETO") {
+    return family === "LEGISLACAO_FEDERAL" || family === "DIARIO_OFICIAL";
+  }
+  if (sourceType === "SUMULA" || sourceType === "ACORDAO" || sourceType === "INFORMATIVO") {
+    return family !== "LEGISLACAO_FEDERAL" && family !== "DIARIO_OFICIAL";
+  }
+  return true;
+}
+
+const evidenceModelSupport = new WeakMap<LegalReviewEvidence, boolean>();
+const evidenceRawSourceType = new WeakMap<LegalReviewEvidence, string>();
+
+function readEvidence(value: unknown, consulted: Set<string>): LegalReviewEvidence | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const url = safeHttpsUrl(clip(record.url, 500));
+  if (!url) return null;
+  const host = matchOfficialHost(url);
+  const canonical = canonicalSourceUrl(url);
+  const rawSourceType = typeof record.sourceType === "string" ? record.sourceType.trim().slice(0, 64) : "";
+  const sourceType = oneOf(record.sourceType, SOURCE_TYPES, "OUTRO_OFICIAL");
+  const wasConsulted = Boolean(canonical && consulted.has(canonical));
+  const official = Boolean(host);
+  const modelSupports = record.supportsChange === true;
+  const supportsChange = Boolean(
+    modelSupports && official && wasConsulted && host && sourceTypeFits(sourceType, host.family)
+  );
+  const evidence: LegalReviewEvidence = {
+    institution: host?.label || clip(record.institution, 160) || "Fonte",
+    title: clip(record.title, 300) || host?.label || "Documento",
+    url,
+    official,
+    consulted: wasConsulted,
+    supportsChange,
+    supportExplanation: clip(record.supportExplanation, 2000),
+    sourceType,
+  };
+  evidenceModelSupport.set(evidence, modelSupports);
+  evidenceRawSourceType.set(evidence, rawSourceType);
+  return evidence;
+}
+
+function readSource(value: unknown): LegalReviewSource | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const url = safeHttpsUrl(clip(record.url, 500));
+  if (!url) return null;
+  const host = matchOfficialHost(url);
+  return {
+    title: clip(record.title, 300) || host?.label || "Fonte",
+    url,
+    official: Boolean(host),
+    institution: host?.label || clip(record.institution, 160) || "Fonte",
+  };
+}
+
+export function isMaterialLegalChange(change: Pick<LegalReviewChange, "type" | "category">): boolean {
+  return MATERIAL_TYPES.has(change.type) && MATERIAL_CATEGORIES.has(change.category);
+}
+
+const GENERIC_NORMATIVE_PATTERNS: Array<{
+  type: "organ" | "deadline" | "quorum";
+  pattern: RegExp;
+}> = [
+  {
+    type: "organ",
+    pattern: /\b(?:autoridade(?:\s+judici[aá]ria)?|[oó]rg[aã]o(?:\s+(?:p[uú]blico|judici[aá]rio))?|tribunal|ju[ií]zo|foro|inst[aâ]ncia)\s+competente\b/i,
+  },
+  {
+    type: "deadline",
+    pattern: /\b(?:no\s+)?prazo\s+(?:legal|regimental|previsto\s+em\s+lei|da\s+lei)\b/i,
+  },
+  {
+    type: "quorum",
+    pattern: /\b(?:maioria\s+exigida|qu[oó]rum\s+(?:legal|exigido|qualificado))\b/i,
+  },
+];
+
+export const SPECIFIC_ORGAN_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
+  { id: "STF", pattern: /\bSTF\b|Supremo Tribunal Federal/i },
+  { id: "STJ", pattern: /\bSTJ\b|Superior Tribunal de Justi[cç]a/i },
+  { id: "CNJ", pattern: /\bCNJ\b|Conselho Nacional de Justi[cç]a/i },
+  { id: "TSE", pattern: /\bTSE\b|Tribunal Superior Eleitoral/i },
+  { id: "TST", pattern: /\bTST\b|Tribunal Superior do Trabalho/i },
+  { id: "STM", pattern: /\bSTM\b|Superior Tribunal Militar/i },
+  { id: "TRF", pattern: /\bTRF(?:-?\d)?\b|\bTribuna(?:l|is) Regiona(?:l|is) Federa(?:l|is)\b/i },
+  { id: "TRT", pattern: /\bTRT(?:-?\d{1,2})?\b|\bTribuna(?:l|is) Regiona(?:l|is) do Trabalho\b/i },
+  { id: "TJ", pattern: /\bTJ(?:-[A-Z]{2}|[A-Z]{2,3})\b|\bTribuna(?:l|is) de Justi[cç]a\b/i },
+  { id: "MP", pattern: /\bMinist[eé]rio P[uú]blico\b|\bPGR\b|\bPGJ\b|\bProcurador(?:a)?-Geral\b/i },
+  { id: "DP", pattern: /\bDefensoria P[uú]blica\b|\bDefensor(?:a)?\s+P[uú]blico\b/i },
+  { id: "CONGRESSO", pattern: /\bCongresso Nacional\b|\bSenado Federal\b|\bC[aâ]mara dos Deputados\b/i },
+  { id: "TCU", pattern: /\bTCU\b|\bTribuna(?:l|is) de Contas\b/i },
+];
+
+export const SPECIFIC_DEADLINE_PATTERNS: RegExp[] = [
+  /\b\d+\s+(?:dias|meses|anos|horas)\b/i,
+  /\b(?:cinco|dez|quinze|vinte|trinta|quarenta\s+e\s+cinco|sessenta|noventa|cento\s+e\s+vinte)\s+dias\b/i,
+];
+
+export const SPECIFIC_QUORUM_PATTERNS: RegExp[] = [
+  /\bmaioria\s+(?:absoluta|simples)\b/i,
+  /\b(?:dois\s+ter[cç]os|2\/3|tr[eê]s\s+quintos|3\/5|unanimidade)\b/i,
+];
+
+export const SPECIFIC_RECOURSE_PATTERNS: RegExp[] = [
+  /\brecurso\s+extraordin[aá]rio\b/i,
+  /\brecurso\s+especial\b/i,
+  /\bagravo\s+(?:de\s+instrumento|interno|regimental)\b/i,
+  /\bapela[cç][aã]o\b/i,
+  /\bembargos\s+de\s+declara[cç][aã]o\b/i,
+  /\brecurso\s+ordin[aá]rio(?:\s+constitucional)?\b/i,
+];
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeDeadlineText(text: string): string {
+  let normalized = text.toLowerCase();
+  // 1. Remove parênteses com extenso após dígitos: ex.: "2 (dois) anos" -> "2 anos", "1 (um) ano" -> "1 ano", "15 (quinze) dias" -> "15 dias"
+  normalized = normalized.replace(/\b(\d+)\s*\([a-zçãéíóú\s]+\)\s*(dias?|meses|m[eê]s|anos?|horas?)\b/gi, "$1 $2");
+  // 2. Padronização de números por extenso antes de unidades temporais ou isolados
+  normalized = normalized
+    .replace(/\b(?:um|uma)\b/g, "1")
+    .replace(/\b(?:dois|duas)\b/g, "2")
+    .replace(/\btr[eê]s\b/g, "3")
+    .replace(/\bquatro\b/g, "4")
+    .replace(/\bcinco\b/g, "5")
+    .replace(/\bseis\b/g, "6")
+    .replace(/\bsete\b/g, "7")
+    .replace(/\boito\b/g, "8")
+    .replace(/\bnove\b/g, "9")
+    .replace(/\bdez\b/g, "10")
+    .replace(/\bonze\b/g, "11")
+    .replace(/\bdoze\b/g, "12")
+    .replace(/\bquinze\b/g, "15")
+    .replace(/\bvinte\b/g, "20")
+    .replace(/\btrinta\b/g, "30")
+    .replace(/\bquarenta\s+e\s+cinco\b/g, "45")
+    .replace(/\bsessenta\b/g, "60")
+    .replace(/\bnoventa\b/g, "90")
+    .replace(/\bcento\s+e\s+vinte\b/g, "120");
+  // 3. Normalização de singular/plural nas unidades temporais para comparação uniforme
+  normalized = normalized
+    .replace(/\bano\b/g, "anos")
+    .replace(/\bdia\b/g, "dias")
+    .replace(/\bm[eê]s\b/g, "meses")
+    .replace(/\bhora\b/g, "horas");
+  return normalized;
+}
+
+
+function normalizeQuorumText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\bdois\s+ter[cç]os\b/g, "2/3")
+    .replace(/\btr[eê]s\s+quintos\b/g, "3/5");
+}
+
+export function extractSpecificStatutes(text: string): Array<{ type: string; number: string; raw: string }> {
+  const statutes: Array<{ type: string; number: string; raw: string }> = [];
+  const seen = new Set<string>();
+  const regex = /\b(Lei(?:\s+Complementar|\s+Federal)?|Decreto(?:-Lei)?|Medida\s+Provis[oó]ria|MP|LC)\s*(?:n[º°.]\s*)?(\d+(?:\.\d+)?)(?:\/(\d{2,4}))?\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text || ""))) {
+    const rawNumber = match[2].replace(/\./g, "");
+    if (!seen.has(rawNumber)) {
+      seen.add(rawNumber);
+      statutes.push({ type: match[1], number: rawNumber, raw: match[0] });
+    }
+  }
+  return statutes;
+}
+
+export function newlyIntroducedStatutes(
+  original: string,
+  revised: string
+): Array<{ type: string; number: string; raw: string }> {
+  const origStatutes = new Set(extractSpecificStatutes(original).map((s) => s.number));
+  return extractSpecificStatutes(revised).filter((s) => !origStatutes.has(s.number));
+}
+
+/** O número precisa estar isolado de outros dígitos. `l10522` conta; `l15358` não cobre `1535`. */
+export function urlContainsStatuteNumber(url: string, statuteNumber: string): boolean {
+  if (!/^\d{1,12}$/.test(statuteNumber)) return false;
+  const compact = String(url || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  return new RegExp(`(?:^|[^0-9])${statuteNumber}(?:[^0-9]|$)`).test(compact);
+}
+
+export function evidenceSupportsStatute(evidence: LegalReviewEvidence, statuteNumber: string): boolean {
+  if (!evidence.official || !evidence.consulted || !evidence.supportsChange) return false;
+  if (urlContainsStatuteNumber(evidence.url, statuteNumber)) return true;
+  const cleanTitle = (evidence.title || "").replace(/\./g, "");
+  if (new RegExp(`\\b${statuteNumber}\\b`).test(cleanTitle)) return true;
+  const cleanExplanation = (evidence.supportExplanation || "").replace(/\./g, "");
+  if (new RegExp(`\\b${statuteNumber}\\b`).test(cleanExplanation)) return true;
+  return false;
+}
+
+export function changeContainsUngroundedInvention(
+  change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt"> & {
+    evidence?: LegalReviewEvidence[];
+  }
+): boolean {
+  const revised = String(change.revisedExcerpt || "");
+  if (!revised.trim()) return false;
+  const original = String(change.originalExcerpt || "");
+  const explanationsAndTitles = (change.evidence || [])
+    .map((e) => `${e.title || ""} ${e.supportExplanation || ""}`)
+    .join("\n");
+
+  // 1. Prazos específicos inventados
+  const normRevisedDeadlines = normalizeDeadlineText(revised);
+  const normOriginalDeadlines = normalizeDeadlineText(original);
+  const normEvidenceDeadlines = normalizeDeadlineText(explanationsAndTitles);
+
+  for (const pattern of SPECIFIC_DEADLINE_PATTERNS) {
+    const match = pattern.exec(normRevisedDeadlines);
+    if (match) {
+      const phrase = match[0];
+      const inOriginal = new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(normOriginalDeadlines);
+      const inEvidence = new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(normEvidenceDeadlines);
+      if (!inOriginal && !inEvidence) {
+        return true;
+      }
+    }
+  }
+
+  // 2. Quóruns específicos inventados
+  const normRevisedQuorum = normalizeQuorumText(revised);
+  const normOriginalQuorum = normalizeQuorumText(original);
+  const normEvidenceQuorum = normalizeQuorumText(explanationsAndTitles);
+
+  for (const pattern of SPECIFIC_QUORUM_PATTERNS) {
+    const match = pattern.exec(normRevisedQuorum);
+    if (match) {
+      const phrase = match[0];
+      const inOriginal = new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(normOriginalQuorum);
+      const inEvidence = new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(normEvidenceQuorum);
+      if (!inOriginal && !inEvidence) {
+        return true;
+      }
+    }
+  }
+
+  // 3. Recursos judiciais específicos inventados
+  for (const pattern of SPECIFIC_RECOURSE_PATTERNS) {
+    if (pattern.test(revised)) {
+      const inOriginal = pattern.test(original);
+      const inEvidence = pattern.test(explanationsAndTitles);
+      if (!inOriginal && !inEvidence) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+export function organAttributedInExplanation(explanation: string, organPattern: RegExp): boolean {
+  if (!explanation) return false;
+  const organSource = organPattern.source;
+  const organFlags = organPattern.flags.includes("i") ? "i" : "";
+
+  // 1. Competência ou atribuição normativa/jurisdicional dirigida ao órgão:
+  // ex.: "compete ao STF", "compete privativamente ao STF", "cabe ao STF", "incumbe ao STF", "atribui ao STF", "pertence ao STF", "reserva-se ao STF", "outorga-se ao STF"
+  const directedVerbs = new RegExp(
+    `(?:\\b(?:compete|competir[aá]|cabe|caber[aá]|incumbe|incumbir[aá]|atribui(?:r(?:-[aá])?)?|pertence|reserva-se|outorga-se|defere-se)(?:\\s+(?:privativamente|exclusivamente|originariamente|especificamente))?)\\s+(?:(?:[eé]|ser[aá])\\s+)?(?:ao?|pelo?|do?|da|perante\\s+o|a\\s+cargo\\s+do?|sob\\s+a\\s+responsabilidade\\s+do?)\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+    organFlags
+  );
+  if (directedVerbs.test(explanation)) return true;
+
+  // 2. Substantivos de competência institucional vinculados ao órgão:
+  // ex.: "competência do STF", "competência privativa do STF", "atribuição do STF", "jurisdição do STF", "alçada do STF", "prerrogativa do STF", "encargo do STF", "função institucional do STF"
+  const competenceNouns = new RegExp(
+    `(?:\\b(?:compet[eê]ncia|atribui[cç][aã]o|jurisdi[cç][aã]o|al[cç]ada|prerrogativa|encargo|fun[cç][aã]o|papel|miss[aã]o\\s+institucional)(?:\\s+(?:origin[aá]ria|exclusiva|privativa|constitucional|recursal|institucional))?)\\s+(?:(?:[eé]|ser[aá])\\s+)?(?:ao?|pelo?|do?|da|perante\\s+o|pertencente\\s+ao?|delegad[oa]\\s+ao?)\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+    organFlags
+  );
+  if (competenceNouns.test(explanation)) return true;
+
+  // 3. Atos jurisdicionais, decisórios, autorizativos ou de controle conferidos ao órgão:
+  // ex.: "exige pronunciamento prévio do STF", "julgamento pelo STF", "manifestação do STF", "decisão do STF", "apreciação do STF", "análise pelo STF", "exame pelo STF", "deliberação do STF", "autorização da Câmara", "homologação do STF", "chancela do STF", "crivo do STF"
+  const jurisdictionalActs = new RegExp(
+    `(?:\\b(?:pronunciamento|manifesta[cç][aã]o|decis[aã]o|julgamento|aprecia[cç][aã]o|an[aá]lise|exame|delibera[cç][aã]o|autoriza[cç][aã]o|homologa[cç][aã]o|chancela|crivo|valida[cç][aã]o|ju[ií]zo\\s+de\\s+deliba[cç][aã]o)(?:\\s+(?:pr[eé]vi[oa]|origin[aá]ri[oa]|definitiv[oa]|vinculante))?)\\s+(?:(?:[eé]|ser[aá])\\s+)?(?:ao?|pelo?|pela|do?|da|perante\\s+o|a\\s+cargo\\s+do?|por\\s+parte\\s+do?|a\\s+ser\\s+proferid[oa]\\s+pelo?)\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+    organFlags
+  );
+  if (jurisdictionalActs.test(explanation)) return true;
+
+  // 4. Órgão como sujeito ativo de ato normativo, decisório ou jurisdicional:
+  // ex.: "STF é competente", "Senado Federal processa e julga", "STF julga a extradição", "STF aprecia a legalidade", "Câmara dos Deputados autoriza"
+  const organAsSubject = new RegExp(
+    `(?:${organSource})\\s+(?:(?:[eé]\\s+competente|possui\\s+(?:a\\s+)?compet[eê]ncia|tem\\s+(?:a\\s+)?compet[eê]ncia|det[eé]m\\s+(?:a\\s+)?compet[eê]ncia|processa\\s+e\\s+julga|julga|aprecia|decide|delibera|autoriza|homologa|chancela|exige\\s+manifesta[cç][aã]o)\\b)`,
+    organFlags
+  );
+  if (organAsSubject.test(explanation)) return true;
+
+  // 5. Submissão, via ou instância decisória perante o órgão:
+  // ex.: "submissão ao STF", "tramitação perante o STF", "pedido perante o STF", "processamento perante o Senado Federal"
+  const venueSubmission = new RegExp(
+    `(?:\\b(?:submiss[aã]o|tramita[cç][aã]o|processamento|pedido|requerimento|recurso)(?:\\s+(?:pr[eé]vi[oa]|diret[oa]))?)\\s+(?:ao?|perante\\s+o|junto\\s+ao?)\\s*(?:(?:ilustre|egr[eé]gio)\\s+)?(?:${organSource})\\b`,
+    organFlags
+  );
+  if (venueSubmission.test(explanation)) return true;
+
+  // 6. Definição expressa do órgão competente:
+  // ex.: "órgão competente: STF", "autoridade judiciária competente é o STF", "tribunal competente: Supremo Tribunal Federal"
+  const organDefined = new RegExp(
+    `(?:(?:[oó]rg[aã]o(?:\\s+jurisdicional)?|autoridade(?:\\s+judici[aá]ria)?|tribunal|inst[aâ]ncia)\\s+competente(?:\\s+[eé]|\\s*:\\s*|\\s+ser[aá])\\s+(?:o\\s+|a\\s+)?(?:${organSource})\\b)`,
+    organFlags
+  );
+  if (organDefined.test(explanation)) return true;
+
+  return false;
+}
+
+function evidenceSupportsFamily(evidence: LegalReviewEvidence, family: string): boolean {
+  if (!evidence.official || !evidence.consulted || !evidence.supportsChange) return false;
+  const host = matchOfficialHost(evidence.url);
+  if (!host) return false;
+  // 1. Correspondência institucional direta (ex.: stf.jus.br -> STF)
+  if (host.family === family && sourceTypeFits(evidence.sourceType, family)) {
+    return true;
+  }
+  // 2. Cobertura composta: atos normativos oficiais (LEGISLACAO_FEDERAL ou DIARIO_OFICIAL)
+  // que atribuem expressamente competência, função ou encargo a um órgão específico (ex.: STF, STJ).
+  // A fonte legislativa só sustenta a especificidade do órgão se seu texto/explicação
+  // expressamente atribuir essa competência ao órgão (evitando que fontes genéricas sustentem
+  // órgãos não previstos no diploma).
+  if (host.family === "LEGISLACAO_FEDERAL" || host.family === "DIARIO_OFICIAL") {
+    const organItem = SPECIFIC_ORGAN_PATTERNS.find((item) => item.id === family);
+    if (organItem) {
+      // A Constituição da República Federativa do Brasil é a fonte primária originária
+      // das competências e prerrogativas dos órgãos constitucionais federais (STF, STJ, CNJ, TSE, TST, STM, TRFs, etc.).
+      const isConstitution =
+        evidence.sourceType === "CONSTITUICAO" ||
+        /\bconstituic(?:ao|ão)\b/i.test(evidence.title) ||
+        /\/constituicao(?:\.htm|_compilad[oa]\.htm)/i.test(evidence.url);
+      const isFederalConstitutionalOrgan =
+        family === "STF" ||
+        family === "STJ" ||
+        family === "CNJ" ||
+        family === "TSE" ||
+        family === "TST" ||
+        family === "STM" ||
+        family === "CONGRESSO" ||
+        family === "TCU" ||
+        family.startsWith("TRF") ||
+        family.startsWith("TRT");
+
+      if (isConstitution && isFederalConstitutionalOrgan) {
+        return true;
+      }
+
+      const attributed =
+        organAttributedInExplanation(evidence.supportExplanation, organItem.pattern) ||
+        organAttributedInExplanation(evidence.title, organItem.pattern);
+      if (attributed) return true;
+    }
+  }
+
+  return false;
+}
+
+function evidenceConfirmsMaterialClaim(evidence: LegalReviewEvidence): boolean {
+  if (!evidence.official || !evidence.consulted || evidence.supportsChange !== true) return false;
+  const url = safeHttpsUrl(evidence.url);
+  if (!url) return false;
+  const host = matchOfficialHost(url);
+  return Boolean(host && sourceTypeFits(evidence.sourceType, host.family));
+}
+
+export function changeLacksNormativeSpecificity(
+  change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt" | "reason" | "category"> & {
+    evidence?: LegalReviewEvidence[];
+  }
+): boolean {
+  const revised = String(change.revisedExcerpt || "");
+  if (!revised.trim()) return false;
+
+  const original = String(change.originalExcerpt || "");
+  const explanations = (change.evidence || []).map((e) => String(e.supportExplanation || "")).join("\n");
+
+  for (const item of GENERIC_NORMATIVE_PATTERNS) {
+    if (!item.pattern.test(revised)) continue;
+
+    if (item.type === "organ") {
+      for (const organ of SPECIFIC_ORGAN_PATTERNS) {
+        const inOriginal = organ.pattern.test(original);
+        const affirmedInEvidence = organAttributedInExplanation(explanations, organ.pattern);
+
+        if ((inOriginal || affirmedInEvidence) && !organ.pattern.test(revised)) {
+          return true;
+        }
+      }
+    }
+
+    if (item.type === "deadline") {
+      for (const deadline of SPECIFIC_DEADLINE_PATTERNS) {
+        const inOriginal = deadline.test(original);
+        const inEvidence = deadline.test(explanations);
+        if ((inOriginal || inEvidence) && !deadline.test(revised)) {
+          return true;
+        }
+      }
+    }
+
+    if (item.type === "quorum") {
+      for (const quorum of SPECIFIC_QUORUM_PATTERNS) {
+        const inOriginal = quorum.test(original);
+        const inEvidence = quorum.test(explanations);
+        if ((inOriginal || inEvidence) && !quorum.test(revised)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function legalRefusalCodes(
+  change: Omit<LegalReviewChange, "verified" | "confirmation">,
+  modelConfirmation: LegalConfirmation
+): ValidationReasonCode[] {
+  if (modelConfirmation === "NAO_CONFIRMADO") return ["MODEL_UNCONFIRMED"];
+  if (changeLacksNormativeSpecificity(change)) return ["SOURCE_SPECIFICITY_FAILED"];
+  if (changeContainsUngroundedInvention(change)) return ["NORMATIVE_INVENTION"];
+  const introducedStatutes = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
+  if (introducedStatutes.length > 0) {
+    const covered = introducedStatutes.every((statute) =>
+      change.evidence.some((item) => evidenceSupportsStatute(item, statute.number))
+    );
+    if (!covered) return ["DIPLOMA_EVIDENCE_FAILED"];
+  }
+  const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
+  const required = institutionsNamedInClaim(claim, change.category);
+  if (required.length) {
+    const covered = required.every((family) => change.evidence.some((item) => evidenceSupportsFamily(item, family)));
+    return covered ? [] : ["COURT_FAMILY_FAILED"];
+  }
+  if (!isMaterialLegalChange(change)) return [];
+  return change.evidence.some(evidenceConfirmsMaterialClaim) ? [] : ["EVIDENCE_INSUFFICIENT"];
+}
+
+function confirmChange(
+  change: Omit<LegalReviewChange, "verified" | "confirmation">,
+  modelConfirmation: LegalConfirmation
+): LegalConfirmation {
+  if (modelConfirmation === "NAO_CONFIRMADO") return "NAO_CONFIRMADO";
+  if (changeLacksNormativeSpecificity(change)) return "NAO_CONFIRMADO";
+  if (changeContainsUngroundedInvention(change)) return "NAO_CONFIRMADO";
+
+  // Verificação de diplomas normativos expressamente introduzidos na revisão:
+  // Se o trecho revisado introduzir diplomas normativos específicos não presentes no original,
+  // cada diploma introduzido deve ser amparado por ao menos uma evidência oficial consultada.
+  const introducedStatutes = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
+  if (introducedStatutes.length > 0) {
+    const statutesCovered = introducedStatutes.every((statute) =>
+      change.evidence.some((item) => evidenceSupportsStatute(item, statute.number))
+    );
+    if (!statutesCovered) return "NAO_CONFIRMADO";
+  }
+
+  const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
+  const required = institutionsNamedInClaim(claim, change.category);
+  if (required.length) {
+    const covered = required.every((family) => change.evidence.some((item) => evidenceSupportsFamily(item, family)));
+    return covered ? "CONFIRMADO" : "NAO_CONFIRMADO";
+  }
+  if (!isMaterialLegalChange(change)) return modelConfirmation;
+  return change.evidence.some(evidenceConfirmsMaterialClaim) ? "CONFIRMADO" : "NAO_CONFIRMADO";
+}
+
+function readChange(value: unknown, index: number, consulted: Set<string>): LegalReviewChange | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const type = oneOf(record.type, CHANGE_TYPES, "CORRECAO");
+  const originalExcerpt = clip(record.originalExcerpt, 4000);
+  const revisedExcerpt = clip(record.revisedExcerpt, 4000);
+  if (type === "ACRESCIMO" && !revisedExcerpt.trim()) return null;
+  if (type === "REMOCAO" && !originalExcerpt.trim()) return null;
+  if (type !== "ACRESCIMO" && type !== "REMOCAO" && originalExcerpt.trim() === revisedExcerpt.trim()) {
+    return null;
+  }
+  const sources = Array.isArray(record.sources)
+    ? record.sources.map(readSource).filter((item): item is LegalReviewSource => Boolean(item)).slice(0, 6)
+    : [];
+  const evidence = Array.isArray(record.evidence)
+    ? record.evidence.map((item) => readEvidence(item, consulted)).filter((item): item is LegalReviewEvidence => Boolean(item)).slice(0, 6)
+    : [];
+  const category = oneOf(record.category, CATEGORIES, "CONCEITO");
+  const draft = {
+    id: clip(record.id, 40) || `change-${index + 1}`,
+    type,
+    severity: oneOf(record.severity, SEVERITIES, "MEDIA"),
+    category,
+    originalExcerpt,
+    revisedExcerpt,
+    reason: clip(record.reason, 4000),
+    sources,
+    evidence,
+  };
+  const modelConfirmation: LegalConfirmation = record.confirmation === "NAO_CONFIRMADO" || record.verified === false
+    ? "NAO_CONFIRMADO"
+    : "CONFIRMADO";
+  const confirmation = confirmChange(draft, modelConfirmation);
+  return {
+    ...draft,
+    confirmation,
+    verified: confirmation === "CONFIRMADO",
+  };
+}
+
+export function summarizeChanges(changes: LegalReviewChange[]): LegalReviewSummary {
+  const count = (type: LegalChangeType) => changes.filter((change) => change.type === type).length;
+  return {
+    totalChanges: changes.length,
+    corrections: count("CORRECAO"),
+    additions: count("ACRESCIMO"),
+    removals: count("REMOCAO"),
+    updates: count("ATUALIZACAO"),
+    precisions: count("PRECISAO"),
+    restructures: count("REESTRUTURACAO"),
+  };
+}
+
+/**
+ * Máximo de changes conferíveis. Acima disso a auditoria é recusada por inteiro.
+ * Não há descarte silencioso: um item além do teto poderia ser justamente a alteração jurídica.
+ * O schema não limita o array; o teto fica aqui para o erro ser explícito.
+ */
+export const MAX_DECLARED_CHANGES = 40;
+
+const TOKEN_LCS_CELL_LIMIT = 250_000;
+const STRUCTURAL_LINE = /^(#{1,6}\s+|(?:[-*+]|\d+[.)])\s+)/;
+/**
+ * § é token próprio. Vírgula, ponto e demais pontuação comum continuam fora.
+ * Número com ponto interno (9.605, 999.999) e ordinal (5º) permanecem um token.
+ */
+const TOKEN_PATTERN = /§|[\p{L}\p{N}]+(?:[.-][\p{L}\p{N}]+)*[ºª]?/gu;
+
+export interface CoverageHunkDiagnostic {
+  kind: ChangeHunk["kind"];
+  chars: number;
+}
+
+export const AUDIT_FAILURE_CODES = [
+  "UNDECLARED_ADDITION",
+  "UNDECLARED_REMOVAL",
+  "INCOMPLETE_ADDITION_EXCERPT",
+  "INCOMPLETE_REMOVAL_EXCERPT",
+  "STRUCTURAL_CHANGE_UNDECLARED",
+  "CHANGE_WRONG_HUNK",
+  "CHANGE_WRONG_SIDE",
+  "TOO_MANY_CHANGES",
+  "MARKER_MISMATCH",
+  "INVALID_SCHEMA",
+  "HTML_REJECTED",
+  "INVALID_LENGTH",
+  "COVERAGE_FAILURE",
+  "EMPTY_SOURCE",
+] as const;
+
+export type AuditFailureCode = (typeof AUDIT_FAILURE_CODES)[number];
+
+export interface CoverageDiagnostics {
+  reason: "ok" | "uncovered_edits" | "too_many_changes" | "invalid_audit";
+  hunks: number;
+  covered: number;
+  uncovered: number;
+  add: number;
+  remove: number;
+  replace: number;
+  changeCount: number;
+  limit: number;
+  uncoveredChars: number[];
+  uncoveredKinds: Array<ChangeHunk["kind"]>;
+  totalHunks: number;
+  coveredHunks: number;
+  uncoveredHunks: number;
+  totalChanges: number;
+  usedChanges: number;
+  unusedChanges: number;
+  uncoveredRemovedTokenCount: number;
+  uncoveredAddedTokenCount: number;
+  uncoveredStructuralCount: number;
+  maxUncoveredRemovedTokens: number;
+  maxUncoveredAddedTokens: number;
+  failureReasonCode?: AuditFailureCode;
+  auditFailure?: AuditFailureCode;
+}
+
+export class LegalReviewValidationError extends Error {
+  readonly code: "too_many_changes" | "uncovered_edits" | "invalid_audit";
+  readonly auditFailure: AuditFailureCode;
+  readonly diagnostics: CoverageDiagnostics;
+  validationLog?: LegalAuditValidationLog;
+
+  constructor(
+    message: string,
+    code: "too_many_changes" | "uncovered_edits" | "invalid_audit",
+    diagnostics: CoverageDiagnostics
+  ) {
+    super(message);
+    this.name = "LegalReviewValidationError";
+    this.code = code;
+    this.diagnostics = diagnostics;
+    this.auditFailure = diagnostics.auditFailure || "INVALID_SCHEMA";
+  }
+}
+
+/** Normaliza só o que não altera palavra, número, data, negação ou marcador estrutural. */
+export function normalizeCoverageComparable(value: string): string {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/[ \t\u00a0]+/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+function stripDecorativeMarkdown(line: string): string {
+  const heading = line.match(/^(#{1,6}\s+)([\s\S]*)$/);
+  const list = line.match(/^((?:[-*+]|\d+[.)])\s+)([\s\S]*)$/);
+  const prefix = heading?.[1] || list?.[1] || "";
+  let body = heading?.[2] ?? list?.[2] ?? line;
+  body = body.replace(/\*\*([^*]+)\*\*/g, "$1");
+  body = body.replace(/__([^_]+)__/g, "$1");
+  body = body.replace(/`([^`]+)`/g, "$1");
+  body = body.replace(/(^|\s)\*(\S(?:.*?\S)?)\*(?=\s|$)/g, "$1$2");
+  body = body.replace(/(^|\s)_(\S(?:.*?\S)?)_(?=\s|$)/g, "$1$2");
+  return `${prefix}${body}`.replace(/[ \t]+/g, " ").trim();
+}
+
+/** Assinatura editorial. Heading e lista permanecem; ênfase pareada sai. */
+export function editorialSignature(value: string): string {
+  return normalizeCoverageComparable(value)
+    .split("\n")
+    .map(stripDecorativeMarkdown)
+    .join("\n")
+    .toLocaleLowerCase("pt-BR");
+}
+
+export function coverageTokens(value: string): string[] {
+  return editorialSignature(value).match(TOKEN_PATTERN) || [];
+}
+
+/** Cada token removido ou acrescentado precisa aparecer no excerpt daquele lado. */
+function requiredTokenMatches(deltaLength: number): number {
+  return deltaLength;
+}
+
+function orderedMatchCount(delta: string[], excerpt: string[]): number {
+  let matched = 0;
+  for (const token of excerpt) {
+    if (matched < delta.length && token === delta[matched]) matched += 1;
+  }
+  return matched;
+}
+
+function coversTokens(delta: string[], excerpt: string): boolean {
+  if (!delta.length) return true;
+  return orderedMatchCount(delta, coverageTokens(excerpt)) >= requiredTokenMatches(delta.length);
+}
+
+function coversStructural(side: string, excerpt: string): boolean {
+  const hunkSignature = editorialSignature(side);
+  if (!hunkSignature) return true;
+  return editorialSignature(excerpt).includes(hunkSignature);
+}
+
+export interface TokenDeltaResult {
+  removed: string[];
+  added: string[];
+  removedMap: Map<number, number>;
+  addedMap: Map<number, number>;
+  commonCount: number;
+}
+
+export function tokenDeltaWithPositions(before: string[], after: string[]): TokenDeltaResult {
+  if (!before.length && !after.length) {
+    return { removed: [], added: [], removedMap: new Map(), addedMap: new Map(), commonCount: 0 };
+  }
+  if (before.length * after.length > TOKEN_LCS_CELL_LIMIT) {
+    const removedMap = new Map<number, number>();
+    for (let i = 0; i < before.length; i += 1) removedMap.set(i, i);
+    const addedMap = new Map<number, number>();
+    for (let j = 0; j < after.length; j += 1) addedMap.set(j, j);
+    return { removed: before, added: after, removedMap, addedMap, commonCount: 0 };
+  }
+  const n = before.length;
+  const m = after.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const row = dp[i];
+    const next = dp[i + 1];
+    for (let j = m - 1; j >= 0; j -= 1) {
+      row[j] = before[i] === after[j] ? next[j + 1] + 1 : Math.max(next[j], row[j + 1]);
+    }
+  }
+  const removed: string[] = [];
+  const added: string[] = [];
+  const removedMap = new Map<number, number>();
+  const addedMap = new Map<number, number>();
+  let commonCount = 0;
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (before[i] === after[j]) {
+      commonCount += 1;
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      removedMap.set(i, removed.length);
+      removed.push(before[i]);
+      i += 1;
+    } else {
+      addedMap.set(j, added.length);
+      added.push(after[j]);
+      j += 1;
+    }
+  }
+  while (i < n) {
+    removedMap.set(i, removed.length);
+    removed.push(before[i]);
+    i += 1;
+  }
+  while (j < m) {
+    addedMap.set(j, added.length);
+    added.push(after[j]);
+    j += 1;
+  }
+  return { removed, added, removedMap, addedMap, commonCount };
+}
+
+function tokenDelta(before: string[], after: string[]): { removed: string[]; added: string[] } {
+  const result = tokenDeltaWithPositions(before, after);
+  return { removed: result.removed, added: result.added };
+}
+
+function grounded(excerpt: string, side: string): boolean {
+  const excerptTokens = coverageTokens(excerpt);
+  const sideTokens = coverageTokens(side);
+  if (!excerptTokens.length || !sideTokens.length) return false;
+  return orderedMatchCount(excerptTokens, sideTokens) === excerptTokens.length;
+}
+
+function findExcerptSideIndices(excerptTokens: string[], sideTokens: string[]): number[] | null {
+  if (!excerptTokens.length || !sideTokens.length) return null;
+  for (let start = 0; start <= sideTokens.length - excerptTokens.length; start += 1) {
+    let matches = true;
+    for (let k = 0; k < excerptTokens.length; k += 1) {
+      if (sideTokens[start + k] !== excerptTokens[k]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return Array.from({ length: excerptTokens.length }, (_, k) => start + k);
+    }
+  }
+
+  const matchedIndices: number[] = [];
+  let eIdx = 0;
+  for (let sIdx = 0; sIdx < sideTokens.length && eIdx < excerptTokens.length; sIdx += 1) {
+    if (sideTokens[sIdx] === excerptTokens[eIdx]) {
+      matchedIndices.push(sIdx);
+      eIdx += 1;
+    }
+  }
+  if (eIdx === excerptTokens.length) {
+    return matchedIndices;
+  }
+  return null;
+}
+
+function coveredDeltaPositionsForChange(
+  hunk: ChangeHunk,
+  change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">,
+  deltaInfo: TokenDeltaResult
+): { coveredRemoved: Set<number>; coveredAdded: Set<number> } | null {
+  const origTokens = coverageTokens(hunk.original);
+  const revTokens = coverageTokens(hunk.revised);
+  const chOrigTokens = coverageTokens(change.originalExcerpt);
+  const chRevTokens = coverageTokens(change.revisedExcerpt);
+
+  if (chOrigTokens.length > 0 && !grounded(change.originalExcerpt, hunk.original)) {
+    return null;
+  }
+  if (chRevTokens.length > 0 && !grounded(change.revisedExcerpt, hunk.revised)) {
+    return null;
+  }
+  if (chOrigTokens.length === 0 && chRevTokens.length === 0) {
+    return null;
+  }
+
+  const coveredRemoved = new Set<number>();
+  const coveredAdded = new Set<number>();
+
+  if (chOrigTokens.length > 0) {
+    const sideIndices = findExcerptSideIndices(chOrigTokens, origTokens);
+    if (!sideIndices) return null;
+    for (const idx of sideIndices) {
+      const deltaIdx = deltaInfo.removedMap.get(idx);
+      if (deltaIdx !== undefined) {
+        coveredRemoved.add(deltaIdx);
+      }
+    }
+  }
+
+  if (chRevTokens.length > 0) {
+    const sideIndices = findExcerptSideIndices(chRevTokens, revTokens);
+    if (!sideIndices) return null;
+    for (const idx of sideIndices) {
+      const deltaIdx = deltaInfo.addedMap.get(idx);
+      if (deltaIdx !== undefined) {
+        coveredAdded.add(deltaIdx);
+      }
+    }
+  }
+
+  return { coveredRemoved, coveredAdded };
+}
+
+function evaluateHunkCompositeCoverage(
+  hunk: ChangeHunk,
+  candidateChanges: Array<{ change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">; originalIndex: number }>,
+  deltaInfo: TokenDeltaResult
+): { covered: boolean; usedChangeIndices: number[] } {
+  if (deltaInfo.removed.length === 0 && deltaInfo.added.length === 0) {
+    return { covered: false, usedChangeIndices: [] };
+  }
+  if (deltaInfo.commonCount === 0 && deltaInfo.removed.length > 0 && deltaInfo.added.length > 0) {
+    return { covered: false, usedChangeIndices: [] };
+  }
+  if (!candidateChanges.length) {
+    return { covered: false, usedChangeIndices: [] };
+  }
+
+  const allCoveredRemoved = new Set<number>();
+  const allCoveredAdded = new Set<number>();
+  const usedChangeIndices: number[] = [];
+
+  for (const item of candidateChanges) {
+    const pos = coveredDeltaPositionsForChange(hunk, item.change, deltaInfo);
+    if (!pos) continue;
+
+    let contributes = false;
+    for (const r of pos.coveredRemoved) {
+      if (!allCoveredRemoved.has(r)) contributes = true;
+      allCoveredRemoved.add(r);
+    }
+    for (const a of pos.coveredAdded) {
+      if (!allCoveredAdded.has(a)) contributes = true;
+      allCoveredAdded.add(a);
+    }
+
+    if (contributes) {
+      usedChangeIndices.push(item.originalIndex);
+    }
+  }
+
+  const removed100 = allCoveredRemoved.size === deltaInfo.removed.length;
+  const added100 = allCoveredAdded.size === deltaInfo.added.length;
+  const ok = removed100 && added100 && usedChangeIndices.length > 0;
+
+  return {
+    covered: ok,
+    usedChangeIndices: ok ? usedChangeIndices : [],
+  };
+}
+
+function changeCoversHunk(
+  hunk: ChangeHunk,
+  change: Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">
+): boolean {
+  const delta = tokenDelta(coverageTokens(hunk.original), coverageTokens(hunk.revised));
+  if (delta.removed.length === 0 && delta.added.length === 0) {
+    if (hunk.kind === "add") return coversStructural(hunk.revised, change.revisedExcerpt);
+    if (hunk.kind === "remove") return coversStructural(hunk.original, change.originalExcerpt);
+    return coversStructural(hunk.original, change.originalExcerpt) && coversStructural(hunk.revised, change.revisedExcerpt);
+  }
+  if (hunk.kind === "add") {
+    return grounded(change.revisedExcerpt, hunk.revised) && coversTokens(delta.added, change.revisedExcerpt);
+  }
+  if (hunk.kind === "remove") {
+    return grounded(change.originalExcerpt, hunk.original) && coversTokens(delta.removed, change.originalExcerpt);
+  }
+  if (!grounded(change.originalExcerpt, hunk.original) || !grounded(change.revisedExcerpt, hunk.revised)) return false;
+  const originalOk = delta.removed.length === 0 || coversTokens(delta.removed, change.originalExcerpt);
+  const revisedOk = delta.added.length === 0 || coversTokens(delta.added, change.revisedExcerpt);
+  return originalOk && revisedOk;
+}
+
+function sidePrefix(delta: string[], excerpt: string, side: string): number {
+  if (!delta.length || !excerpt.trim()) return 0;
+  if (!grounded(excerpt, side)) return 0;
+  return orderedMatchCount(delta, coverageTokens(excerpt));
+}
+
+function classifyUncoveredHunk(
+  hunk: ChangeHunk,
+  changes: Array<Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">>,
+  others: ChangeHunk[]
+): { reason: AuditFailureCode; removed: number; added: number; structural: boolean } {
+  const deltaInfo = tokenDeltaWithPositions(coverageTokens(hunk.original), coverageTokens(hunk.revised));
+  const delta = { removed: deltaInfo.removed, added: deltaInfo.added };
+  const removed = delta.removed.length;
+  const added = delta.added.length;
+  if (removed === 0 && added === 0) {
+    return { reason: "STRUCTURAL_CHANGE_UNDECLARED", removed: 0, added: 0, structural: true };
+  }
+  let bestRemoval = 0;
+  let bestAddition = 0;
+  let wrongSide = false;
+  for (const change of changes) {
+    const removal = sidePrefix(delta.removed, change.originalExcerpt, hunk.original);
+    const addition = sidePrefix(delta.added, change.revisedExcerpt, hunk.revised);
+    const pos = coveredDeltaPositionsForChange(hunk, change, deltaInfo);
+    const posRemoval = pos ? pos.coveredRemoved.size : 0;
+    const posAddition = pos ? pos.coveredAdded.size : 0;
+    bestRemoval = Math.max(bestRemoval, removal, posRemoval);
+    bestAddition = Math.max(bestAddition, addition, posAddition);
+    const removedOnRevised = sidePrefix(delta.removed, change.revisedExcerpt, hunk.original);
+    const addedOnOriginal = sidePrefix(delta.added, change.originalExcerpt, hunk.revised);
+    if ((removed > 0 && removedOnRevised > removal) || (added > 0 && addedOnOriginal > addition)) wrongSide = true;
+  }
+  if (removed > 0 && bestRemoval > 0 && bestRemoval < removed) {
+    return { reason: "INCOMPLETE_REMOVAL_EXCERPT", removed, added, structural: false };
+  }
+  if (added > 0 && bestAddition > 0 && bestAddition < added) {
+    return { reason: "INCOMPLETE_ADDITION_EXCERPT", removed, added, structural: false };
+  }
+  if (wrongSide && bestRemoval < removed && bestAddition < added) {
+    return { reason: "CHANGE_WRONG_SIDE", removed, added, structural: false };
+  }
+  const misplaced = changes.some((change) => others.some((other) => {
+    if (other === hunk || changeCoversHunk(other, change)) return false;
+    const otherDelta = tokenDelta(coverageTokens(other.original), coverageTokens(other.revised));
+    return sidePrefix(otherDelta.removed, change.originalExcerpt, other.original) > 0
+      || sidePrefix(otherDelta.added, change.revisedExcerpt, other.revised) > 0;
+  }));
+  if (misplaced && bestRemoval === 0 && bestAddition === 0) {
+    return { reason: "CHANGE_WRONG_HUNK", removed, added, structural: false };
+  }
+  if (removed > 0 && bestRemoval === 0) return { reason: "UNDECLARED_REMOVAL", removed, added, structural: false };
+  return { reason: "UNDECLARED_ADDITION", removed, added, structural: false };
+}
+
+function emptyCoverage(
+  reason: CoverageDiagnostics["reason"],
+  changeCount = 0,
+  failureReasonCode?: AuditFailureCode,
+  auditFailure?: AuditFailureCode
+): CoverageDiagnostics {
+  return {
+    reason,
+    hunks: 0,
+    covered: 0,
+    uncovered: 0,
+    add: 0,
+    remove: 0,
+    replace: 0,
+    changeCount,
+    limit: MAX_DECLARED_CHANGES,
+    uncoveredChars: [],
+    uncoveredKinds: [],
+    totalHunks: 0,
+    coveredHunks: 0,
+    uncoveredHunks: 0,
+    totalChanges: changeCount,
+    usedChanges: 0,
+    unusedChanges: changeCount,
+    uncoveredRemovedTokenCount: 0,
+    uncoveredAddedTokenCount: 0,
+    uncoveredStructuralCount: 0,
+    maxUncoveredRemovedTokens: 0,
+    maxUncoveredAddedTokens: 0,
+    ...(failureReasonCode ? { failureReasonCode } : {}),
+    ...(auditFailure ? { auditFailure } : {}),
+  };
+}
+
+function paragraphReflowOnly(before: string, after: string): boolean {
+  const left = editorialSignature(before);
+  const right = editorialSignature(after);
+  if (left.split("\n").some((line) => STRUCTURAL_LINE.test(line))) return false;
+  if (right.split("\n").some((line) => STRUCTURAL_LINE.test(line))) return false;
+  const fold = (value: string) => value.replace(/\n/g, " ").replace(/[ \t]+/g, " ").trim();
+  return fold(left) === fold(right);
+}
+
+function requiresDeclaredChange(hunk: ChangeHunk): boolean {
+  if (editorialSignature(hunk.original) === editorialSignature(hunk.revised)) return false;
+  return !paragraphReflowOnly(hunk.original, hunk.revised);
+}
+
+export function assessSubstantiveCoverage(
+  original: string,
+  revised: string,
+  changes: Array<Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">>
+): CoverageDiagnostics {
+  const substantive = changeHunks(original, revised).filter(requiresDeclaredChange);
+  const used = new Set<number>();
+  const uncovered: CoverageHunkDiagnostic[] = [];
+  const uncoveredHunks: ChangeHunk[] = [];
+  let covered = 0;
+  for (const hunk of substantive) {
+    const index = changes.findIndex((change, changeIndex) => !used.has(changeIndex) && changeCoversHunk(hunk, change));
+    if (index >= 0) {
+      used.add(index);
+      covered += 1;
+    } else {
+      const deltaInfo = tokenDeltaWithPositions(coverageTokens(hunk.original), coverageTokens(hunk.revised));
+      const candidates = changes
+        .map((change, originalIndex) => ({ change, originalIndex }))
+        .filter((item) => !used.has(item.originalIndex));
+      const composite = evaluateHunkCompositeCoverage(hunk, candidates, deltaInfo);
+      if (composite.covered) {
+        for (const idx of composite.usedChangeIndices) {
+          used.add(idx);
+        }
+        covered += 1;
+      } else {
+        const chars = normalizeCoverageComparable(hunk.original).length + normalizeCoverageComparable(hunk.revised).length;
+        uncovered.push({ kind: hunk.kind, chars });
+        uncoveredHunks.push(hunk);
+      }
+    }
+  }
+  const details = uncoveredHunks.map((hunk) => classifyUncoveredHunk(hunk, changes, substantive));
+  const removedCounts = details.map((item) => item.removed);
+  const addedCounts = details.map((item) => item.added);
+  return {
+    reason: uncovered.length ? "uncovered_edits" : "ok",
+    hunks: substantive.length,
+    covered,
+    uncovered: uncovered.length,
+    add: substantive.filter((hunk) => hunk.kind === "add").length,
+    remove: substantive.filter((hunk) => hunk.kind === "remove").length,
+    replace: substantive.filter((hunk) => hunk.kind === "replace").length,
+    changeCount: changes.length,
+    limit: MAX_DECLARED_CHANGES,
+    uncoveredChars: uncovered.map((hunk) => hunk.chars),
+    uncoveredKinds: uncovered.map((hunk) => hunk.kind),
+    totalHunks: substantive.length,
+    coveredHunks: covered,
+    uncoveredHunks: uncovered.length,
+    totalChanges: changes.length,
+    usedChanges: used.size,
+    unusedChanges: Math.max(0, changes.length - used.size),
+    uncoveredRemovedTokenCount: removedCounts.reduce((sum, count) => sum + count, 0),
+    uncoveredAddedTokenCount: addedCounts.reduce((sum, count) => sum + count, 0),
+    uncoveredStructuralCount: details.filter((item) => item.structural).length,
+    maxUncoveredRemovedTokens: removedCounts.reduce((max, count) => Math.max(max, count), 0),
+    maxUncoveredAddedTokens: addedCounts.reduce((max, count) => Math.max(max, count), 0),
+    ...(details[0] ? { failureReasonCode: details[0].reason, auditFailure: "COVERAGE_FAILURE" as const } : {}),
+  };
+}
+
+/**
+ * Blocos materiais ainda sem change. O retorno é só tipo e tamanho, nunca o texto jurídico.
+ * Cada change cobre no máximo um bloco.
+ */
+export function uncoveredSubstantiveEdits(
+  original: string,
+  revised: string,
+  changes: Array<Pick<LegalReviewChange, "originalExcerpt" | "revisedExcerpt">>
+): string[] {
+  const report = assessSubstantiveCoverage(original, revised, changes);
+  return report.uncoveredChars.map((chars, index) => `${report.uncoveredKinds[index] || "replace"}:${chars}`);
+}
+
+export function enforceVerificationLevel(input: {
+  webSearchExecuted: boolean;
+  officialSourcesConsulted: boolean;
+  allMaterialChangesConfirmed: boolean;
+  hasUnverified: boolean;
+  diffConsistent: boolean;
+  manuallyEdited: boolean;
+}): LegalVerificationLevel {
+  if (!input.webSearchExecuted || !input.officialSourcesConsulted) return "FALHA_NA_VERIFICACAO";
+  if (input.manuallyEdited) return "VERIFICACAO_PARCIAL";
+  if (!input.diffConsistent || !input.allMaterialChangesConfirmed || input.hasUnverified) {
+    return "VERIFICACAO_PARCIAL";
+  }
+  return "VERIFICADO_COM_FONTES";
+}
+
+export function evidenceMayBeShownAsProof(evidence: Pick<LegalReviewEvidence, "url" | "official" | "consulted">): boolean {
+  return Boolean(evidence.official && evidence.consulted && safeHttpsUrl(evidence.url) && matchOfficialHost(evidence.url));
+}
+
+export interface NormalizedAudit {
+  outcome: LegalReviewOutcome;
+  confidence: LegalReviewConfidence;
+  verificationLevel: LegalVerificationLevel;
+  summary: LegalReviewSummary;
+  changes: LegalReviewChange[];
+  unverifiedClaims: LegalUnverifiedClaim[];
+  reviewedMarkdown: string;
+  reviewNotes: string;
+  consultedSources: ConsultedLegalSource[];
+  /** Transitório. Não entra em legal_reviews. */
+  repairablePatches?: RepairablePatch[];
+  /** Transitório. Não entra em legal_reviews. */
+  appliedPatchInputs?: AppliedPatchInput[];
+  /** Transitório. Não entra em legal_reviews. */
+  validationLog?: LegalAuditValidationLog;
+}
+
+export type LiteralRejectReason =
+  | "excerpt_missing"
+  | "ambiguous"
+  | "overlap"
+  | "html"
+  | "marker"
+  | "length";
+
+export interface LiteralPatchInput {
+  key: string;
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  beforeContext?: string;
+  afterContext?: string;
+}
+
+export interface AppliedLiteralPatch {
+  key: string;
+  start: number;
+  end: number;
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  beforeContext: string;
+  afterContext: string;
+}
+
+export interface RejectedLiteralPatch {
+  key: string;
+  reason: LiteralRejectReason;
+}
+
+export interface LiteralPatchApplication {
+  markdown: string;
+  applied: AppliedLiteralPatch[];
+  rejected: RejectedLiteralPatch[];
+}
+
+export interface RepairablePatch {
+  id: string;
+  reason: "excerpt_missing" | "ambiguous" | "overlap" | "court_family" | "diploma_evidence";
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  beforeContext: string;
+  afterContext: string;
+  /** Só enum fechado. Não leva número de diploma, URL nem texto de fonte. */
+  missingFamilies?: DiagnosticSourceFamily[];
+  statuteTypes?: DiagnosticStatuteType[];
+}
+
+export interface AppliedPatchInput {
+  id: string;
+  beforeContext: string;
+  afterContext: string;
+}
+
+function isRepairableReason(reason: LiteralRejectReason): reason is "excerpt_missing" | "ambiguous" | "overlap" {
+  return reason === "excerpt_missing" || reason === "ambiguous" || reason === "overlap";
+}
+
+function rejectionNote(reason: LiteralRejectReason): string {
+  switch (reason) {
+    case "excerpt_missing":
+      return "Patch não aplicado: o originalExcerpt não foi localizado literalmente no Markdown original.";
+    case "ambiguous":
+      return "Patch não aplicado: o trecho não identifica uma única ocorrência no Markdown original.";
+    case "overlap":
+      return "Patch não aplicado: o intervalo se sobrepõe a outro patch e nenhum dos conflitantes foi aplicado.";
+    case "html":
+      return "Patch não aplicado: a substituição introduziria HTML.";
+    case "marker":
+      return "Patch não aplicado: a substituição removeria um marcador de parte.";
+    case "length":
+      return "Patch não aplicado: a substituição excederia o tamanho admitido.";
+    default:
+      return "Patch não aplicado.";
+  }
+}
+
+function rangesOverlap(left: { start: number; end: number }, right: { start: number; end: number }): boolean {
+  return left.start < right.end && right.start < left.end;
+}
+
+function findLiteralSpans(
+  haystack: string,
+  needle: string,
+  before: string,
+  after: string
+): Array<{ start: number; end: number }> {
+  if (needle.length === 0) return [];
+  const spans: Array<{ start: number; end: number }> = [];
+  let from = 0;
+  while (from < haystack.length) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) break;
+    const end = at + needle.length;
+    const beforeOk = before.length === 0 || (at >= before.length && haystack.slice(at - before.length, at) === before);
+    const afterOk = after.length === 0 || haystack.slice(end, end + after.length) === after;
+    if (beforeOk && afterOk) spans.push({ start: at, end });
+    from = at + 1;
+  }
+  return spans;
+}
+
+function replacementDropsBlockMarker(originalExcerpt: string, revisedExcerpt: string): boolean {
+  const after = new Set(blockMarkers(revisedExcerpt));
+  return blockMarkers(originalExcerpt).some((marker) => !after.has(marker));
+}
+
+function markdownWithinLimit(original: string, revised: string): boolean {
+  if (revised.length > 900_000) return false;
+  if (original.trim().length >= 20 && revised.trim().length < 20) return false;
+  return revised.length <= Math.max(original.length * 3, original.length + 20_000);
+}
+
+function applySpans(original: string, patches: AppliedLiteralPatch[]): string {
+  const ordered = [...patches].sort((left, right) => right.start - left.start || right.end - left.end);
+  let text = original;
+  for (const patch of ordered) {
+    text = text.slice(0, patch.start) + patch.revisedExcerpt + text.slice(patch.end);
+  }
+  return text;
+}
+
+/**
+ * Localiza e aplica patches por igualdade literal no Markdown original.
+ * Não normaliza espaço, não escolhe ocorrência e não funde sobreposição.
+ */
+export function applyLiteralPatches(original: string, patches: LiteralPatchInput[]): LiteralPatchApplication {
+  const rejected: RejectedLiteralPatch[] = [];
+  let pending = patches.map((patch) => ({
+    ...patch,
+    beforeContext: patch.beforeContext ?? "",
+    afterContext: patch.afterContext ?? "",
+  }));
+
+  for (let guard = 0; guard <= patches.length; guard += 1) {
+    const located: AppliedLiteralPatch[] = [];
+    const stillPending: typeof pending = [];
+    for (const patch of pending) {
+      if (containsHtmlMarkup(patch.revisedExcerpt)) {
+        rejected.push({ key: patch.key, reason: "html" });
+        continue;
+      }
+      if (replacementDropsBlockMarker(patch.originalExcerpt, patch.revisedExcerpt)) {
+        rejected.push({ key: patch.key, reason: "marker" });
+        continue;
+      }
+      const spans = findLiteralSpans(original, patch.originalExcerpt, patch.beforeContext, patch.afterContext);
+      if (spans.length === 0) {
+        rejected.push({ key: patch.key, reason: "excerpt_missing" });
+        continue;
+      }
+      if (spans.length > 1) {
+        rejected.push({ key: patch.key, reason: "ambiguous" });
+        continue;
+      }
+      const span = spans[0];
+      located.push({
+        key: patch.key,
+        start: span.start,
+        end: span.end,
+        originalExcerpt: patch.originalExcerpt,
+        revisedExcerpt: patch.revisedExcerpt,
+        beforeContext: patch.beforeContext,
+        afterContext: patch.afterContext,
+      });
+      stillPending.push(patch);
+    }
+
+    const conflicted = new Set<string>();
+    for (let left = 0; left < located.length; left += 1) {
+      for (let right = left + 1; right < located.length; right += 1) {
+        if (rangesOverlap(located[left], located[right])) {
+          conflicted.add(located[left].key);
+          conflicted.add(located[right].key);
+        }
+      }
+    }
+    for (const patch of located) {
+      if (conflicted.has(patch.key)) rejected.push({ key: patch.key, reason: "overlap" });
+    }
+    const kept = located.filter((patch) => !conflicted.has(patch.key));
+    const markdown = kept.length ? applySpans(original, kept) : original;
+    const safe = markdownWithinLimit(original, markdown)
+      && markersPreserved(original, markdown)
+      && (!containsHtmlMarkup(markdown) || containsHtmlMarkup(original));
+    if (safe && outsidePatchBytesIdentical(original, markdown, kept)) {
+      return { markdown, applied: kept, rejected };
+    }
+    if (!kept.length) return { markdown: original, applied: [], rejected };
+    const offender = [...kept].sort((left, right) => {
+      const growth = (patch: AppliedLiteralPatch) => patch.revisedExcerpt.length - (patch.end - patch.start);
+      return growth(right) - growth(left);
+    })[0];
+    rejected.push({ key: offender.key, reason: containsHtmlMarkup(markdown) && !containsHtmlMarkup(original) ? "html" : !markersPreserved(original, markdown) ? "marker" : "length" });
+    pending = stillPending.filter((patch) => patch.key !== offender.key && !conflicted.has(patch.key));
+  }
+
+  return { markdown: original, applied: [], rejected };
+}
+
+/** Reconstrói o original substituindo os intervalos aplicados pelo originalExcerpt. */
+export function revertAppliedLiteralPatches(appliedMarkdown: string, applied: AppliedLiteralPatch[]): string {
+  const sorted = [...applied].sort((left, right) => left.start - right.start || left.end - right.end);
+  let delta = 0;
+  const shifted = sorted.map((patch) => {
+    const start = patch.start + delta;
+    const end = start + patch.revisedExcerpt.length;
+    delta += patch.revisedExcerpt.length - (patch.end - patch.start);
+    return { start, end, originalExcerpt: patch.originalExcerpt };
+  });
+  let text = appliedMarkdown;
+  for (const patch of [...shifted].sort((left, right) => right.start - left.start)) {
+    text = text.slice(0, patch.start) + patch.originalExcerpt + text.slice(patch.end);
+  }
+  return text;
+}
+
+/** Todo byte fora dos intervalos declarados permanece o do Markdown original. */
+export function outsidePatchBytesIdentical(
+  original: string,
+  appliedMarkdown: string,
+  applied: Array<Pick<AppliedLiteralPatch, "start" | "end" | "revisedExcerpt">>
+): boolean {
+  const sorted = [...applied].sort((left, right) => left.start - right.start || left.end - right.end);
+  let originalAt = 0;
+  let appliedAt = 0;
+  for (const patch of sorted) {
+    const gap = original.slice(originalAt, patch.start);
+    if (appliedMarkdown.slice(appliedAt, appliedAt + gap.length) !== gap) return false;
+    appliedAt += gap.length;
+    if (appliedMarkdown.slice(appliedAt, appliedAt + patch.revisedExcerpt.length) !== patch.revisedExcerpt) return false;
+    appliedAt += patch.revisedExcerpt.length;
+    originalAt = patch.end;
+  }
+  return original.slice(originalAt) === appliedMarkdown.slice(appliedAt);
+}
+
+export type ClassifiedLegalAudit =
+  | { ok: true; audit: NormalizedAudit }
+  | { ok: false; error: LegalReviewValidationError };
+
+function safeDiagnosticChangeId(value: unknown, index: number): string {
+  if (typeof value !== "string") return `index-${index}`;
+  const token = value.trim();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(token)) return `index-${index}`;
+  return token;
+}
+
+function rejectedValidationLog(
+  diagnostics: CoverageDiagnostics
+): LegalAuditValidationLog {
+  const reason: ValidationReasonCode = diagnostics.failureReasonCode === "TOO_MANY_CHANGES"
+    ? "TOO_MANY_CHANGES"
+    : diagnostics.failureReasonCode === "INVALID_LENGTH"
+      ? "INVALID_LENGTH"
+      : "SCHEMA_INVALID";
+  return {
+    validationOutcome: "rejected",
+    validationReasonCodes: [reason],
+    rawChangeCount: reason === "TOO_MANY_CHANGES" ? diagnostics.changeCount : 0,
+    acceptedPatchCount: 0,
+    rejectedPatchCount: 0,
+    unverifiedClaimCount: 0,
+    hasConsultedSources: false,
+    consultedSourceCount: 0,
+    repairablePatchCount: 0,
+    followUpEligible: false,
+    rejectedPatches: [],
+  };
+}
+
+function validationFailure(
+  message: string,
+  code: "too_many_changes" | "uncovered_edits" | "invalid_audit",
+  diagnostics: CoverageDiagnostics
+): ClassifiedLegalAudit {
+  const error = new LegalReviewValidationError(message, code, diagnostics);
+  error.validationLog = rejectedValidationLog(diagnostics);
+  return { ok: false, error };
+}
+
+/** Classifica a auditoria e preserva o motivo. O texto jurídico não entra no erro. */
+export function classifyLegalAudit(
+  raw: unknown,
+  originalMarkdown: string,
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] }
+): ClassifiedLegalAudit {
+  const record = asRecord(raw);
+  if (!record) {
+    return validationFailure(
+      INVALID_AUDIT_MESSAGE,
+      "invalid_audit",
+      emptyCoverage("invalid_audit", 0, "INVALID_SCHEMA", "INVALID_SCHEMA")
+    );
+  }
+  const original = String(originalMarkdown || "");
+  if (original.trim().length < 20) {
+    return validationFailure(
+      INVALID_AUDIT_MESSAGE,
+      "invalid_audit",
+      emptyCoverage("invalid_audit", 0, "INVALID_LENGTH", "INVALID_LENGTH")
+    );
+  }
+
+  const consulted = consultedUrlSet(search.consultedUrls || []);
+  const consultedSources = describeConsultedSources(search.consultedUrls || []);
+  const declared = Array.isArray(record.changes) ? record.changes : [];
+  if (declared.length > MAX_DECLARED_CHANGES) {
+    return validationFailure(
+      TOO_MANY_CHANGES_MESSAGE,
+      "too_many_changes",
+      emptyCoverage("too_many_changes", declared.length, "TOO_MANY_CHANGES", "TOO_MANY_CHANGES")
+    );
+  }
+  const drafts = declared.flatMap((item, index) => {
+    const change = readChange(item, index, consulted);
+    if (!change) return [];
+    const source = asRecord(item);
+    const modelConfirmation: LegalConfirmation = source?.confirmation === "NAO_CONFIRMADO" || source?.verified === false
+      ? "NAO_CONFIRMADO"
+      : "CONFIRMADO";
+    return [{
+      change,
+      beforeContext: literalContext(source?.beforeContext),
+      afterContext: literalContext(source?.afterContext),
+      key: `${index}:${change.id}`,
+      refusalCodes: legalRefusalCodes(change, modelConfirmation),
+    }];
+  });
+  const unreadable = declared.flatMap((item, index) => {
+    const kept = drafts.some((draft) => draft.key.startsWith(`${index}:`));
+    if (kept || !rawMaterialChange(item)) return [];
+    const source = asRecord(item);
+    return [{
+      changeId: safeDiagnosticChangeId(source?.id, index),
+      reasonCodes: ["UNREADABLE_CHANGE" as const],
+    }];
+  });
+  const unreadMaterial = unreadable.length > 0;
+
+  return {
+    ok: true,
+    audit: finalizePatchAudit({
+      original,
+      drafts,
+      held: [],
+      search,
+      consultedSources,
+      reviewNotes: clip(record.reviewNotes, 8000),
+      confidence: oneOf(record.confidence, CONFIDENCE, "MEDIA"),
+      modelClaims: Array.isArray(record.unverifiedClaims) ? record.unverifiedClaims : [],
+      unreadMaterial,
+      rawChangeCount: declared.length,
+      unreadable,
+    }),
+  };
+}
+
+function rawMaterialChange(value: unknown): boolean {
+  const record = asRecord(value);
+  if (!record) return false;
+  const type = oneOf(record.type, CHANGE_TYPES, "CORRECAO");
+  const category = oneOf(record.category, CATEGORIES, "CONCEITO");
+  if (!isMaterialLegalChange({ type, category })) return false;
+  return clip(record.originalExcerpt, 4000).trim() !== clip(record.revisedExcerpt, 4000).trim();
+}
+
+interface PatchDraft {
+  change: LegalReviewChange;
+  beforeContext: string;
+  afterContext: string;
+  key: string;
+  refusalCodes: ValidationReasonCode[];
+}
+
+const LOCATION_REASON_CODES: Record<LiteralRejectReason, ValidationReasonCode> = {
+  excerpt_missing: "EXCERPT_NOT_FOUND",
+  ambiguous: "EXCERPT_AMBIGUOUS",
+  overlap: "PATCH_OVERLAP",
+  html: "HTML_VIOLATION",
+  marker: "MARKER_VIOLATION",
+  length: "PATCH_SIZE_INVALID",
+};
+
+function declaredDraftIndex(key: string, fallback: number): number {
+  const match = /^(\d+):/.exec(key);
+  if (!match) return fallback;
+  const index = Number(match[1]);
+  return Number.isInteger(index) ? index : fallback;
+}
+
+const DIAGNOSTIC_FAMILIES = new Set<string>([
+  "LEGISLACAO_FEDERAL", "STF", "STJ", "CNJ", "TSE", "TST", "STM", "DIARIO_OFICIAL",
+  "TJAC", "TJAL", "TJAM", "TJAP", "TJBA", "TJCE", "TJDFT", "TJES", "TJGO", "TJMA",
+  "TJMG", "TJMS", "TJMT", "TJPA", "TJPB", "TJPE", "TJPI", "TJPR", "TJRJ", "TJRN",
+  "TJRO", "TJRR", "TJRS", "TJSC", "TJSE", "TJSP", "TJTO",
+  ...Array.from({ length: 6 }, (_, index) => `TRF${index + 1}`),
+  ...Array.from({ length: 24 }, (_, index) => `TRT${index + 1}`),
+]);
+
+function closedFamily(value: string): DiagnosticSourceFamily | undefined {
+  if (!DIAGNOSTIC_FAMILIES.has(value)) return undefined;
+  return value as DiagnosticSourceFamily;
+}
+
+function closedHostFamily(url: string): DiagnosticHostFamily {
+  try {
+    const family = matchOfficialHost(url)?.family;
+    if (typeof family === "string") {
+      const closed = closedFamily(family);
+      if (closed) return closed;
+    }
+  } catch {
+    // host inesperado não entra no log
+  }
+  return "OTHER";
+}
+
+function closedLoggedSourceType(evidence: LegalReviewEvidence): DiagnosticSourceType {
+  const raw = evidenceRawSourceType.get(evidence) ?? "";
+  if ((SOURCE_TYPES as readonly string[]).includes(raw)) return raw as DiagnosticSourceType;
+  return "OTHER";
+}
+
+function closedStatuteType(raw: string): DiagnosticStatuteType {
+  const text = String(raw || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text === "lc" || text === "lei complementar") return "LC";
+  if (text === "lei" || text === "lei federal") return "LEI";
+  if (text === "decreto-lei" || text === "decreto lei") return "DECRETO_LEI";
+  if (text === "decreto") return "DECRETO";
+  if (text === "mp" || text === "medida provisoria") return "MP";
+  return "OTHER";
+}
+
+function statuteTextMatch(
+  evidence: LegalReviewEvidence,
+  statuteNumber: string
+): { url: boolean; title: boolean; explanation: boolean } {
+  try {
+    const url = urlContainsStatuteNumber(evidence.url, statuteNumber);
+    const cleanTitle = String(evidence.title || "").replace(/\./g, "");
+    const title = Boolean(statuteNumber) && new RegExp(`\\b${statuteNumber}\\b`).test(cleanTitle);
+    const cleanExplanation = String(evidence.supportExplanation || "").replace(/\./g, "");
+    const explanation = Boolean(statuteNumber) && new RegExp(`\\b${statuteNumber}\\b`).test(cleanExplanation);
+    return { url, title, explanation };
+  } catch {
+    return { url: false, title: false, explanation: false };
+  }
+}
+
+function earlierLegalBlock(codes: ValidationReasonCode[]): boolean {
+  return codes.includes("MODEL_UNCONFIRMED")
+    || codes.includes("SOURCE_SPECIFICITY_FAILED")
+    || codes.includes("NORMATIVE_INVENTION");
+}
+
+function predicateMetadata(
+  change: LegalReviewChange,
+  codes: ValidationReasonCode[]
+): Omit<RefusalPredicateDiagnostic, "changeId"> | undefined {
+  if (earlierLegalBlock(codes)) return undefined;
+  const evidence = Array.isArray(change.evidence) ? change.evidence : [];
+  const meta: Omit<RefusalPredicateDiagnostic, "changeId"> = {};
+  let any = false;
+  const introduced = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
+  if (introduced.length > 0) {
+    const coveredNumbers = new Set(
+      introduced
+        .filter((statute) => evidence.some((item) => evidenceSupportsStatute(item, statute.number)))
+        .map((statute) => statute.number)
+    );
+    meta.introducedStatuteCount = introduced.length;
+    meta.coveredStatuteCount = coveredNumbers.size;
+    meta.missingStatutes = introduced
+      .filter((statute) => !coveredNumbers.has(statute.number))
+      .slice(0, 24)
+      .map((statute): MissingStatuteDiagnostic => {
+        const hits = evidence.map((item) => ({
+          ...statuteTextMatch(item, statute.number),
+          effectiveSupportsChange: item.supportsChange === true,
+        }));
+        const stringHits = hits.filter((hit) => hit.url || hit.title || hit.explanation);
+        const pool = stringHits.length > 0 ? stringHits : hits;
+        return {
+          statuteType: closedStatuteType(statute.type),
+          evidenceMatch: {
+            url: hits.some((hit) => hit.url),
+            title: hits.some((hit) => hit.title),
+            explanation: hits.some((hit) => hit.explanation),
+            effectiveSupportsChange: pool.some((hit) => hit.effectiveSupportsChange),
+          },
+        };
+      });
+    any = true;
+  }
+  if (!codes.includes("DIPLOMA_EVIDENCE_FAILED")) {
+    const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
+    const requiredFamilies = institutionsNamedInClaim(claim, change.category)
+      .map((family) => closedFamily(String(family)))
+      .filter((family): family is DiagnosticSourceFamily => Boolean(family));
+    if (requiredFamilies.length > 0) {
+      const missingFamilies = requiredFamilies.filter((family) => (
+        !evidence.some((item) => evidenceSupportsFamily(item, family))
+      ));
+      const evidenceDiagnostics: EvidenceRefusalDiagnostic[] = evidence.slice(0, 6).map((item, evidenceIndex) => ({
+        evidenceIndex,
+        hostFamily: closedHostFamily(item.url),
+        sourceType: closedLoggedSourceType(item),
+        official: item.official === true,
+        consulted: item.consulted === true,
+        modelSupportsChange: evidenceModelSupport.get(item) === true,
+        effectiveSupportsChange: item.supportsChange === true,
+      }));
+      meta.requiredFamilies = requiredFamilies;
+      meta.missingFamilies = missingFamilies;
+      meta.evidenceDiagnostics = evidenceDiagnostics;
+      any = true;
+    }
+  }
+  return any ? meta : undefined;
+}
+
+function safePredicateMetadata(
+  change: LegalReviewChange,
+  codes: ValidationReasonCode[]
+): Omit<RefusalPredicateDiagnostic, "changeId"> | undefined {
+  try {
+    return predicateMetadata(change, codes);
+  } catch {
+    return undefined;
+  }
+}
+
+function evidenceRepairFromDraft(draft: PatchDraft): RepairablePatch | undefined {
+  if (draft.refusalCodes.length !== 1) return undefined;
+  const code = draft.refusalCodes[0];
+  if (code !== "COURT_FAMILY_FAILED" && code !== "DIPLOMA_EVIDENCE_FAILED") return undefined;
+  const metadata = safePredicateMetadata(draft.change, draft.refusalCodes);
+  if (!metadata) return undefined;
+  const base = {
+    id: draft.change.id,
+    originalExcerpt: draft.change.originalExcerpt,
+    revisedExcerpt: draft.change.revisedExcerpt,
+    beforeContext: draft.beforeContext,
+    afterContext: draft.afterContext,
+  };
+  if (code === "COURT_FAMILY_FAILED") {
+    const missingFamilies = metadata.missingFamilies ?? [];
+    if (!missingFamilies.length) return undefined;
+    return { ...base, reason: "court_family", missingFamilies };
+  }
+  const introduced = metadata.introducedStatuteCount ?? 0;
+  const covered = metadata.coveredStatuteCount ?? 0;
+  if (introduced <= covered) return undefined;
+  const statuteTypes = (metadata.missingStatutes ?? []).map((item) => item.statuteType);
+  if (!statuteTypes.length) return undefined;
+  return { ...base, reason: "diploma_evidence", statuteTypes };
+}
+
+function finalizePatchAudit(input: {
+  original: string;
+  drafts: PatchDraft[];
+  held: LegalReviewChange[];
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] };
+  consultedSources: ConsultedLegalSource[];
+  reviewNotes: string;
+  confidence: LegalReviewConfidence;
+  modelClaims: unknown[];
+  unreadMaterial: boolean;
+  rawChangeCount: number;
+  unreadable: Array<{ changeId: string; reasonCodes: ValidationReasonCode[] }>;
+}): NormalizedAudit {
+  const applicable = input.drafts.filter((draft) => draft.change.confirmation === "CONFIRMADO");
+  const appliedResult = applyLiteralPatches(input.original, applicable.map((draft) => ({
+    key: draft.key,
+    originalExcerpt: draft.change.originalExcerpt,
+    revisedExcerpt: draft.change.revisedExcerpt,
+    beforeContext: draft.beforeContext,
+    afterContext: draft.afterContext,
+  })));
+  const rejectedByKey = new Map(appliedResult.rejected.map((item) => [item.key, item.reason]));
+  const appliedByKey = new Map(appliedResult.applied.map((item) => [item.key, item]));
+  const resolved = input.drafts.map((draft) => {
+    const reason = rejectedByKey.get(draft.key);
+    if (!reason) return draft.change;
+    return {
+      ...draft.change,
+      confirmation: "NAO_CONFIRMADO" as const,
+      verified: false,
+      reason: rejectionNote(reason),
+    };
+  });
+  const changes = [...input.held, ...resolved];
+  const repairablePatches: RepairablePatch[] = [
+    ...input.drafts.flatMap((draft) => {
+      const reason = rejectedByKey.get(draft.key);
+      if (!reason || !isRepairableReason(reason)) return [];
+      return [{
+        id: draft.change.id,
+        reason,
+        originalExcerpt: draft.change.originalExcerpt,
+        revisedExcerpt: draft.change.revisedExcerpt,
+        beforeContext: draft.beforeContext,
+        afterContext: draft.afterContext,
+      }];
+    }),
+    ...input.drafts.flatMap((draft) => {
+      if (rejectedByKey.has(draft.key)) return [];
+      const repair = evidenceRepairFromDraft(draft);
+      return repair ? [repair] : [];
+    }),
+  ];
+  const appliedPatchInputs: AppliedPatchInput[] = input.drafts.flatMap((draft) => {
+    if (!appliedByKey.has(draft.key)) return [];
+    return [{
+      id: draft.change.id,
+      beforeContext: draft.beforeContext,
+      afterContext: draft.afterContext,
+    }];
+  });
+
+  const unverifiedClaims: LegalUnverifiedClaim[] = [];
+  const seen = new Set<string>();
+  const pushClaim = (excerpt: string, reason: string) => {
+    const key = `${excerpt.slice(0, 180)}|${reason.slice(0, 180)}`;
+    if (!excerpt.trim() || seen.has(key)) return;
+    seen.add(key);
+    unverifiedClaims.push({ excerpt: excerpt.slice(0, 2000), reason: reason.slice(0, 2000) });
+  };
+  for (const item of input.modelClaims) {
+    const claim = asRecord(item);
+    if (!claim) continue;
+    pushClaim(clip(claim.excerpt, 2000), clip(claim.reason, 2000) || "Não confirmado em fonte oficial.");
+  }
+  if (input.unreadMaterial) {
+    pushClaim("Alteração não aplicada.", "Uma alteração material declarada não pôde ser lida e não foi aplicada.");
+  }
+  for (const change of changes) {
+    if (change.confirmation !== "NAO_CONFIRMADO") continue;
+    let reason = change.reason || "NAO_CONFIRMADO";
+    if (changeLacksNormativeSpecificity(change)) {
+      reason = "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica.";
+    } else if (changeContainsUngroundedInvention(change)) {
+      reason = "Invenção normativa desprovida de fundamento em fonte oficial (prazo, quórum ou recurso inexistente na fonte).";
+    }
+    pushClaim(change.revisedExcerpt || change.originalExcerpt, reason);
+  }
+
+  const rejectedMaterial = input.unreadMaterial || changes.some((change) => (
+    isMaterialLegalChange(change) && change.confirmation !== "CONFIRMADO"
+  ));
+  const reviewedMarkdown = changes.length === 0 && !rejectedMaterial ? input.original : appliedResult.markdown;
+  const outcome: LegalReviewOutcome = changes.length === 0 && !rejectedMaterial
+    ? "SEM_ALTERACOES_RELEVANTES"
+    : "ALTERACOES_NECESSARIAS";
+  const material = changes.filter(isMaterialLegalChange);
+  const officialSourcesConsulted = input.consultedSources.some((source) => source.official);
+  const verificationLevel = enforceVerificationLevel({
+    webSearchExecuted: input.search.webSearchExecuted && input.consultedSources.length > 0,
+    officialSourcesConsulted,
+    allMaterialChangesConfirmed: material.every((change) => change.confirmation === "CONFIRMADO"),
+    hasUnverified: unverifiedClaims.length > 0,
+    diffConsistent: reviewedMarkdown === input.original || outsidePatchBytesIdentical(input.original, reviewedMarkdown, appliedResult.applied),
+    manuallyEdited: false,
+  });
+  const limitedClaims = unverifiedClaims.slice(0, 40);
+  const predicateDiagnostics: RefusalPredicateDiagnostic[] = [];
+  for (let position = 0; position < input.drafts.length && predicateDiagnostics.length < 40; position += 1) {
+    const draft = input.drafts[position];
+    const metadata = safePredicateMetadata(draft.change, draft.refusalCodes);
+    if (!metadata) continue;
+    predicateDiagnostics.push({
+      changeId: safeDiagnosticChangeId(draft.change.id, declaredDraftIndex(draft.key, position)),
+      ...metadata,
+    });
+  }
+  const rejectedPatches = [
+    ...input.unreadable,
+    ...input.drafts.flatMap((draft, position) => {
+      const location = rejectedByKey.get(draft.key);
+      const reasonCodes = location ? [LOCATION_REASON_CODES[location]] : draft.refusalCodes;
+      if (!reasonCodes.length) return [];
+      const diagnostic: LegalAuditValidationLog["rejectedPatches"][number] = {
+        changeId: safeDiagnosticChangeId(draft.change.id, declaredDraftIndex(draft.key, position)),
+        reasonCodes,
+      };
+      if (!location) {
+        const metadata = safePredicateMetadata(draft.change, reasonCodes);
+        if (metadata && reasonCodes.includes("COURT_FAMILY_FAILED")) {
+          diagnostic.requiredFamilies = metadata.requiredFamilies;
+          diagnostic.missingFamilies = metadata.missingFamilies;
+          diagnostic.evidenceDiagnostics = metadata.evidenceDiagnostics;
+        }
+        if (metadata && reasonCodes.includes("DIPLOMA_EVIDENCE_FAILED")) {
+          diagnostic.introducedStatuteCount = metadata.introducedStatuteCount;
+          diagnostic.coveredStatuteCount = metadata.coveredStatuteCount;
+          diagnostic.missingStatutes = metadata.missingStatutes;
+        }
+      }
+      return [diagnostic];
+    }),
+  ];
+  const validationReasonCodes: ValidationReasonCode[] = [];
+  const pushReason = (code: ValidationReasonCode) => {
+    if (!validationReasonCodes.includes(code)) validationReasonCodes.push(code);
+  };
+  for (const patch of rejectedPatches) {
+    for (const code of patch.reasonCodes) pushReason(code);
+  }
+  if (input.rawChangeCount > 0 && appliedResult.applied.length === 0) pushReason("NO_APPLICABLE_PATCH");
+  if (!input.search.webSearchExecuted || input.consultedSources.length === 0) pushReason("MISSING_REQUIRED_SEARCH");
+
+  return {
+    outcome,
+    confidence: input.confidence,
+    verificationLevel,
+    summary: summarizeChanges(changes),
+    changes,
+    unverifiedClaims: limitedClaims,
+    reviewedMarkdown,
+    reviewNotes: input.reviewNotes,
+    consultedSources: input.consultedSources,
+    repairablePatches,
+    appliedPatchInputs,
+    validationLog: {
+      validationOutcome: "accepted",
+      validationReasonCodes,
+      rawChangeCount: input.rawChangeCount,
+      acceptedPatchCount: appliedResult.applied.length,
+      rejectedPatchCount: rejectedPatches.length,
+      unverifiedClaimCount: limitedClaims.length,
+      status: outcome,
+      verificationLevel,
+      hasConsultedSources: input.consultedSources.length > 0,
+      consultedSourceCount: input.consultedSources.length,
+      repairablePatchCount: repairablePatches.length,
+      followUpEligible: false,
+      rejectedPatches,
+      ...(predicateDiagnostics.length ? { predicateDiagnostics } : {}),
+    },
+  };
+}
+
+/**
+ * Reaplica, no Markdown original, os patches já aceitos e o reparo do follow-up.
+ * O follow-up não substitui um patch já validado.
+ */
+export function mergePatchAudits(
+  originalMarkdown: string,
+  current: NormalizedAudit,
+  follow: NormalizedAudit,
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] },
+  consultedSources: ConsultedLegalSource[]
+): NormalizedAudit {
+  const acceptedIds = new Set((current.appliedPatchInputs || []).map((item) => item.id));
+  const repairableIds = new Set((current.repairablePatches || []).map((item) => item.id));
+  const followById = new Map(follow.changes.map((change) => [change.id, change]));
+  const followContext = new Map((follow.appliedPatchInputs || []).map((item) => [item.id, item]));
+  for (const patch of follow.repairablePatches || []) {
+    if (!followContext.has(patch.id)) {
+      followContext.set(patch.id, { id: patch.id, beforeContext: patch.beforeContext, afterContext: patch.afterContext });
+    }
+  }
+  const currentContext = new Map((current.appliedPatchInputs || []).map((item) => [item.id, item]));
+  for (const patch of current.repairablePatches || []) {
+    if (!currentContext.has(patch.id)) {
+      currentContext.set(patch.id, { id: patch.id, beforeContext: patch.beforeContext, afterContext: patch.afterContext });
+    }
+  }
+
+  const held: LegalReviewChange[] = [];
+  const drafts: PatchDraft[] = [];
+  const seenDraft = new Set<string>();
+  const pushDraft = (change: LegalReviewChange, beforeContext: string, afterContext: string, key: string) => {
+    if (seenDraft.has(change.id)) return;
+    seenDraft.add(change.id);
+    drafts.push({ change, beforeContext, afterContext, key, refusalCodes: [] });
+  };
+
+  for (const change of current.changes) {
+    if (acceptedIds.has(change.id)) {
+      const context = currentContext.get(change.id);
+      pushDraft(change, context?.beforeContext || "", context?.afterContext || "", `kept:${change.id}`);
+      continue;
+    }
+    const replacement = repairableIds.has(change.id) ? followById.get(change.id) : undefined;
+    if (replacement) {
+      const repair = (current.repairablePatches || []).find((item) => item.id === change.id);
+      const evidenceRepair = repair?.reason === "court_family" || repair?.reason === "diploma_evidence";
+      if (evidenceRepair && (
+        replacement.originalExcerpt !== repair?.originalExcerpt
+        || replacement.revisedExcerpt !== repair?.revisedExcerpt
+      )) {
+        held.push(change);
+        continue;
+      }
+      const context = followContext.get(replacement.id);
+      pushDraft(replacement, context?.beforeContext || "", context?.afterContext || "", `repair:${replacement.id}`);
+      continue;
+    }
+    held.push(change);
+  }
+  const heldIds = new Set(held.map((change) => change.id));
+  for (const change of follow.changes) {
+    if (acceptedIds.has(change.id) || seenDraft.has(change.id) || heldIds.has(change.id)) continue;
+    const context = followContext.get(change.id);
+    pushDraft(change, context?.beforeContext || "", context?.afterContext || "", `follow:${change.id}`);
+  }
+
+  const retiredExcerpts = new Set<string>();
+  for (const patch of current.repairablePatches || []) {
+    if (!followById.has(patch.id)) continue;
+    retiredExcerpts.add(patch.originalExcerpt);
+    retiredExcerpts.add(patch.revisedExcerpt);
+  }
+  const modelClaims = [...current.unverifiedClaims, ...follow.unverifiedClaims]
+    .filter((claim) => !retiredExcerpts.has(claim.excerpt))
+    .map((claim) => ({ excerpt: claim.excerpt, reason: claim.reason }));
+
+  return finalizePatchAudit({
+    original: String(originalMarkdown || ""),
+    drafts,
+    held,
+    search,
+    consultedSources,
+    reviewNotes: follow.reviewNotes || current.reviewNotes,
+    confidence: follow.confidence,
+    modelClaims,
+    unreadMaterial: false,
+    rawChangeCount: drafts.length + held.length,
+    unreadable: [],
+  });
+}
+
+export function normalizeLegalAudit(
+  raw: unknown,
+  originalMarkdown: string,
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] }
+): NormalizedAudit | null {
+  const classified = classifyLegalAudit(raw, originalMarkdown, search);
+  return classified.ok ? classified.audit : null;
+}
+
+const UNCOVERED_AUDIT_MESSAGE =
+  "A revisão não descreveu todas as alterações do texto. A aula publicada não foi alterada.";
+const TOO_MANY_CHANGES_MESSAGE =
+  "A revisão declarou mais de 40 alterações. Nenhuma foi descartada e a auditoria não foi aceita. A aula publicada não foi alterada.";
+export const INVALID_AUDIT_MESSAGE =
+  "A OpenAI devolveu uma auditoria inválida. A aula publicada não foi alterada.";
+
+/** Motivo seguro da recusa. Não devolve aula, excerpt nem Markdown. */
+export function explainLegalAuditFailure(raw: unknown, originalMarkdown: string): LegalReviewValidationError {
+  const classified = classifyLegalAudit(raw, originalMarkdown, { webSearchExecuted: false });
+  if (classified.ok === false) return classified.error;
+  const error = new LegalReviewValidationError(
+    INVALID_AUDIT_MESSAGE,
+    "invalid_audit",
+    emptyCoverage("invalid_audit", 0, "INVALID_SCHEMA", "INVALID_SCHEMA")
+  );
+  error.validationLog = rejectedValidationLog(error.diagnostics);
+  return error;
+}
+
+const evidenceSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "institution",
+    "title",
+    "url",
+    "official",
+    "consulted",
+    "supportsChange",
+    "supportExplanation",
+    "sourceType",
+  ],
+  properties: {
+    institution: { type: "string" },
+    title: { type: "string" },
+    url: { type: "string" },
+    official: { type: "boolean" },
+    consulted: { type: "boolean" },
+    supportsChange: { type: "boolean" },
+    supportExplanation: { type: "string" },
+    sourceType: { type: "string", enum: SOURCE_TYPES },
+  },
+};
+
+export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "status",
+    "confidence",
+    "verificationLevel",
+    "summary",
+    "changes",
+    "unverifiedClaims",
+    "reviewNotes",
+  ],
+  properties: {
+    status: { type: "string", enum: OUTCOMES },
+    confidence: { type: "string", enum: CONFIDENCE },
+    verificationLevel: { type: "string", enum: LEVELS },
+    summary: {
+      type: "object",
+      additionalProperties: false,
+      required: ["totalChanges", "corrections", "additions", "removals", "updates", "precisions", "restructures"],
+      properties: {
+        totalChanges: { type: "integer" },
+        corrections: { type: "integer" },
+        additions: { type: "integer" },
+        removals: { type: "integer" },
+        updates: { type: "integer" },
+        precisions: { type: "integer" },
+        restructures: { type: "integer" },
+      },
+    },
+    changes: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "type",
+          "severity",
+          "category",
+          "originalExcerpt",
+          "revisedExcerpt",
+          "beforeContext",
+          "afterContext",
+          "reason",
+          "verified",
+          "confirmation",
+          "sources",
+          "evidence",
+        ],
+        properties: {
+          id: { type: "string" },
+          type: { type: "string", enum: CHANGE_TYPES },
+          severity: { type: "string", enum: SEVERITIES },
+          category: { type: "string", enum: CATEGORIES },
+          originalExcerpt: { type: "string" },
+          revisedExcerpt: { type: "string" },
+          beforeContext: { type: "string" },
+          afterContext: { type: "string" },
+          reason: { type: "string" },
+          verified: { type: "boolean" },
+          confirmation: { type: "string", enum: ["CONFIRMADO", "NAO_CONFIRMADO"] },
+          sources: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["title", "url", "official", "institution"],
+              properties: {
+                title: { type: "string" },
+                url: { type: "string" },
+                official: { type: "boolean" },
+                institution: { type: "string" },
+              },
+            },
+          },
+          evidence: {
+            type: "array",
+            items: evidenceSchema,
+          },
+        },
+      },
+    },
+    unverifiedClaims: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["excerpt", "reason"],
+        properties: {
+          excerpt: { type: "string" },
+          reason: { type: "string" },
+        },
+      },
+    },
+    reviewNotes: { type: "string" },
+  },
+};

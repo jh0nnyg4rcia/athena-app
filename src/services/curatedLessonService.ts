@@ -7,13 +7,25 @@ import {
   extractChallengeFromText,
   normalizeObjectiveChallenge
 } from '../lib/objectiveChallenge';
-import { catalogSaveFailureMessage, lessonHasBody, pickFresherLesson, shouldAdoptCloudLesson } from '../lib/officialCacheRestore';
+import { catalogSaveFailureMessage, lessonHasBody, shouldAdoptCloudLesson } from '../lib/officialCacheRestore';
 import {
+  assembleHomologatedLesson,
+  cloudMayReplaceLocal,
+  mayAdoptRemoteLesson,
+  maySyncDisplayedLesson,
+  reportLessonLoad,
+  storedLessonUsable
+} from '../lib/lessonLoad';
+import {
+  confirmVaultLesson,
   deleteVaultLesson,
   getRememberedLesson,
   hydrateLessonVault,
   listRememberedLessons,
+  persistCatalogLesson,
   putVaultLesson,
+  readVaultLesson,
+  rememberLegacyLessonIfSafe,
   rememberLesson
 } from './lessonVault';
 
@@ -49,7 +61,7 @@ function payloadBytes(value: unknown): number {
 void hydrateLessonVault().then(() => {
   try {
     for (const lesson of Object.values(readLocalStorageLessons())) {
-      rememberLesson(lesson);
+      rememberLegacyLessonIfSafe(lesson);
     }
   } catch {
     /* ignore */
@@ -127,14 +139,42 @@ export function restoreOfficialLessonsFromCloud(
   return restoreFlight;
 }
 
+function readLegacyHomologatedLesson(docId: string): HomologatedLesson | null {
+  try {
+    const raw = localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${docId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw) as HomologatedLesson;
+      if (parsed?.id || parsed?.content) return { ...parsed, id: parsed.id || docId };
+    }
+  } catch {
+    /* chave legada ilegível não autoriza apagar o IndexedDB */
+  }
+  if (staticSeeds && staticSeeds[docId]) return staticSeeds[docId];
+  return null;
+}
+
+async function localLessonStillWins(docId: string, cloud: HomologatedLesson): Promise<boolean> {
+  const presence = await confirmVaultLesson(docId);
+  const legacy = readLegacyHomologatedLesson(docId);
+  const remembered = getRememberedLesson(docId);
+  if (!mayAdoptRemoteLesson(presence, storedLessonUsable(legacy) || lessonHasBody(remembered))) return true;
+  if (!shouldAdoptCloudLesson(remembered || legacy, cloud)) return true;
+  return false;
+}
+
 async function restoreOfficialLessonsNow(
   slots: Array<{ day: number; part: number }>
 ): Promise<number> {
-  await hydrateLessonVault();
-  const pending = slots.filter((slot) => {
+  const pending: Array<{ day: number; part: number }> = [];
+  for (const slot of slots) {
     const id = getLessonDocId(slot.day, slot.part);
-    return !lessonHasBody(getRememberedLesson(id));
-  });
+    const presence = await confirmVaultLesson(id);
+    const legacy = readLegacyHomologatedLesson(id);
+    const remembered = getRememberedLesson(id);
+    if (mayAdoptRemoteLesson(presence, storedLessonUsable(legacy) || lessonHasBody(remembered))) {
+      pending.push(slot);
+    }
+  }
 
   let restored = 0;
   let cursor = 0;
@@ -148,7 +188,7 @@ async function restoreOfficialLessonsNow(
         const snap = await getDoc(doc(db, 'homologated_lessons', docId));
         if (!snap.exists()) continue;
         const cloud = ensureObjectiveChallenge(normalizeLesson(docId, snap.data() as HomologatedLesson));
-        if (!shouldAdoptCloudLesson(getRememberedLesson(docId), cloud)) continue;
+        if (await localLessonStillWins(docId, cloud)) continue;
         setLocalHomologatedLesson(cloud);
         officialPartIds.add(docId);
         restored += 1;
@@ -209,7 +249,7 @@ export function getLocalHomologatedLesson(day: number, part: number): Homologate
     if (raw) {
       const parsed = JSON.parse(raw) as HomologatedLesson;
       if (isUsableLesson(parsed)) {
-        rememberLesson(parsed);
+        rememberLegacyLessonIfSafe(parsed);
         return parsed;
       }
     }
@@ -253,43 +293,41 @@ export function removeLocalHomologatedLesson(day: number, part: number): void {
   void deleteVaultLesson(docId);
 }
 
-export async function getHomologatedLesson(day: number, part: number): Promise<HomologatedLesson | null> {
-  await hydrateLessonVault();
-  const docId = getLessonDocId(day, part);
-  const local = getRememberedLesson(docId) || getLocalHomologatedLesson(day, part);
-
-  let cloud: HomologatedLesson | null = null;
+async function readCloudHomologatedLesson(docId: string): Promise<HomologatedLesson | null> {
   try {
     const snap = await getDoc(doc(db, 'homologated_lessons', docId));
-    if (snap.exists()) {
-      const data = ensureObjectiveChallenge(normalizeLesson(docId, snap.data() as HomologatedLesson));
-      if (lessonHasBody(data)) cloud = data;
-    }
+    if (!snap.exists()) return null;
+    const data = ensureObjectiveChallenge(normalizeLesson(docId, snap.data() as HomologatedLesson));
+    return lessonHasBody(data) ? data : null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `homologated_lessons/${docId}`);
+    return null;
   }
-
-  const chosen = pickFresherLesson(local, cloud);
-  if (!chosen) return null;
-
-  const memory = getRememberedLesson(docId);
-  const memoryIsNewer = Boolean(memory && lessonHasBody(memory) && lessonStamp(memory) > lessonStamp(chosen));
-  if (memoryIsNewer) return memory || chosen;
-
-  if (chosen === cloud) {
-    const published = { ...chosen, pendingCloud: false };
-    await setLocalHomologatedLesson(published);
-    return published;
-  }
-
-  if (cloud && lessonStamp(local) > lessonStamp(cloud)) {
-    return { ...chosen, pendingCloud: true };
-  }
-  return chosen;
 }
 
-function lessonStamp(lesson?: HomologatedLesson | null): number {
-  return lesson?.approvedAt || 0;
+function refreshHomologatedLesson(docId: string, shown: HomologatedLesson): void {
+  void readCloudHomologatedLesson(docId).then(async (cloud) => {
+    const current = getRememberedLesson(docId) || shown;
+    if (!cloudMayReplaceLocal(current, cloud) || !cloud) return;
+    const again = getRememberedLesson(docId) || current;
+    if (!cloudMayReplaceLocal(again, cloud)) return;
+    await setLocalHomologatedLesson({ ...cloud, pendingCloud: false });
+  }).catch(() => undefined);
+}
+
+export async function getHomologatedLesson(day: number, part: number): Promise<HomologatedLesson | null> {
+  const docId = getLessonDocId(day, part);
+  const loaded = await assembleHomologatedLesson({
+    readVault: () => readVaultLesson(docId),
+    readLegacy: () => readLegacyHomologatedLesson(docId),
+    readCloud: () => readCloudHomologatedLesson(docId),
+    writeLocal: (lesson) => setLocalHomologatedLesson({ ...lesson, pendingCloud: false })
+  });
+  if (loaded.source) reportLessonLoad(loaded.source, docId, loaded.ms);
+  if (maySyncDisplayedLesson(loaded) && loaded.lesson) {
+    refreshHomologatedLesson(docId, loaded.lesson);
+  }
+  return loaded.lesson;
 }
 
 function normalizeLesson(docId: string, raw: HomologatedLesson): HomologatedLesson {
@@ -470,17 +508,19 @@ export async function fetchAllHomologatedLessons(): Promise<HomologatedLesson[]>
   try {
     const snap = await getDocs(collection(db, 'homologated_lessons'));
     const cloud: HomologatedLesson[] = [];
-    snap.forEach((docSnap) => {
-      const data = normalizeLesson(docSnap.id, docSnap.data() as HomologatedLesson);
-      if (!data.content && !data.blocks?.length && !data.review) return;
-      if (data.status && data.status !== 'approved') return;
-      setLocalHomologatedLesson(data);
-      cloud.push(data);
-    });
     const byId = new Map<string, HomologatedLesson>();
-    [...local, ...cloud].forEach((lesson) => {
+    for (const lesson of local) {
       if (lesson?.id) byId.set(lesson.id, lesson);
-    });
+    }
+    for (const docSnap of snap.docs) {
+      const data = normalizeLesson(docSnap.id, docSnap.data() as HomologatedLesson);
+      if (!data.content && !data.blocks?.length && !data.review) continue;
+      if (data.status && data.status !== 'approved') continue;
+      const persisted = await persistCatalogLesson(data, readLegacyHomologatedLesson);
+      if (!persisted) continue;
+      byId.set(data.id, data);
+      cloud.push(data);
+    }
     lastCloudFetch = Array.from(byId.values());
     lastCloudFetchAt = Date.now();
     if (typeof window !== 'undefined') {
