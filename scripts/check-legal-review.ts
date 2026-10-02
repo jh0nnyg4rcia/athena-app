@@ -32,6 +32,8 @@ import {
   LegalReviewError,
   hashCatalogSnapshot,
   hashLessonContent,
+  PROCESSING_LEASE_MS,
+  processingLockBlocks,
   processingLockFresh,
   reviewCannotBePublished,
   type LegalReviewRepository,
@@ -70,6 +72,7 @@ import {
   startLegalReview,
   startLegalReviewSection,
   startLegalReviewTest,
+  renewProcessingLease,
   type LegalReviewAuditor,
   type StartReviewResult,
 } from "../src/services/legalReviewFlow";
@@ -110,6 +113,7 @@ function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
   lessons: Map<string, StoredCatalogLesson>;
   parts: Map<string, { id: string }>;
   reviews: Map<string, LegalReviewView>;
+  indexes: Map<string, ReturnType<typeof emptyReviewIndex>>;
 } {
   const lessons = new Map<string, StoredCatalogLesson>([[initial.id, { ...initial }]]);
   const parts = new Map<string, { id: string }>();
@@ -119,6 +123,7 @@ function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
     lessons,
     parts,
     reviews,
+    indexes,
     async getLesson(id) {
       const found = lessons.get(id);
       return found ? { ...found } : null;
@@ -128,8 +133,12 @@ function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
     },
     async begin(review) {
       const index = indexes.get(review.lessonId) || emptyReviewIndex(review.lessonId);
-      if (processingLockFresh(index, review.requestedAt) && index.processingReviewId !== review.id) {
+      const previous = index.processingReviewId ? reviews.get(index.processingReviewId) || null : null;
+      if (processingLockBlocks(index, previous, review.requestedAt)) {
         throw new LegalReviewError("Já existe uma revisão em andamento para esta aula. Aguarde a conclusão antes de iniciar outra.", 409);
+      }
+      if (previous?.status === "processing" && !processingLockFresh(index, review.requestedAt)) {
+        reviews.set(previous.id, { ...previous, status: "failed" });
       }
       reviews.set(review.id, { ...review });
       indexes.set(review.lessonId, {
@@ -142,6 +151,7 @@ function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
     async complete(review) {
       reviews.set(review.id, { ...review });
       const index = indexes.get(review.lessonId) || emptyReviewIndex(review.lessonId);
+      if (index.processingReviewId && index.processingReviewId !== review.id) return;
       indexes.set(review.lessonId, {
         ...index,
         processingReviewId: null,
@@ -152,9 +162,23 @@ function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
     },
     async fail(reviewId, lessonId) {
       const current = reviews.get(reviewId);
-      if (current) reviews.set(reviewId, { ...current, status: "failed" });
+      if (!current || current.status !== "processing") return;
+      reviews.set(reviewId, { ...current, status: "failed" });
       const index = indexes.get(lessonId) || emptyReviewIndex(lessonId);
-      indexes.set(lessonId, { ...index, processingReviewId: null, latestStatus: "failed" });
+      if (index.processingReviewId !== reviewId) return;
+      indexes.set(lessonId, {
+        ...index,
+        processingReviewId: null,
+        processingStartedAt: null,
+        latestReviewId: reviewId,
+        latestStatus: "failed",
+      });
+    },
+    async touchProcessing(lessonId, reviewId, now) {
+      const index = indexes.get(lessonId) || emptyReviewIndex(lessonId);
+      if (index.processingReviewId !== reviewId) return false;
+      indexes.set(lessonId, { ...index, processingStartedAt: now });
+      return true;
     },
     async get(reviewId) {
       const current = reviews.get(reviewId);
@@ -174,6 +198,15 @@ function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
       if (!current) throw new LegalReviewError("Revisão não encontrada.", 404);
       const next: LegalReviewView = { ...current, status: "rejected", rejectedByUid: uid, rejectedAt: now };
       reviews.set(reviewId, next);
+      const index = indexes.get(current.lessonId) || emptyReviewIndex(current.lessonId);
+      if (index.processingReviewId && index.processingReviewId !== current.id) return next;
+      indexes.set(current.lessonId, {
+        ...index,
+        processingReviewId: null,
+        processingStartedAt: null,
+        latestReviewId: current.id,
+        latestStatus: "rejected",
+      });
       return next;
     },
     async approve(reviewId, uid, email, now) {
@@ -192,13 +225,13 @@ function memoryRepo(initial: StoredCatalogLesson): LegalReviewRepository & {
       parts.set(published.id, { id: published.id });
       reviews.set(reviewId, { ...current, status: "approved", approvedByUid: uid, approvedAt: now });
       const index = indexes.get(current.lessonId) || emptyReviewIndex(current.lessonId);
+      const ownsLock = !index.processingReviewId || index.processingReviewId === reviewId;
       indexes.set(current.lessonId, {
         ...index,
-        processingReviewId: null,
+        ...(ownsLock ? { processingReviewId: null, processingStartedAt: null, latestReviewId: reviewId, latestStatus: "approved" } : {}),
         approvedHash: hashCatalogSnapshot(published),
         approvedReviewId: reviewId,
         approvedReviewDate: current.reviewDate,
-        latestStatus: "approved",
       });
       return { ok: true, lesson: published };
     },
@@ -2325,6 +2358,324 @@ async function main() {
     missingPart = error instanceof LegalReviewError ? error.status : 0;
   }
   assert(missingPart === 404 && sectionRepo.lessons.get("day_1_part_0")!.content === sectionBefore, "parte inexistente falha fechado sem alterar a aula");
+
+  const lockAuditor: LegalReviewAuditor = {
+    async audit(input) {
+      const audit = normalizeLegalAudit(
+        auditBody(input.content, []),
+        input.content,
+        { webSearchExecuted: true, consultedUrls: [PLANALTO] }
+      );
+      if (!audit) throw new Error("cadeado inválido");
+      return { ...audit, model: "gpt-5.6", webSearchUsed: true };
+    },
+  };
+  const activeRepo = memoryRepo(lesson());
+  const activeBefore = activeRepo.lessons.get("day_1_part_0")!.content;
+  const activeStarted = 5_000_000;
+  const activeDone = pending(await startLegalReviewSection(activeRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: activeStarted,
+  }));
+  const activeGhost: LegalReviewView = {
+    ...activeRepo.reviews.get(activeDone.id)!,
+    id: "rev_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    status: "processing",
+    requestedAt: activeStarted,
+  };
+  await activeRepo.begin(activeGhost);
+  let activeBlocked = "";
+  try {
+    await startLegalReviewSection(activeRepo, lockAuditor, {
+      day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: activeStarted + 1_000,
+    });
+  } catch (error) {
+    activeBlocked = error instanceof LegalReviewError ? `${error.status}:${error.message}` : "";
+  }
+  assert(activeBlocked === "409:Já existe uma revisão em andamento para esta parte. Aguarde a conclusão antes de iniciar outra.", "revisão realmente ativa bloqueia outra da mesma parte");
+  assert(activeRepo.lessons.get("day_1_part_0")!.content === activeBefore, "bloqueio ativo não altera a aula");
+  const otherPart = pending(await startLegalReviewSection(activeRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 0, force: true, uid: "ceo", now: activeStarted + 2_000,
+  }));
+  assert(otherPart.lessonId === sectionReviewKey(1, 0, 0) && otherPart.previewOnly === true, "cadeado de uma parte não bloqueia outra parte");
+  assert(activeRepo.reviews.get(activeGhost.id)?.status === "processing", "a parte bloqueada permanece em processamento");
+  await activeRepo.touchProcessing(sectionReviewKey(1, 0, 1), activeGhost.id, activeStarted + PROCESSING_LEASE_MS - 5_000);
+  let heartbeatBlocked = 0;
+  try {
+    await startLegalReviewSection(activeRepo, lockAuditor, {
+      day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: activeStarted + PROCESSING_LEASE_MS + 1_000,
+    });
+  } catch (error) {
+    heartbeatBlocked = error instanceof LegalReviewError ? error.status : 0;
+  }
+  assert(heartbeatBlocked === 409, "renovação do cadeado mantém o bloqueio enquanto a revisão segue ativa");
+
+  const staleRepo = memoryRepo(lesson());
+  const staleBefore = staleRepo.lessons.get("day_1_part_0")!.content;
+  const staleStarted = 6_000_000;
+  const staleDone = pending(await startLegalReviewSection(staleRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: staleStarted,
+  }));
+  const staleGhost: LegalReviewView = {
+    ...staleRepo.reviews.get(staleDone.id)!,
+    id: "rev_cccccccc-cccc-cccc-cccc-cccccccccccc",
+    status: "processing",
+    requestedAt: staleStarted,
+  };
+  await staleRepo.begin(staleGhost);
+  const recovered = pending(await startLegalReviewSection(staleRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: staleStarted + PROCESSING_LEASE_MS + 1,
+  }));
+  assert(recovered.previewOnly === true && recovered.blockIndex === 1, "revisão órfã libera nova prévia da mesma parte");
+  assert(staleRepo.reviews.get(staleGhost.id)?.status === "failed", "revisão órfã é encerrada como falha");
+  assert(staleRepo.lessons.get("day_1_part_0")!.content === staleBefore && staleRepo.parts.size === 0, "recuperação da órfã não publica a aula");
+  let staleApprove = 0;
+  try {
+    await approveLegalReview(staleRepo, recovered.id, "uid-ceo", CEO, staleStarted + PROCESSING_LEASE_MS + 2);
+  } catch (error) {
+    staleApprove = error instanceof LegalReviewError ? error.status : 0;
+  }
+  assert(staleApprove === 403, "prévia recuperada continua sem publicação");
+
+  const doneRepo = memoryRepo(lesson());
+  const firstDone = pending(await startLegalReviewSection(doneRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 7_000_000,
+  }));
+  const secondDone = pending(await startLegalReviewSection(doneRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 7_010_000,
+  }));
+  assert(firstDone.status === "pending_approval" && secondDone.id !== firstDone.id, "revisão concluída não bloqueia nova execução");
+  await rejectLegalReview(doneRepo, secondDone.id, "uid-ceo", 7_020_000);
+  const afterReject = pending(await startLegalReviewSection(doneRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 7_030_000,
+  }));
+  assert(doneRepo.reviews.get(secondDone.id)?.status === "rejected" && afterReject.previewOnly === true, "revisão rejeitada não bloqueia");
+
+  const processingRejectRepo = memoryRepo(lesson());
+  const seeded = pending(await startLegalReviewSection(processingRejectRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 8_000_000,
+  }));
+  const stillProcessing: LegalReviewView = {
+    ...processingRejectRepo.reviews.get(seeded.id)!,
+    status: "processing",
+    requestedAt: 8_000_000,
+  };
+  await processingRejectRepo.begin(stillProcessing);
+  await rejectLegalReview(processingRejectRepo, stillProcessing.id, "uid-ceo", 8_001_000);
+  const afterProcessingReject = pending(await startLegalReviewSection(processingRejectRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 8_002_000,
+  }));
+  assert(afterProcessingReject.id !== stillProcessing.id && processingRejectRepo.lessons.get("day_1_part_0")!.content === activeBefore, "rejeitar uma revisão em processamento libera a parte");
+
+  let failures = 0;
+  const failingAuditor: LegalReviewAuditor = {
+    async audit(input) {
+      failures += 1;
+      if (failures === 1) throw new Error("timeout");
+      const audit = normalizeLegalAudit(
+        auditBody(input.content, []),
+        input.content,
+        { webSearchExecuted: true, consultedUrls: [PLANALTO] }
+      );
+      if (!audit) throw new Error("falha");
+      return { ...audit, model: "gpt-5.6", webSearchUsed: true };
+    },
+  };
+  const errorRepo = memoryRepo(lesson());
+  let errorStatus = 0;
+  try {
+    await startLegalReviewSection(errorRepo, failingAuditor, {
+      day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 9_000_000,
+    });
+  } catch (error) {
+    errorStatus = error instanceof LegalReviewError ? error.status : 0;
+  }
+  const afterError = pending(await startLegalReviewSection(errorRepo, failingAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 9_001_000,
+  }));
+  assert(errorStatus === 502 && afterError.previewOnly === true && errorRepo.lessons.get("day_1_part_0")!.content === activeBefore, "erro ou timeout não bloqueia uma nova prévia");
+
+  const dirtyRepo = memoryRepo(lesson());
+  const dirty = pending(await startLegalReviewSection(dirtyRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 10_000_000,
+  }));
+  dirtyRepo.indexes.set(dirty.lessonId, {
+    ...await dirtyRepo.getIndex(dirty.lessonId),
+    processingReviewId: dirty.id,
+    processingStartedAt: 10_000_000,
+    latestStatus: "processing",
+  });
+  const despiteDirtyIndex = pending(await startLegalReviewSection(dirtyRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 10_001_000,
+  }));
+  assert(dirty.status === "pending_approval" && despiteDirtyIndex.id !== dirty.id && dirtyRepo.reviews.get(dirty.id)?.status === "pending_approval", "índice antigo não bloqueia revisão já concluída");
+  assert(!processingLockBlocks(
+    { ...emptyReviewIndex(sectionReviewKey(1, 0, 1)), processingReviewId: dirty.id, processingStartedAt: 10_000_000 },
+    { id: dirty.id, status: "pending_approval" },
+    10_001_000
+  ), "cadeado fresco de revisão concluída não é tratado como execução");
+
+  const raceRepo = memoryRepo(lesson());
+  const raceBefore = raceRepo.lessons.get("day_1_part_0")!.content;
+  const raceKey = sectionReviewKey(1, 0, 1);
+  const raceStart = 12_000_000;
+  const raceDone = pending(await startLegalReviewSection(raceRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: raceStart,
+  }));
+  const lateA: LegalReviewView = {
+    ...raceRepo.reviews.get(raceDone.id)!,
+    id: "rev_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    status: "processing",
+    requestedAt: raceStart,
+  };
+  await raceRepo.begin(lateA);
+  const renewedAt = raceStart + PROCESSING_LEASE_MS - 1_000;
+  await raceRepo.touchProcessing(raceKey, lateA.id, renewedAt);
+  let slowRefused = 0;
+  try {
+    await startLegalReviewSection(raceRepo, lockAuditor, {
+      day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: renewedAt + 1_000,
+    });
+  } catch (error) {
+    slowRefused = error instanceof LegalReviewError ? error.status : 0;
+  }
+  assert(slowRefused === 409 && (await raceRepo.getIndex(raceKey)).processingReviewId === lateA.id, "heartbeat mantém o lease e recusa a execução concorrente");
+  const takeoverAt = renewedAt + PROCESSING_LEASE_MS + 1;
+  const ownerB: LegalReviewView = {
+    ...lateA,
+    id: "rev_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    status: "processing",
+    requestedAt: takeoverAt,
+  };
+  await raceRepo.begin(ownerB);
+  assert(raceRepo.reviews.get(lateA.id)?.status === "failed" && (await raceRepo.getIndex(raceKey)).processingReviewId === ownerB.id, "lease expirado transfere o cadeado e encerra só a revisão antiga");
+  await raceRepo.touchProcessing(raceKey, lateA.id, takeoverAt + 10_000);
+  await raceRepo.fail(lateA.id, raceKey, "retorno atrasado");
+  await raceRepo.complete({ ...lateA, status: "pending_approval", reviewedMarkdown: lateA.originalContent });
+  await raceRepo.reject(lateA.id, "uid-ceo", takeoverAt + 20_000);
+  const afterLateA = await raceRepo.getIndex(raceKey);
+  assert(afterLateA.processingReviewId === ownerB.id && afterLateA.processingStartedAt === takeoverAt, "execução atrasada não renova nem libera o cadeado novo");
+  assert(raceRepo.reviews.get(ownerB.id)?.status === "processing" && raceRepo.lessons.get("day_1_part_0")!.content === raceBefore, "execução atrasada não marca falha nem publica a revisão nova");
+
+  const exclusiveRepo = memoryRepo(lesson());
+  const exclusiveStart = 13_000_000;
+  const exclusiveDone = pending(await startLegalReviewSection(exclusiveRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: exclusiveStart,
+  }));
+  const expired: LegalReviewView = {
+    ...exclusiveRepo.reviews.get(exclusiveDone.id)!,
+    id: "rev_dddddddd-dddd-dddd-dddd-dddddddddddd",
+    status: "processing",
+    requestedAt: exclusiveStart,
+  };
+  await exclusiveRepo.begin(expired);
+  const claimAt = exclusiveStart + PROCESSING_LEASE_MS + 1;
+  const claimantB: LegalReviewView = {
+    ...expired,
+    id: "rev_eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+    status: "processing",
+    requestedAt: claimAt,
+  };
+  const claimantC: LegalReviewView = {
+    ...expired,
+    id: "rev_ffffffff-ffff-ffff-ffff-ffffffffffff",
+    status: "processing",
+    requestedAt: claimAt,
+  };
+  await exclusiveRepo.begin(claimantB);
+  let claimantCBlocked = 0;
+  try {
+    await exclusiveRepo.begin(claimantC);
+  } catch (error) {
+    claimantCBlocked = error instanceof LegalReviewError ? error.status : 0;
+  }
+  const exclusiveIndex = await exclusiveRepo.getIndex(sectionReviewKey(1, 0, 1));
+  assert(claimantCBlocked === 409 && exclusiveIndex.processingReviewId === claimantB.id, "duas aquisições simultâneas após o lease deixam um único dono");
+  assert(exclusiveRepo.reviews.get(expired.id)?.status === "failed" && exclusiveRepo.reviews.get(claimantC.id)?.status !== "failed", "a disputa não marca falha na execução que não chegou a possuir o cadeado");
+
+  const finished = pending(await startLegalReviewSection(memoryRepo(lesson()), lockAuditor, {
+    day: 1, part: 0, blockIndex: 0, force: true, uid: "ceo", now: 14_000_000,
+  }));
+  const preservedRepo = memoryRepo(lesson());
+  await preservedRepo.begin({ ...finished, lessonId: sectionReviewKey(1, 0, 0), status: "pending_approval", requestedAt: 14_000_000 });
+  preservedRepo.reviews.set(finished.id, { ...preservedRepo.reviews.get(finished.id)!, status: "pending_approval" });
+  preservedRepo.indexes.set(sectionReviewKey(1, 0, 0), {
+    ...await preservedRepo.getIndex(sectionReviewKey(1, 0, 0)),
+    processingReviewId: finished.id,
+    processingStartedAt: 14_000_000 - PROCESSING_LEASE_MS - 1,
+  });
+  const preservedNext = pending(await startLegalReviewSection(preservedRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 0, force: true, uid: "ceo", now: 14_000_000,
+  }));
+  assert(preservedRepo.reviews.get(finished.id)?.status === "pending_approval" && preservedNext.id !== finished.id, "recuperação não sobrescreve revisão já concluída");
+
+  let heartbeatFailures = 0;
+  const fragile = memoryRepo(lesson());
+  const originalTouch = fragile.touchProcessing.bind(fragile);
+  fragile.touchProcessing = async () => {
+    heartbeatFailures += 1;
+    throw new Error("firestore temporário");
+  };
+  await renewProcessingLease(fragile, sectionReviewKey(1, 0, 1), "rev_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 15_000_000);
+  fragile.touchProcessing = originalTouch;
+  await fragile.begin(lateA);
+  await renewProcessingLease(fragile, raceKey, "rev_00000000-0000-0000-0000-000000000000", raceStart + 50_000);
+  assert(heartbeatFailures === 1 && (await fragile.getIndex(raceKey)).processingReviewId === lateA.id, "falha ou perda de ownership do heartbeat não derruba nem troca o cadeado");
+  const renewed = await fragile.touchProcessing(raceKey, lateA.id, raceStart + 30_000);
+  const lost = await fragile.touchProcessing(raceKey, "rev_00000000-0000-0000-0000-000000000000", raceStart + 50_000);
+  const afterLostTouch = await fragile.getIndex(raceKey);
+  assert(renewed === true && lost === false && afterLostTouch.processingReviewId === lateA.id && afterLostTouch.processingStartedAt === raceStart + 30_000, "heartbeat sem ownership devolve false e não altera o dono atual");
+
+  const finishedRepo = memoryRepo(lesson());
+  const finishedReview = pending(await startLegalReviewSection(finishedRepo, lockAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 15_000_000,
+  }));
+  await finishedRepo.fail(finishedReview.id, finishedReview.lessonId, "retorno atrasado");
+  assert(finishedRepo.reviews.get(finishedReview.id)?.status === "pending_approval", "fail atrasado não transforma revisão concluída em failed");
+
+  const publishRepo = memoryRepo(lesson());
+  const publishBefore = publishRepo.lessons.get("day_1_part_0")!.content;
+  const approvedCandidate = pending(await startLegalReview(publishRepo, lockAuditor, {
+    day: 1, part: 0, force: true, uid: "ceo", now: 16_000_000,
+  }));
+  const publishHolder: LegalReviewView = {
+    ...publishRepo.reviews.get(approvedCandidate.id)!,
+    id: "rev_11111111-1111-1111-1111-111111111111",
+    status: "processing",
+    requestedAt: 16_100_000,
+  };
+  await publishRepo.begin(publishHolder);
+  const published = await approveLegalReview(publishRepo, approvedCandidate.id, "uid-ceo", CEO, 16_200_000);
+  const publishIndex = await publishRepo.getIndex("day_1_part_0");
+  assert(published.lesson.day === 1 && publishIndex.processingReviewId === publishHolder.id && publishIndex.processingStartedAt === 16_100_000, "approve antigo não limpa o lease de outro review");
+  assert(publishRepo.reviews.get(publishHolder.id)?.status === "processing", "approve antigo não marca falha na execução que possui o lease");
+
+  const rejectRepo = memoryRepo(lesson());
+  const rejectCandidate = pending(await startLegalReview(rejectRepo, lockAuditor, {
+    day: 1, part: 0, force: true, uid: "ceo", now: 17_000_000,
+  }));
+  const rejectHolder: LegalReviewView = {
+    ...rejectRepo.reviews.get(rejectCandidate.id)!,
+    id: "rev_22222222-2222-2222-2222-222222222222",
+    status: "processing",
+    requestedAt: 17_100_000,
+  };
+  await rejectRepo.begin(rejectHolder);
+  await rejectLegalReview(rejectRepo, rejectCandidate.id, "uid-ceo", 17_200_000);
+  const rejectIndex = await rejectRepo.getIndex("day_1_part_0");
+  assert(rejectRepo.reviews.get(rejectCandidate.id)?.status === "rejected" && rejectIndex.processingReviewId === rejectHolder.id && rejectIndex.processingStartedAt === 17_100_000, "reject antigo não limpa o lease de outro review");
+
+  let probedSection: number | undefined;
+  const probeRepo = memoryRepo(lesson());
+  const probeAuditor: LegalReviewAuditor = {
+    async audit(input) {
+      probedSection = input.sectionIndex;
+      return lockAuditor.audit(input);
+    },
+  };
+  const probed = pending(await startLegalReviewSection(probeRepo, probeAuditor, {
+    day: 1, part: 0, blockIndex: 1, force: true, uid: "ceo", now: 18_000_000,
+  }));
+  assert(probedSection === 1 && probed.previewOnly === true && probed.blockIndex === 1 && probeRepo.lessons.get("day_1_part_0")!.content === publishBefore, "lease não altera sectionIndex nem previewOnly");
 
   if (failed) {
     console.error(`${failed} verificações falharam.`);
