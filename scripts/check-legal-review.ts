@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { createAthenaApiApp } from "../src/api/createAthenaApiApp";
 import { changeHunks, diffLines } from "../src/lib/legalReviewDiff";
-import { searchDomainsForLesson } from "../src/lib/legalReviewSources";
+import { institutionsNamedInClaim, searchDomainsForLesson } from "../src/lib/legalReviewSources";
 import {
   LEGAL_REVIEW_ALREADY_MESSAGE,
   LEGAL_REVIEW_CONFLICT_MESSAGE,
@@ -380,6 +380,31 @@ async function main() {
   assert(absentFromTool?.changes[0]?.evidence[0]?.consulted === false, "URL escrita pelo modelo e ausente da pesquisa não é consultada");
   assert(absentFromTool?.changes[0]?.confirmation === "NAO_CONFIRMADO", "URL não consultada não confirma a alteração");
   assert(absentFromTool?.verificationLevel !== "VERIFICADO_COM_FONTES", "URL não consultada não verifica a auditoria");
+
+  const unnamedReason = "A redação do prazo passa a contar em dias corridos.";
+  const unnamedClaim = `${unnamedReason}\ndetenção\nreclusão`;
+  assert(institutionsNamedInClaim(unnamedClaim, "CONCEITO").length === 0, "controle sem família institucional nomeada");
+  const unnamedConfirmed = normalizeLegalAudit(auditBody(original.replace("detenção", "reclusão"), [
+    change({
+      category: "CONCEITO",
+      reason: unnamedReason,
+      originalExcerpt: "detenção",
+      revisedExcerpt: "reclusão",
+      evidence: [evidence(PLANALTO, "LEI", true)],
+    }),
+  ]), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+  assert(unnamedConfirmed?.changes[0]?.confirmation === "CONFIRMADO", "evidência oficial consultada confirma alteração material sem família nomeada");
+  assert(unnamedConfirmed?.changes[0]?.evidence[0]?.supportsChange === true, "evidência sem família nomeada permanece pertinente");
+  const unnamedDenied = normalizeLegalAudit(auditBody(original.replace("detenção", "reclusão"), [
+    change({
+      category: "CONCEITO",
+      reason: unnamedReason,
+      originalExcerpt: "detenção",
+      revisedExcerpt: "reclusão",
+      evidence: [evidence(PLANALTO, "LEI", false)],
+    }),
+  ]), original, { webSearchExecuted: true, consultedUrls: [PLANALTO] });
+  assert(unnamedDenied?.changes[0]?.confirmation === "NAO_CONFIRMADO", "evidência sem pertinência não confirma alteração material sem família nomeada");
 
   const uncovered = normalizeLegalAudit(auditBody(
     original.replace("O conceito permanece.", "O conceito permanece.\n\nO STF decidiu em segredo que a pena mudou."),

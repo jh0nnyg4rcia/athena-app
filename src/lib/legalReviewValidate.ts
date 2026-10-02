@@ -219,6 +219,14 @@ function evidenceSupportsFamily(evidence: LegalReviewEvidence, family: string): 
   return Boolean(host && host.family === family && sourceTypeFits(evidence.sourceType, family));
 }
 
+function evidenceConfirmsMaterialClaim(evidence: LegalReviewEvidence): boolean {
+  if (!evidence.official || !evidence.consulted || evidence.supportsChange !== true) return false;
+  const url = safeHttpsUrl(evidence.url);
+  if (!url) return false;
+  const host = matchOfficialHost(url);
+  return Boolean(host && sourceTypeFits(evidence.sourceType, host.family));
+}
+
 function confirmChange(change: Omit<LegalReviewChange, "verified" | "confirmation">, modelConfirmation: LegalConfirmation): LegalConfirmation {
   if (modelConfirmation === "NAO_CONFIRMADO") return "NAO_CONFIRMADO";
   const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
@@ -228,7 +236,7 @@ function confirmChange(change: Omit<LegalReviewChange, "verified" | "confirmatio
     return covered ? "CONFIRMADO" : "NAO_CONFIRMADO";
   }
   if (!isMaterialLegalChange(change)) return modelConfirmation;
-  return "NAO_CONFIRMADO";
+  return change.evidence.some(evidenceConfirmsMaterialClaim) ? "CONFIRMADO" : "NAO_CONFIRMADO";
 }
 
 function readChange(value: unknown, index: number, consulted: Set<string>): LegalReviewChange | null {
