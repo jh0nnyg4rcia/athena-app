@@ -26,9 +26,11 @@ import type {
   DiagnosticSourceType,
   DiagnosticStatuteType,
   EvidenceRefusalDiagnostic,
+  FollowUpSkipReason,
   LegalAuditValidationLog,
   MissingStatuteDiagnostic,
   RefusalPredicateDiagnostic,
+  StatuteFailureReason,
   ValidationReasonCode,
 } from "./legalReviewDiagnostics";
 
@@ -1831,6 +1833,28 @@ function predicateMetadata(
         }));
         const stringHits = hits.filter((hit) => hit.url || hit.title || hit.explanation);
         const pool = stringHits.length > 0 ? stringHits : hits;
+
+        const hasIdentifierWithoutSupport = evidence.some((item) => {
+          const match = statuteTextMatch(item, statute.number);
+          const hasIdentifier = match.url || match.title || match.explanation;
+          return hasIdentifier && item.supportsChange !== true;
+        });
+
+        const hasSupportWithoutIdentifier = evidence.some((item) => {
+          const match = statuteTextMatch(item, statute.number);
+          const hasIdentifier = match.url || match.title || match.explanation;
+          return !hasIdentifier && item.supportsChange === true;
+        });
+
+        const failureReason: StatuteFailureReason =
+          hasIdentifierWithoutSupport && hasSupportWithoutIdentifier
+            ? "split_support_and_identifier"
+            : hasIdentifierWithoutSupport
+            ? "identifier_without_support"
+            : hasSupportWithoutIdentifier
+            ? "support_without_identifier"
+            : "neither";
+
         return {
           statuteType: closedStatuteType(statute.type),
           evidenceMatch: {
@@ -1838,6 +1862,9 @@ function predicateMetadata(
             title: hits.some((hit) => hit.title),
             explanation: hits.some((hit) => hit.explanation),
             effectiveSupportsChange: pool.some((hit) => hit.effectiveSupportsChange),
+            hasIdentifierWithoutSupport,
+            hasSupportWithoutIdentifier,
+            failureReason,
           },
         };
       });
@@ -2085,6 +2112,7 @@ function finalizePatchAudit(input: {
       consultedSourceCount: input.consultedSources.length,
       repairablePatchCount: repairablePatches.length,
       followUpEligible: false,
+      followUpSkipReason: repairablePatches.length > 0 ? "insufficient_remaining" : "no_repairable_patch",
       rejectedPatches,
       ...(predicateDiagnostics.length ? { predicateDiagnostics } : {}),
     },

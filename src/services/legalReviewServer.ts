@@ -13,7 +13,14 @@ import {
   type NormalizedAudit,
   type RepairablePatch,
 } from "../lib/legalReviewValidate";
-import type { LegalAuditValidationLog, ValidationIncompleteReason, ValidationReasonCode, ValidationResponseStatus } from "../lib/legalReviewDiagnostics";
+import {
+  computeFollowUpEligibility,
+  type FollowUpSkipReason,
+  type LegalAuditValidationLog,
+  type ValidationIncompleteReason,
+  type ValidationReasonCode,
+  type ValidationResponseStatus,
+} from "../lib/legalReviewDiagnostics";
 import { searchDomainsForLesson } from "../lib/legalReviewSources";
 import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "./legalReviewPrompt";
 import { redactProviderError } from "./openaiServerService";
@@ -477,16 +484,31 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   const startedAt = Date.now();
   const remaining = () => OPENAI_AUDIT_BUDGET_MS - (Date.now() - startedAt);
 
-  const read = (current: ReviewModelResponse) => {
+  const read = (current: ReviewModelResponse, timings?: { mainCallElapsedMs?: number }) => {
+    const valStart = Date.now();
     trace.validationStart();
     try {
       const audit = interpretReviewResponse(current, baseline, requestedModel);
-      const validation = audit.validationLog
+      const valElapsed = Date.now() - valStart;
+      const remMs = remaining();
+      const repairableCount = audit.repairablePatches?.length || 0;
+      const lacksSources = !audit.webSearchUsed;
+      const eligibility = computeFollowUpEligibility({
+        repairablePatchCount: repairableCount,
+        lacksSources,
+        remainingMs: remMs,
+        requiredRemainingMs: MIN_FOLLOW_UP_REMAINING_MS,
+      });
+      const validation: LegalAuditValidationLog | undefined = audit.validationLog
         ? {
           ...audit.validationLog,
-          followUpEligible:
-            ((audit.repairablePatches?.length || 0) > 0 || !audit.webSearchUsed)
-            && remaining() >= MIN_FOLLOW_UP_REMAINING_MS,
+          followUpEligible: eligibility.followUpEligible,
+          followUpSkipReason: eligibility.followUpSkipReason,
+          remainingMs: Math.max(0, remMs),
+          requiredRemainingMs: MIN_FOLLOW_UP_REMAINING_MS,
+          repairablePatchCount: repairableCount,
+          ...(timings?.mainCallElapsedMs !== undefined ? { mainCallElapsedMs: timings.mainCallElapsedMs } : {}),
+          validationElapsedMs: valElapsed,
         }
         : undefined;
       trace.validationEnd(traceCounts(audit), undefined, validation);
@@ -500,15 +522,18 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   };
 
   let response: ReviewModelResponse | null = null;
+  let mainCallElapsedMs = 0;
   for (let tryNumber = 0; tryNumber < 2; tryNumber += 1) {
     if (tryNumber > 0 && remaining() < MIN_GENERATION_RETRY_REMAINING_MS) break;
     const timeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
     if (timeoutMs < 15_000) break;
     trace.openaiStart();
+    const callStart = Date.now();
     try {
       response = input.callModel
         ? await input.callModel({ model: requestedModel, instructions, userInput, lessonText: input.content, timeoutMs })
         : await createResponse(client as OpenAI, requestedModel, instructions, userInput, input.content, timeoutMs);
+      mainCallElapsedMs = Date.now() - callStart;
       trace.openaiEnd(response.model);
       break;
     } catch (error) {
@@ -528,7 +553,7 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
     throw failure;
   }
 
-  let parsed = read(response);
+  let parsed = read(response, { mainCallElapsedMs });
   if (parsed instanceof Error) {
     trace.noteFailure(parsed, "validation");
     throw parsed;

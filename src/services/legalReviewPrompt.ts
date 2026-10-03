@@ -175,6 +175,17 @@ Uma página oficial de outro órgão não comprova afirmação atribuída ao STF
 
 Quando uma alteração jurídica compuser proposições de múltiplas normas ou fontes (por exemplo, vedações da Constituição Federal combinadas com impedimentos da Lei de Migração e regras do Estatuto dos Refugiados), inclua em evidence[] todas as fontes oficiais necessárias para cobrir conjuntamente cada uma das proposições materiais da redação revisada. Para cada evidência oficial que comprovar a sua respectiva proposição ou diploma na redação revisada, preencha supportsChange: true (não marque supportsChange: false apenas porque o documento sustenta uma proposição da alteração composta e não a alteração inteira). Quando todas as proposições materiais da redação revisada estiverem fundamentadas pelas fontes oficiais consultadas reunidas em evidence[], a alteração deve ser classificada com confirmation: "CONFIRMADO" e verified: true. Cada diploma ou órgão específico introduzido na redação deve possuir sua correspondente evidência oficial comprobatória. A combinação de fontes não autoriza inventar prazo, quórum ou recurso não previsto nas fontes consultadas.
 
+Quando revisedExcerpt introduzir ou utilizar especificamente Lei, Lei Complementar, Decreto, Decreto-Lei ou Medida Provisória identificada por número, deve existir no evidence[] correspondente pelo menos um item que:
+- tenha supportsChange: true;
+- corresponda efetivamente àquele diploma;
+- seja fonte oficial;
+- repita os dígitos identificadores do diploma no title ou supportExplanation;
+- preserve o número na URL somente quando ele naturalmente fizer parte da URL oficial real;
+- nunca invente ou modifique URL para satisfazer o validador;
+- nunca use outro diploma apenas porque trata do mesmo assunto.
+
+Uma fonte jurisprudencial que mencione o diploma não substitui automaticamente a fonte normativa quando a alteração introduz especificamente aquele diploma.
+
 
 ## OBJETIVO FINAL
 

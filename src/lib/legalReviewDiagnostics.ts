@@ -80,6 +80,23 @@ export type DiagnosticSourceType = (typeof DIAGNOSTIC_SOURCE_TYPES)[number];
 export const DIAGNOSTIC_STATUTE_TYPES = ["LEI", "LC", "DECRETO", "DECRETO_LEI", "MP", "OTHER"] as const;
 export type DiagnosticStatuteType = (typeof DIAGNOSTIC_STATUTE_TYPES)[number];
 
+export const FOLLOW_UP_SKIP_REASONS = [
+  "none",
+  "no_repairable_patch",
+  "insufficient_remaining",
+] as const;
+
+export type FollowUpSkipReason = (typeof FOLLOW_UP_SKIP_REASONS)[number];
+
+export const STATUTE_FAILURE_REASONS = [
+  "identifier_without_support",
+  "support_without_identifier",
+  "split_support_and_identifier",
+  "neither",
+] as const;
+
+export type StatuteFailureReason = (typeof STATUTE_FAILURE_REASONS)[number];
+
 export interface EvidenceRefusalDiagnostic {
   evidenceIndex: number;
   hostFamily: DiagnosticHostFamily;
@@ -95,6 +112,9 @@ export interface StatuteEvidenceMatchDiagnostic {
   title: boolean;
   explanation: boolean;
   effectiveSupportsChange: boolean;
+  hasIdentifierWithoutSupport: boolean;
+  hasSupportWithoutIdentifier: boolean;
+  failureReason: StatuteFailureReason;
 }
 
 export interface MissingStatuteDiagnostic {
@@ -136,6 +156,11 @@ export interface LegalAuditValidationLog {
   consultedSourceCount: number;
   repairablePatchCount: number;
   followUpEligible: boolean;
+  followUpSkipReason?: FollowUpSkipReason;
+  remainingMs?: number;
+  requiredRemainingMs?: number;
+  mainCallElapsedMs?: number;
+  validationElapsedMs?: number;
   responseStatus?: ValidationResponseStatus;
   incompleteReason?: ValidationIncompleteReason;
   rejectedPatches: RejectedPatchDiagnostic[];
@@ -232,6 +257,37 @@ function evidenceDiagnostics(value: unknown): EvidenceRefusalDiagnostic[] {
   return found;
 }
 
+export function computeFollowUpEligibility(params: {
+  repairablePatchCount: number;
+  lacksSources?: boolean;
+  remainingMs: number;
+  requiredRemainingMs: number;
+}): {
+  followUpEligible: boolean;
+  followUpSkipReason: FollowUpSkipReason;
+} {
+  const needsFollowUp = params.repairablePatchCount > 0 || Boolean(params.lacksSources);
+  if (!needsFollowUp) {
+    return {
+      followUpEligible: false,
+      followUpSkipReason: "no_repairable_patch",
+    };
+  }
+  if (params.remainingMs < params.requiredRemainingMs) {
+    return {
+      followUpEligible: false,
+      followUpSkipReason: "insufficient_remaining",
+    };
+  }
+  return {
+    followUpEligible: true,
+    followUpSkipReason: "none",
+  };
+}
+
+const STATUTE_FAILURE_REASONS_SET = new Set<string>(STATUTE_FAILURE_REASONS);
+const SKIP_REASONS_SET = new Set<string>(FOLLOW_UP_SKIP_REASONS);
+
 function missingStatutes(value: unknown): MissingStatuteDiagnostic[] {
   if (!Array.isArray(value)) return [];
   const found: MissingStatuteDiagnostic[] = [];
@@ -240,6 +296,9 @@ function missingStatutes(value: unknown): MissingStatuteDiagnostic[] {
     const record = asRecord(item);
     if (!record) continue;
     const match = asRecord(record.evidenceMatch) ?? {};
+    const failureReason = typeof match.failureReason === "string" && STATUTE_FAILURE_REASONS_SET.has(match.failureReason)
+      ? (match.failureReason as StatuteFailureReason)
+      : "neither";
     found.push({
       statuteType: statuteType(record.statuteType),
       evidenceMatch: {
@@ -247,6 +306,9 @@ function missingStatutes(value: unknown): MissingStatuteDiagnostic[] {
         title: match.title === true,
         explanation: match.explanation === true,
         effectiveSupportsChange: match.effectiveSupportsChange === true,
+        hasIdentifierWithoutSupport: match.hasIdentifierWithoutSupport === true,
+        hasSupportWithoutIdentifier: match.hasSupportWithoutIdentifier === true,
+        failureReason,
       },
     });
   }
@@ -335,6 +397,21 @@ export function sanitizeValidationLog(value: unknown): LegalAuditValidationLog |
     rejectedPatches,
     ...(predicateDiagnostics.length ? { predicateDiagnostics } : {}),
   };
+  if (typeof record.followUpSkipReason === "string" && SKIP_REASONS_SET.has(record.followUpSkipReason)) {
+    log.followUpSkipReason = record.followUpSkipReason as FollowUpSkipReason;
+  }
+  if (typeof record.remainingMs === "number" && Number.isFinite(record.remainingMs)) {
+    log.remainingMs = finiteCount(record.remainingMs);
+  }
+  if (typeof record.requiredRemainingMs === "number" && Number.isFinite(record.requiredRemainingMs)) {
+    log.requiredRemainingMs = finiteCount(record.requiredRemainingMs);
+  }
+  if (typeof record.mainCallElapsedMs === "number" && Number.isFinite(record.mainCallElapsedMs)) {
+    log.mainCallElapsedMs = finiteCount(record.mainCallElapsedMs);
+  }
+  if (typeof record.validationElapsedMs === "number" && Number.isFinite(record.validationElapsedMs)) {
+    log.validationElapsedMs = finiteCount(record.validationElapsedMs);
+  }
   if (typeof record.status === "string" && AUDIT_STATUSES.has(record.status)) {
     log.status = record.status as ValidationAuditStatus;
   }
