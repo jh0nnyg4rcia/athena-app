@@ -1,8 +1,12 @@
 import { changeHunks, type ChangeHunk } from "./legalReviewDiff";
 import {
+  hasAutonomousClaimAttributedToFamily,
+  hasPositiveAffirmationInReason,
+  institutionalPatternForFamily,
   institutionsNamedInClaim,
   isConfiguredOfficialUrl,
   matchOfficialHost,
+  type SourceFamily,
 } from "./legalReviewSources";
 import type {
   ConsultedLegalSource,
@@ -652,6 +656,134 @@ export function changeLacksNormativeSpecificity(
   return false;
 }
 
+/**
+ * Determina as famílias de fontes oficiais obrigatórias para sustentar uma alteração jurídica.
+ *
+ * Regras:
+ * 1. Famílias institucionais presentes no trecho revisado (revisedExcerpt) são inicialmente candidatas.
+ * 2. Categoria LEGISLACAO sempre requer LEGISLACAO_FEDERAL.
+ * 3. Famílias presentes APENAS no originalExcerpt (e removidas/substituídas no revisedExcerpt)
+ *    NÃO são exigidas, salvo se a alteração fizer afirmação positiva autônoma sobre decisão,
+ *    competência, ato ou entendimento daquela instituição na justificativa (reason).
+ * 4. Regra semântica de autoridade vs. menção incidental: quando uma autoridade decisória A
+ *    (ex.: STF) possui evidência oficial consultada com suporte efetivo à alteração cobrindo
+ *    uma decisão/julgamento dela descrita no texto, e outra instituição B (ex.: CNJ, TJs, TRFs)
+ *    é mencionada apenas no conteúdo ou parâmetros dessa decisão (ex.: "observar diretrizes do CNJ"),
+ *    sem que haja afirmação jurídica autônoma atribuída diretamente a B (como resolução, ato normativo,
+ *    decisão ou precedentes próprios produzidos por B), B é considerada incidental e não gera
+ *    requiredFamily autônoma.
+ */
+export function requiredFamiliesForChange(change: {
+  category: string;
+  reason: string;
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  evidence?: LegalReviewEvidence[];
+}): SourceFamily[] {
+  const originalNamed = institutionsNamedInClaim(change.originalExcerpt, "CONCEITO");
+  const revisedNamed = institutionsNamedInClaim(change.revisedExcerpt, "CONCEITO");
+  const reasonNamed = institutionsNamedInClaim(change.reason, "CONCEITO");
+
+  // Todas as instituições nomeadas na alteração na ordem canônica (NAMED_PATTERNS + LEGISLACAO_FEDERAL)
+  const allMentioned = institutionsNamedInClaim(
+    `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`,
+    change.category
+  );
+
+  const candidates: SourceFamily[] = [];
+
+  for (const family of allMentioned) {
+    if (family === "LEGISLACAO_FEDERAL" || family === "DIARIO_OFICIAL") {
+      candidates.push(family);
+      continue;
+    }
+
+    const inOriginal = originalNamed.includes(family);
+    const inRevised = revisedNamed.includes(family);
+    const inReason = reasonNamed.includes(family);
+
+    // Se a família estava no original, mas NÃO está no revisado:
+    if (inOriginal && !inRevised) {
+      if (!inReason) {
+        // Estava apenas no original e foi removida (caso CHG-001) -> não exige
+        continue;
+      }
+      // Se está na reason, verifica se a reason apenas explica a remoção/erro do original
+      if (hasPositiveAffirmationInReason(change.reason, family)) {
+        candidates.push(family);
+      }
+      continue;
+    }
+
+    // Se está no revisado ou na reason:
+    candidates.push(family);
+  }
+
+  // 5. Distinção entre autoridade da fonte e instituição incidentalmente mencionada
+  const claimText = `${change.reason}\n${change.revisedExcerpt}`;
+  const evidenceList = Array.isArray(change.evidence) ? change.evidence : [];
+
+  // Localiza autoridades judiciais/decisórias A que possuem suporte oficial na evidência
+  const verifiedRulingAuthorities = new Set<SourceFamily>();
+  for (const ev of evidenceList) {
+    if (!ev.official || !ev.consulted || ev.supportsChange !== true) continue;
+    const isRulingEvidence =
+      ev.sourceType === "ACORDAO" ||
+      ev.sourceType === "REPERCUSSAO_GERAL" ||
+      ev.sourceType === "REPETITIVO" ||
+      ev.sourceType === "INFORMATIVO" ||
+      ev.sourceType === "OUTRO_OFICIAL" ||
+      /\b(?:ADI|ADC|ADPF|RE|HC|RMS|Tema|ac[oó]rd[aã]o|julgamento)\b/i.test(ev.title || "") ||
+      /\b(?:ADI|ADC|ADPF|RE|HC|RMS|Tema|ac[oó]rd[aã]o|julgamento)\b/i.test(ev.supportExplanation || "");
+
+    if (!isRulingEvidence) continue;
+
+    for (const family of candidates) {
+      if (family === "LEGISLACAO_FEDERAL" || family === "DIARIO_OFICIAL") continue;
+      if (evidenceSupportsFamily(ev, family)) {
+        const pattern = institutionalPatternForFamily(family);
+        const reportsRulingOfA =
+          pattern &&
+          pattern.test(claimText) &&
+          /\b(?:declarou|decidiu|fixou|julgou|entendeu|assentou|firmou|concluiu|determinou|inconstitucionalidade|constitucionalidade|interpreta[cç][aã]o\s+conforme|ADI|ADC|ADPF|RE|RMS|HC)\b/i.test(
+            claimText
+          );
+        if (reportsRulingOfA) {
+          verifiedRulingAuthorities.add(family);
+        }
+      }
+    }
+  }
+
+  const finalRequired: SourceFamily[] = [];
+  for (const family of candidates) {
+    if (family === "LEGISLACAO_FEDERAL" || family === "DIARIO_OFICIAL") {
+      finalRequired.push(family);
+      continue;
+    }
+
+    // Se é a própria autoridade decisória verificada, permanece exigida
+    if (verifiedRulingAuthorities.has(family)) {
+      finalRequired.push(family);
+      continue;
+    }
+
+    // Se há autoridade decisória A oficialmente verificada no change:
+    if (verifiedRulingAuthorities.size > 0) {
+      // Verifica se B possui afirmação jurídica autônoma atribuída a ela
+      const hasAutonomous = hasAutonomousClaimAttributedToFamily(claimText, family);
+      if (!hasAutonomous) {
+        // B é mencionada apenas incidentalmente no âmbito da decisão da autoridade A
+        continue;
+      }
+    }
+
+    finalRequired.push(family);
+  }
+
+  return finalRequired;
+}
+
 function legalRefusalCodes(
   change: Omit<LegalReviewChange, "verified" | "confirmation">,
   modelConfirmation: LegalConfirmation
@@ -666,8 +798,7 @@ function legalRefusalCodes(
     );
     if (!covered) return ["DIPLOMA_EVIDENCE_FAILED"];
   }
-  const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
-  const required = institutionsNamedInClaim(claim, change.category);
+  const required = requiredFamiliesForChange(change);
   if (required.length) {
     const covered = required.every((family) => change.evidence.some((item) => evidenceSupportsFamily(item, family)));
     return covered ? [] : ["COURT_FAMILY_FAILED"];
@@ -695,8 +826,7 @@ function confirmChange(
     if (!statutesCovered) return "NAO_CONFIRMADO";
   }
 
-  const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
-  const required = institutionsNamedInClaim(claim, change.category);
+  const required = requiredFamiliesForChange(change);
   if (required.length) {
     const covered = required.every((family) => change.evidence.some((item) => evidenceSupportsFamily(item, family)));
     return covered ? "CONFIRMADO" : "NAO_CONFIRMADO";
@@ -1871,8 +2001,7 @@ function predicateMetadata(
     any = true;
   }
   if (!codes.includes("DIPLOMA_EVIDENCE_FAILED")) {
-    const claim = `${change.reason}\n${change.originalExcerpt}\n${change.revisedExcerpt}`;
-    const requiredFamilies = institutionsNamedInClaim(claim, change.category)
+    const requiredFamilies = requiredFamiliesForChange(change)
       .map((family) => closedFamily(String(family)))
       .filter((family): family is DiagnosticSourceFamily => Boolean(family));
     if (requiredFamilies.length > 0) {
@@ -1932,6 +2061,70 @@ function evidenceRepairFromDraft(draft: PatchDraft): RepairablePatch | undefined
   const statuteTypes = (metadata.missingStatutes ?? []).map((item) => item.statuteType);
   if (!statuteTypes.length) return undefined;
   return { ...base, reason: "diploma_evidence", statuteTypes };
+}
+
+/**
+ * Extrai um headline ou identificação concisa do dispositivo para exibição na conferência humana.
+ * Evita o dump massivo de centenas ou milhares de caracteres do excerpt.
+ */
+export function extractConciseHeadline(change: { originalExcerpt: string; revisedExcerpt: string; reason: string }): string {
+  const text = (change.revisedExcerpt || change.originalExcerpt || "").trim();
+  // 1. Tenta encontrar título com Artigo (ex.: "### **1. Art. 1º do CPP — Princípio...", "Art. 3º-C do CPP")
+  const articleMatch = text.match(/(?:#+\s*)?(?:\*{1,2}\s*)?(?:\d+\.\s*)?(Art\.\s*[\wº°.-]+(?:\s+d[oa]\s+[\w.-]+)?(?:\s*[-—–]\s*[^\n\r*#]+)?)/i);
+  if (articleMatch) {
+    const headline = articleMatch[1].replace(/[*#_]/g, "").trim();
+    if (headline.length >= 6 && headline.length <= 140) return headline;
+    return headline.slice(0, 140);
+  }
+  // 2. Primeira linha limpa de formatação markdown
+  const firstLine = text.split(/[\r\n]+/)[0]?.replace(/^[#*_\s-]+|[#*_\s-]+$/g, "").trim() || "";
+  if (firstLine.length >= 6 && firstLine.length <= 140) return firstLine;
+  if (firstLine.length > 140) return `${firstLine.slice(0, 137)}...`;
+
+  // 3. Fallback: razão concisa
+  const fallback = change.reason ? change.reason.split(/[.?!]/)[0]?.trim() : "Alteração não confirmada";
+  return (fallback || "Alteração não confirmada").slice(0, 140);
+}
+
+/**
+ * Constrói justificativa objetiva acompanhada do requisito faltante específico,
+ * substituindo explicações prolixas por diagnóstico direto e acionável.
+ */
+export function buildObjectiveUnverifiedReason(change: LegalReviewChange): string {
+  if (changeLacksNormativeSpecificity(change)) {
+    return "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica. Requisito faltante: preservação dos elementos normativos específicos da fonte oficial.";
+  }
+  if (changeContainsUngroundedInvention(change)) {
+    return "Invenção normativa desprovida de fundamento em fonte oficial. Requisito faltante: exclusão de prazo, quórum ou recurso inexistente na fonte oficial.";
+  }
+
+  const introduced = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
+  if (introduced.length > 0) {
+    const missingStatutes = introduced.filter(
+      (statute) => !change.evidence.some((item) => evidenceSupportsStatute(item, statute.number))
+    );
+    if (missingStatutes.length > 0) {
+      const labels = missingStatutes.map((s) => s.raw || s.number).join(", ");
+      return `Diploma normativo introduzido na revisão sem evidência oficial comprobatória. Requisito faltante: comprovação em fonte oficial de ${labels}.`;
+    }
+  }
+
+  const required = requiredFamiliesForChange(change);
+  if (required.length > 0) {
+    const missing = required.filter(
+      (family) => !change.evidence.some((item) => evidenceSupportsFamily(item, family))
+    );
+    if (missing.length > 0) {
+      return `Ausência de evidência oficial do órgão ou tribunal competente. Requisito faltante: comprovação em fonte oficial de ${missing.join(", ")}.`;
+    }
+  }
+
+  if (isMaterialLegalChange(change) && !change.evidence.some(evidenceConfirmsMaterialClaim)) {
+    return "Evidências apresentadas não comprovam suficientemente a alteração material. Requisito faltante: documento oficial comprobatório com suporte efetivo à alteração.";
+  }
+
+  const baseReason = change.reason ? change.reason.replace(/\s+/g, " ").trim() : "Não confirmado em fonte oficial.";
+  return `${baseReason.slice(0, 300)}. Requisito faltante: comprovação em fonte oficial.`;
 }
 
 function finalizePatchAudit(input: {
@@ -2007,20 +2200,21 @@ function finalizePatchAudit(input: {
   for (const item of input.modelClaims) {
     const claim = asRecord(item);
     if (!claim) continue;
-    pushClaim(clip(claim.excerpt, 2000), clip(claim.reason, 2000) || "Não confirmado em fonte oficial.");
+    const rawExcerpt = clip(claim.excerpt, 2000);
+    const headline = rawExcerpt.length > 140
+      ? extractConciseHeadline({ originalExcerpt: rawExcerpt, revisedExcerpt: "", reason: clip(claim.reason, 300) })
+      : rawExcerpt;
+    const rawReason = clip(claim.reason, 2000) || "Não confirmado em fonte oficial.";
+    pushClaim(headline, rawReason);
   }
   if (input.unreadMaterial) {
     pushClaim("Alteração não aplicada.", "Uma alteração material declarada não pôde ser lida e não foi aplicada.");
   }
   for (const change of changes) {
     if (change.confirmation !== "NAO_CONFIRMADO") continue;
-    let reason = change.reason || "NAO_CONFIRMADO";
-    if (changeLacksNormativeSpecificity(change)) {
-      reason = "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica.";
-    } else if (changeContainsUngroundedInvention(change)) {
-      reason = "Invenção normativa desprovida de fundamento em fonte oficial (prazo, quórum ou recurso inexistente na fonte).";
-    }
-    pushClaim(change.revisedExcerpt || change.originalExcerpt, reason);
+    const headline = extractConciseHeadline(change);
+    const objectiveReason = buildObjectiveUnverifiedReason(change);
+    pushClaim(headline, objectiveReason);
   }
 
   const rejectedMaterial = input.unreadMaterial || changes.some((change) => (

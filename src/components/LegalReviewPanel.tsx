@@ -53,7 +53,17 @@ function SourceLink({ url, title }: { url: string; title: string }) {
   );
 }
 
-function EvidenceBlock({ evidence, confirmed }: { evidence: LegalReviewEvidence; confirmed: boolean }) {
+function evidenceStatusLabel(evidence: LegalReviewEvidence): string {
+  if (evidence.official && evidence.consulted && evidence.supportsChange) {
+    return "Evidência oficial válida";
+  }
+  if (!evidence.consulted) return "Não consultada";
+  if (!evidence.supportsChange) return "Sem suporte à alteração";
+  if (!evidence.official) return "Fonte não oficial";
+  return "Não confirmado";
+}
+
+function EvidenceBlock({ evidence }: { evidence: LegalReviewEvidence; confirmed?: boolean }) {
   const proof = evidenceMayBeShownAsProof(evidence);
   return (
     <div className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 space-y-1">
@@ -62,7 +72,7 @@ function EvidenceBlock({ evidence, confirmed }: { evidence: LegalReviewEvidence;
       <p><span className="font-bold text-slate-100">Documento: </span>{proof ? <SourceLink url={evidence.url} title={evidence.title} /> : evidence.title}</p>
       <p><span className="font-bold text-slate-100">Tipo: </span>{SOURCE_TYPE_LABEL[evidence.sourceType] || evidence.sourceType}</p>
       <p><span className="font-bold text-slate-100">Fonte consultada: </span>{evidence.consulted ? "Sim" : "Não"}</p>
-      <p><span className="font-bold text-slate-100">Status: </span>{confirmed && evidence.supportsChange ? "Confirmado" : "Não confirmado"}</p>
+      <p><span className="font-bold text-slate-100">Status: </span>{evidenceStatusLabel(evidence)}</p>
       {!proof && <p className="text-amber-100">Esta URL não foi validada como fonte consultada.</p>}
       {evidence.supportExplanation && <p className="text-slate-400">{evidence.supportExplanation}</p>}
     </div>
@@ -284,13 +294,18 @@ export function LegalReviewPanel({
               </section>
 
               {review.unverifiedClaims.length > 0 && (
-                <section className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-2">
+                <section className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
                   <h4 className="text-sm font-bold text-amber-100">Informações que exigem conferência humana</h4>
-                  {review.unverifiedClaims.map((claim) => (
-                    <p key={claim.excerpt} className="text-sm text-amber-50">
-                      <span className="font-bold">Não confirmado. </span>
-                      {claim.excerpt} {claim.reason}
-                    </p>
+                  {review.unverifiedClaims.map((claim, idx) => (
+                    <div key={`${claim.excerpt}-${idx}`} className="text-sm border-l-2 border-amber-400/60 pl-3 py-1 space-y-0.5">
+                      <p className="font-bold text-amber-100">
+                        <span className="text-amber-400 mr-1.5">•</span>
+                        {claim.excerpt}
+                      </p>
+                      <p className="text-xs text-amber-200/90 leading-relaxed">
+                        {claim.reason}
+                      </p>
+                    </div>
                   ))}
                 </section>
               )}

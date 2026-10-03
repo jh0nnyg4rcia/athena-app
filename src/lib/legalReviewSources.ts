@@ -159,3 +159,68 @@ export function institutionsNamedInClaim(text: string, category: string): Source
   }
   return found;
 }
+
+export function institutionalPatternForFamily(family: SourceFamily): RegExp | null {
+  const match = NAMED_PATTERNS.find((item) => item.family === family);
+  return match ? match.pattern : null;
+}
+
+/**
+ * Avalia se o texto expressa afirmação jurídica autônoma atribuída diretamente à instituição indicada
+ * (ex.: resolução, ato normativo, portaria, provimento, decisão, acórdão, tese, precedente, súmula
+ * ou competência privativa própria). Menções meramente incidentais (ex.: "observar diretrizes do CNJ"
+ * fixadas em julgamento do STF) não configuram afirmação autônoma dessa instituição.
+ */
+export function hasAutonomousClaimAttributedToFamily(text: string, family: SourceFamily): boolean {
+  const pattern = institutionalPatternForFamily(family);
+  if (!pattern || !pattern.test(text || "")) return false;
+  const organSource = pattern.source;
+
+  // 1. Ato normativo ou resolução produzida diretamente pela instituição:
+  const normativeActPattern = new RegExp(
+    `(?:resolu[cç][aã]o|ato\\s+normativo|portaria|provimento|instru[cç][aã]o\\s+normativa|regimento\\s+interno|enunciado)\\s*(?:n[º°.]?\\s*\\d+[\\w./-]*\\s+)?(?:d[oa]s?|de)\\s*(?:${organSource})|(?:${organSource})\\s*(?:editou|aprovou|publicou|expediu|regulamentou)\\s*(?:a\\s+|o\\s+)?(?:resolu[cç][aã]o|ato|portaria|provimento|instru[cç][aã]o|regra)`,
+    "i"
+  );
+  if (normativeActPattern.test(text)) return true;
+
+  // 2. Decisão, tese, súmula, repetitivo ou entendimento autônomo produzido pela instituição:
+  const judicialOrAdjudicativePattern = new RegExp(
+    `(?:decis[aã]o|ac[oó]rd[aã]o|julgado|precedente|s[uú]mula|jurisprud[eê]ncia|tema\\s+(?:repetitivo|de\\s+repercuss[aã]o\\s+geral)?|procedimento\\s+de\\s+controle|PCA)\\s*(?:n[º°.]?\\s*\\d+[\\w./-]*\\s+)?(?:d[oa]s?|de)\\s*(?:${organSource})|(?:${organSource})\\s+(?:decidiu|declarou|julgou|assentou|firmou|entende|adota|sumulou|fixou)`,
+    "i"
+  );
+  if (judicialOrAdjudicativePattern.test(text)) return true;
+
+  // 3. Competência ou atribuição exclusiva/privativa autônoma:
+  const competencePattern = new RegExp(
+    `(?:compet[eê]ncia|atribui[cç][aã]o)\\s+(?:privativa|exclusiva|constitucional)?\\s*(?:d[oa]s?|de)\\s*(?:${organSource})`,
+    "i"
+  );
+  if (competencePattern.test(text)) return true;
+
+  return false;
+}
+
+/**
+ * Avalia se a justificativa (reason) faz afirmação positiva sobre decisão, competência,
+ * ato ou entendimento daquela instituição, distinguindo de explicações de remoção ou erro do original.
+ */
+export function hasPositiveAffirmationInReason(reason: string, family: SourceFamily): boolean {
+  const pattern = institutionalPatternForFamily(family);
+  if (!pattern || !pattern.test(reason || "")) return false;
+  const organSource = pattern.source;
+
+  const removalExplanationPattern = new RegExp(
+    `(?:remov|afast|incorret|err[oô]|inexist|n[aã]o\\s+(?:se\\s+aplica|h[aá]|prev[eê]|trata)|suprim|retir|substitu|equivocad|confund).*?(?:${organSource})|(?:${organSource}).*?(?:estava\\s+errad|n[aã]o\\s+se\\s+aplica|n[aã]o\\s+tem|foi\\s+(?:removid|afastad|suprimid)|era\\s+inexat)`,
+    "i"
+  );
+
+  const positiveAffirmationPattern = new RegExp(
+    `(?:entendimento|decis[aã]o|s[uú]mula|tese|jurisprud[eê]ncia|compet[eê]ncia|precedente|julgado|posi[cç][aã]o|orienta[cç][aã]o|recurso|tema)\\s*(?:n[º°.]?\\s*\\d+[\\w./-]*\\s+)?(?:d[oa]s?|de)\\s*(?:${organSource})|(?:${organSource})\\s*(?:entende|decidiu|fixou|declarou|afirmou|assentou|possui|adota|definiu|determinou|editou|aprovou|orienta|sumulou)`,
+    "i"
+  );
+
+  if (removalExplanationPattern.test(reason)) {
+    return positiveAffirmationPattern.test(reason);
+  }
+  return true;
+}

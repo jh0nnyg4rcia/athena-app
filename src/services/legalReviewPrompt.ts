@@ -184,6 +184,8 @@ Quando revisedExcerpt introduzir ou utilizar especificamente Lei, Lei Complement
 - nunca invente ou modifique URL para satisfazer o validador;
 - nunca use outro diploma apenas porque trata do mesmo assunto.
 
+Não introduza número, nome ou identificador específico de diploma normativo novo no revisedExcerpt sem incluir evidence oficial específica que identifique e sustente esse diploma. Se a identificação específica não for necessária, prefira redação juridicamente suficiente sem introduzir diploma secundário não comprovado.
+
 Uma fonte jurisprudencial que mencione o diploma não substitui automaticamente a fonte normativa quando a alteração introduz especificamente aquele diploma.
 
 

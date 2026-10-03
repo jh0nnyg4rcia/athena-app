@@ -32,8 +32,8 @@ export const OPENAI_AUDIT_BUDGET_MS = 250_000;
 export const OPENAI_ATTEMPT_TIMEOUT_MS = 200_000;
 /** Nova geração só começa se ainda houver orçamento para outra tentativa de 200s. */
 export const MIN_GENERATION_RETRY_REMAINING_MS = 200_000;
-/** Follow-up só começa se ainda houver pelo menos 90s. */
-export const MIN_FOLLOW_UP_REMAINING_MS = 90_000;
+/** Follow-up só começa se ainda houver pelo menos 75s. */
+export const MIN_FOLLOW_UP_REMAINING_MS = 75_000;
 /** O laço da auditoria continua capaz de repetir. O SDK não repete por conta própria. */
 export const OPENAI_REVIEW_SDK_MAX_RETRIES = 0;
 const MISSING_KEY =
