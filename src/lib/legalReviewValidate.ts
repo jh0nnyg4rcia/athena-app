@@ -1472,6 +1472,8 @@ export interface NormalizedAudit {
   appliedPatchInputs?: AppliedPatchInput[];
   /** Transitório. Não entra em legal_reviews. */
   validationLog?: LegalAuditValidationLog;
+  /** Transitório. Alegações autônomas do modelo sobre a aula, separadas de pendências derivadas de patches. */
+  autonomousClaims?: LegalUnverifiedClaim[];
 }
 
 export type LiteralRejectReason =
@@ -2197,6 +2199,7 @@ function finalizePatchAudit(input: {
     seen.add(key);
     unverifiedClaims.push({ excerpt: excerpt.slice(0, 2000), reason: reason.slice(0, 2000) });
   };
+  const autonomousClaims: LegalUnverifiedClaim[] = [];
   for (const item of input.modelClaims) {
     const claim = asRecord(item);
     if (!claim) continue;
@@ -2206,6 +2209,7 @@ function finalizePatchAudit(input: {
       : rawExcerpt;
     const rawReason = clip(claim.reason, 2000) || "Não confirmado em fonte oficial.";
     pushClaim(headline, rawReason);
+    autonomousClaims.push({ excerpt: headline.slice(0, 2000), reason: rawReason.slice(0, 2000) });
   }
   if (input.unreadMaterial) {
     pushClaim("Alteração não aplicada.", "Uma alteração material declarada não pôde ser lida e não foi aplicada.");
@@ -2293,6 +2297,7 @@ function finalizePatchAudit(input: {
     consultedSources: input.consultedSources,
     repairablePatches,
     appliedPatchInputs,
+    autonomousClaims: autonomousClaims.slice(0, 40),
     validationLog: {
       validationOutcome: "accepted",
       validationReasonCodes,
@@ -2311,6 +2316,60 @@ function finalizePatchAudit(input: {
       ...(predicateDiagnostics.length ? { predicateDiagnostics } : {}),
     },
   };
+}
+
+function extractAutonomousClaims(
+  audit: NormalizedAudit,
+  changes: LegalReviewChange[]
+): LegalUnverifiedClaim[] {
+  if (Array.isArray(audit.autonomousClaims)) {
+    return audit.autonomousClaims;
+  }
+  const changeKeys = new Set<string>();
+  for (const c of changes) {
+    changeKeys.add(extractConciseHeadline(c).trim());
+    if (c.originalExcerpt) changeKeys.add(c.originalExcerpt.trim());
+    if (c.revisedExcerpt) changeKeys.add(c.revisedExcerpt.trim());
+  }
+  return (audit.unverifiedClaims || []).filter(
+    (claim) => !changeKeys.has(claim.excerpt.trim())
+  );
+}
+
+function revalidateChangeWithConsulted(
+  change: LegalReviewChange,
+  consulted: Set<string>
+): LegalReviewChange {
+  const updatedEvidence = change.evidence.map((ev) => {
+    const canonical = canonicalSourceUrl(ev.url);
+    const wasConsulted = Boolean(canonical && consulted.has(canonical));
+    const host = matchOfficialHost(ev.url);
+    const modelSupports = evidenceModelSupport.get(ev) ?? ev.supportsChange;
+    const supportsChange = Boolean(
+      modelSupports && ev.official && wasConsulted && host && sourceTypeFits(ev.sourceType, host.family)
+    );
+    const updated = {
+      ...ev,
+      consulted: wasConsulted,
+      supportsChange,
+    };
+    if (evidenceModelSupport.has(ev)) evidenceModelSupport.set(updated, modelSupports);
+    return updated;
+  });
+  const confirmation = confirmChange({ ...change, evidence: updatedEvidence }, "CONFIRMADO");
+  return {
+    ...change,
+    evidence: updatedEvidence,
+    confirmation,
+    verified: confirmation === "CONFIRMADO",
+  };
+}
+
+function refusalCodesForChange(change: LegalReviewChange): ValidationReasonCode[] {
+  if (change.confirmation === "CONFIRMADO") return [];
+  const objectiveCodes = legalRefusalCodes(change, "CONFIRMADO");
+  if (objectiveCodes.length > 0) return objectiveCodes;
+  return ["MODEL_UNCONFIRMED"];
 }
 
 /**
@@ -2340,13 +2399,15 @@ export function mergePatchAudits(
     }
   }
 
+  const consulted = consultedUrlSet(search.consultedUrls || []);
   const held: LegalReviewChange[] = [];
   const drafts: PatchDraft[] = [];
   const seenDraft = new Set<string>();
   const pushDraft = (change: LegalReviewChange, beforeContext: string, afterContext: string, key: string) => {
     if (seenDraft.has(change.id)) return;
     seenDraft.add(change.id);
-    drafts.push({ change, beforeContext, afterContext, key, refusalCodes: [] });
+    const refusalCodes = refusalCodesForChange(change);
+    drafts.push({ change, beforeContext, afterContext, key, refusalCodes });
   };
 
   for (const change of current.changes) {
@@ -2367,7 +2428,8 @@ export function mergePatchAudits(
         continue;
       }
       const context = followContext.get(replacement.id);
-      pushDraft(replacement, context?.beforeContext || "", context?.afterContext || "", `repair:${replacement.id}`);
+      const revalidatedReplacement = revalidateChangeWithConsulted(replacement, consulted);
+      pushDraft(revalidatedReplacement, context?.beforeContext || "", context?.afterContext || "", `repair:${replacement.id}`);
       continue;
     }
     held.push(change);
@@ -2376,17 +2438,25 @@ export function mergePatchAudits(
   for (const change of follow.changes) {
     if (acceptedIds.has(change.id) || seenDraft.has(change.id) || heldIds.has(change.id)) continue;
     const context = followContext.get(change.id);
-    pushDraft(change, context?.beforeContext || "", context?.afterContext || "", `follow:${change.id}`);
+    const revalidatedChange = revalidateChangeWithConsulted(change, consulted);
+    pushDraft(revalidatedChange, context?.beforeContext || "", context?.afterContext || "", `follow:${change.id}`);
   }
 
   const retiredExcerpts = new Set<string>();
   for (const patch of current.repairablePatches || []) {
     if (!followById.has(patch.id)) continue;
-    retiredExcerpts.add(patch.originalExcerpt);
-    retiredExcerpts.add(patch.revisedExcerpt);
+    if (patch.originalExcerpt) retiredExcerpts.add(patch.originalExcerpt.trim());
+    if (patch.revisedExcerpt) retiredExcerpts.add(patch.revisedExcerpt.trim());
+    retiredExcerpts.add(extractConciseHeadline(patch).trim());
   }
-  const modelClaims = [...current.unverifiedClaims, ...follow.unverifiedClaims]
-    .filter((claim) => !retiredExcerpts.has(claim.excerpt))
+
+  const candidateClaims = [
+    ...extractAutonomousClaims(current, current.changes),
+    ...extractAutonomousClaims(follow, follow.changes),
+  ];
+
+  const modelClaims = candidateClaims
+    .filter((claim) => !retiredExcerpts.has(claim.excerpt.trim()))
     .map((claim) => ({ excerpt: claim.excerpt, reason: claim.reason }));
 
   return finalizePatchAudit({

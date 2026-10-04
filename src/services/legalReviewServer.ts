@@ -626,5 +626,6 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   delete parsed.repairablePatches;
   delete parsed.appliedPatchInputs;
   delete parsed.validationLog;
+  delete parsed.autonomousClaims;
   return parsed;
 }

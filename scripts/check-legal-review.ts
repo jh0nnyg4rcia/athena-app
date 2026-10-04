@@ -37,6 +37,7 @@ import {
   requiredFamiliesForChange,
   extractConciseHeadline,
   buildObjectiveUnverifiedReason,
+  describeConsultedSources,
 } from "../src/lib/legalReviewValidate";
 import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "../src/services/legalReviewPrompt";
 import { nextPublishedLesson } from "../src/services/legalReviewPublish";
@@ -4526,6 +4527,235 @@ O STF declarou este parágrafo inconstitucional. O rodízio foi afastado.`;
 
     const reasonCourt = buildObjectiveUnverifiedReason(auditAutonomousStj!.changes[0]);
     assert(reasonCourt.includes("Ausência de evidência oficial do órgão ou tribunal competente") && reasonCourt.includes("STJ"), "Reason diagnostica tribunal competente faltante");
+  }
+
+  // =========================================================================
+  // REGRESSÃO: RECONCILIAÇÃO PÓS-REPARO DE EVIDÊNCIAS (MERGE E UNVERIFIED CLAIMS)
+  // Casos 1 a 4 e Caso Extra
+  // =========================================================================
+  {
+    const dl3689Url = "https://planalto.gov.br/ccivil_03/decreto-lei/del3689compilado.htm";
+    const cnjUrl = "https://atos.cnj.jus.br/atos/detalhar/213";
+    const stjUrl = "https://scon.stj.jus.br/SCON/jurisprudencia/toc.jsp";
+
+    const docText = `### **Art. 3º-D do CPP**\nO rodízio foi afastado conforme entendimento anterior.`;
+
+    const chg1Initial = {
+      id: "chg-cnj-repair",
+      type: "CORRECAO" as const,
+      category: "LEGISLACAO" as const,
+      originalExcerpt: "O rodízio foi afastado conforme entendimento anterior.",
+      revisedExcerpt: "A organização deve observar a Resolução nº 213 do CNJ.",
+      reason: "Ajuste para observar o ato normativo do CNJ.",
+      evidence: [
+        {
+          institution: "Legislação federal",
+          title: "Decreto-Lei nº 3.689/1941",
+          url: dl3689Url,
+          official: true,
+          consulted: true,
+          supportsChange: true,
+          sourceType: "LEI" as const,
+          supportExplanation: "Texto oficial do CPP.",
+        },
+      ],
+    };
+
+    const chg1Follow = {
+      ...chg1Initial,
+      evidence: [
+        ...chg1Initial.evidence,
+        {
+          institution: "CNJ",
+          title: "Resolução nº 213 do CNJ",
+          url: cnjUrl,
+          official: true,
+          consulted: true,
+          supportsChange: true,
+          sourceType: "RESOLUCAO" as const,
+          supportExplanation: "Resolução oficial do CNJ regulamentando o procedimento.",
+        },
+      ],
+    };
+
+    // Caso 1: Reparo com evidência faltante (CNJ) fornecida no follow-up
+    // Estado inicial: não confirmado por falta de CNJ
+    const auditInitial1 = normalizeLegalAudit(
+      auditBody(docText, [change(chg1Initial)]),
+      docText,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url] }
+    );
+    assert(auditInitial1 !== null, "Caso 1: auditoria inicial normalizada");
+    assert(auditInitial1!.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso 1: patch inicial sem CNJ fica NAO_CONFIRMADO");
+    assert(auditInitial1!.repairablePatches.length === 1, "Caso 1: patch inicial elegível para reparo de família");
+    assert(auditInitial1!.repairablePatches[0]?.reason === "court_family", "Caso 1: motivo do reparo é court_family");
+    assert(auditInitial1!.unverifiedClaims.length > 0, "Caso 1: auditoria inicial tem unverifiedClaim");
+
+    // Follow-up devolve evidência oficial válida do CNJ
+    const auditFollow1 = normalizeLegalAudit(
+      auditBody(docText.replace(chg1Follow.originalExcerpt, chg1Follow.revisedExcerpt), [change(chg1Follow)]),
+      docText,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, cnjUrl] }
+    );
+    assert(auditFollow1 !== null, "Caso 1: follow-up normalizado");
+    assert(auditFollow1!.changes[0]?.confirmation === "CONFIRMADO", "Caso 1: follow-up isolado é confirmado");
+
+    // Merge pós-repair
+    const merged1 = mergePatchAudits(
+      docText,
+      auditInitial1!,
+      auditFollow1!,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, cnjUrl] },
+      describeConsultedSources([dl3689Url, cnjUrl])
+    );
+    assert(merged1.changes[0]?.confirmation === "CONFIRMADO", "Caso 1: patch reparado fica CONFIRMADO");
+    assert(merged1.changes[0]?.originalExcerpt === chg1Initial.originalExcerpt, "Caso 1: originalExcerpt inalterado");
+    assert(merged1.changes[0]?.revisedExcerpt === chg1Initial.revisedExcerpt, "Caso 1: revisedExcerpt inalterado");
+    assert(merged1.changes[0]?.evidence.some((e) => e.institution === "CNJ" && e.consulted === true), "Caso 1: evidência do CNJ presente e consultada");
+    assert(merged1.unverifiedClaims.length === 0, "Caso 1: unverifiedClaims fica vazio sem resíduo de CNJ");
+    assert(merged1.verificationLevel === "VERIFICADO_COM_FONTES", "Caso 1: verificationLevel recalculado para VERIFICADO_COM_FONTES");
+    assert(merged1.reviewedMarkdown.includes("Resolução nº 213 do CNJ"), "Caso 1: Markdown revisado reflete o patch aceito");
+
+    // Caso 2: Reparo parcial de dois patches
+    // chg1 (falta CNJ) e chg2 (falta STJ); follow-up repara apenas chg1
+    const docText2 = `### **Art. 3º-D do CPP**\nO rodízio foi afastado conforme entendimento anterior.\n\n### **Art. 1º do CPP**\nAplica-se a regra geral sem ressalva aos recursos.`;
+    const chg2Initial = {
+      id: "chg-stj-unrepaired",
+      type: "CORRECAO" as const,
+      category: "JURISPRUDENCIA" as const,
+      originalExcerpt: "Aplica-se a regra geral sem ressalva aos recursos.",
+      revisedExcerpt: "O STJ firmou em recurso repetitivo que a regra aplica-se de imediato.",
+      reason: "Fixação da tese repetitiva pelo STJ.",
+      evidence: [
+        {
+          institution: "Legislação federal",
+          title: "Decreto-Lei nº 3.689/1941",
+          url: dl3689Url,
+          official: true,
+          consulted: true,
+          supportsChange: true,
+          sourceType: "LEI" as const,
+          supportExplanation: "Texto oficial.",
+        },
+      ],
+    };
+
+    const auditInitial2 = normalizeLegalAudit(
+      auditBody(docText2, [change(chg1Initial), change(chg2Initial)]),
+      docText2,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url] }
+    );
+    assert(auditInitial2 !== null && auditInitial2.changes.length === 2, "Caso 2: auditoria inicial com 2 patches");
+
+    const auditFollow2 = normalizeLegalAudit(
+      auditBody(docText2.replace(chg1Follow.originalExcerpt, chg1Follow.revisedExcerpt), [change(chg1Follow)]),
+      docText2,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, cnjUrl] }
+    );
+    assert(auditFollow2 !== null, "Caso 2: follow-up normalizado");
+
+    const merged2 = mergePatchAudits(
+      docText2,
+      auditInitial2!,
+      auditFollow2!,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, cnjUrl] },
+      describeConsultedSources([dl3689Url, cnjUrl])
+    );
+    const chg1Result = merged2.changes.find((c) => c.id === chg1Initial.id);
+    const chg2Result = merged2.changes.find((c) => c.id === chg2Initial.id);
+    assert(chg1Result?.confirmation === "CONFIRMADO", "Caso 2: chg1 reparado fica CONFIRMADO");
+    assert(chg2Result?.confirmation === "NAO_CONFIRMADO", "Caso 2: chg2 não reparado permanece NAO_CONFIRMADO");
+    assert(!merged2.unverifiedClaims.some((c) => c.reason.includes("CNJ")), "Caso 2: pendência de CNJ foi removida");
+    assert(merged2.unverifiedClaims.some((c) => c.reason.includes("STJ")), "Caso 2: pendência de STJ permanece em unverifiedClaims");
+    assert(merged2.verificationLevel === "VERIFICACAO_PARCIAL", "Caso 2: verificationLevel é VERIFICACAO_PARCIAL por causa de chg2");
+
+    // Caso 3: Reparo com evidência inválida / família errada (STJ em vez de CNJ)
+    const chg1WrongFamily = {
+      ...chg1Initial,
+      evidence: [
+        ...chg1Initial.evidence,
+        {
+          institution: "STJ",
+          title: "REsp 1.234.567",
+          url: stjUrl,
+          official: true,
+          consulted: true,
+          supportsChange: true,
+          sourceType: "ACORDAO" as const,
+          supportExplanation: "Decisão do STJ (não supre o CNJ).",
+        },
+      ],
+    };
+    const auditFollow3 = normalizeLegalAudit(
+      auditBody(docText, [change(chg1WrongFamily)]),
+      docText,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, stjUrl] }
+    );
+    const merged3 = mergePatchAudits(
+      docText,
+      auditInitial1!,
+      auditFollow3!,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, stjUrl] },
+      describeConsultedSources([dl3689Url, stjUrl])
+    );
+    assert(merged3.changes[0]?.confirmation === "NAO_CONFIRMADO", "Caso 3: reparo com família errada permanece NAO_CONFIRMADO");
+    assert(merged3.unverifiedClaims.some((c) => c.reason.includes("CNJ")), "Caso 3: pendência do CNJ permanece em unverifiedClaims");
+    assert(merged3.validationLog?.rejectedPatches.some((p) => p.reasonCodes.includes("COURT_FAMILY_FAILED")), "Caso 3: validationLog preserva COURT_FAMILY_FAILED");
+    assert(merged3.verificationLevel === "VERIFICACAO_PARCIAL", "Caso 3: verificationLevel permanece VERIFICACAO_PARCIAL");
+
+    // Caso 4: Imutabilidade do patch durante reparo de evidência
+    // Follow-up tenta alterar revisedExcerpt -> rejeitado e retido na versão original
+    const chg1Mutated = {
+      ...chg1Follow,
+      revisedExcerpt: "A organização deve observar a Resolução nº 213 do CNJ e regras novas não acordadas.",
+    };
+    const auditFollow4 = normalizeLegalAudit(
+      auditBody(docText.replace(chg1Initial.originalExcerpt, chg1Mutated.revisedExcerpt), [change(chg1Mutated)]),
+      docText,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, cnjUrl] }
+    );
+    const merged4 = mergePatchAudits(
+      docText,
+      auditInitial1!,
+      auditFollow4!,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, cnjUrl] },
+      describeConsultedSources([dl3689Url, cnjUrl])
+    );
+    const chg4Result = merged4.changes.find((c) => c.id === chg1Initial.id);
+    assert(chg4Result?.confirmation === "NAO_CONFIRMADO", "Caso 4: patch com excerpt modificado no reparo é rejeitado (NAO_CONFIRMADO)");
+    assert(chg4Result?.originalExcerpt === chg1Initial.originalExcerpt, "Caso 4: originalExcerpt preservado rigorosamente");
+    assert(chg4Result?.revisedExcerpt === chg1Initial.revisedExcerpt, "Caso 4: revisedExcerpt preservado rigorosamente (não aceitou mutação)");
+    assert(merged4.reviewedMarkdown === docText, "Caso 4: Markdown não foi alterado pela mutação rejeitada");
+
+    // Caso Extra: Preservação de modelClaim autônomo legítimo
+    // Initial audit tem chg1 (falta CNJ) + modelClaim autônomo sobre a aula
+    const autonomousClaimEntry = {
+      excerpt: "Doutrina majoritária entende cabível a aplicação analógica.",
+      reason: "Afirmação doutrinária sem confirmação em fonte oficial primária.",
+    };
+    const auditInitialExtra = normalizeLegalAudit(
+      auditBody(docText, [change(chg1Initial)], {
+        unverifiedClaims: [autonomousClaimEntry],
+      }),
+      docText,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url] }
+    );
+    assert(auditInitialExtra !== null, "Caso Extra: auditoria inicial com modelClaim autônomo normalizada");
+    assert(auditInitialExtra!.unverifiedClaims.length === 2, "Caso Extra: auditoria inicial tem 2 unverifiedClaims (autônomo + pendência)");
+
+    // Follow-up repara chg1 com sucesso
+    const mergedExtra = mergePatchAudits(
+      docText,
+      auditInitialExtra!,
+      auditFollow1!,
+      { webSearchExecuted: true, consultedUrls: [dl3689Url, cnjUrl] },
+      describeConsultedSources([dl3689Url, cnjUrl])
+    );
+    assert(mergedExtra.changes[0]?.confirmation === "CONFIRMADO", "Caso Extra: chg1 foi reparado e confirmado");
+    assert(!mergedExtra.unverifiedClaims.some((c) => c.reason.includes("CNJ")), "Caso Extra: pendência de CNJ derivada do patch desapareceu");
+    assert(mergedExtra.unverifiedClaims.some((c) => c.excerpt.includes("Doutrina majoritária")), "Caso Extra: modelClaim autônomo sobreviveu ao merge pós-repair");
+    assert(mergedExtra.unverifiedClaims.length === 1, "Caso Extra: exatamente um unverifiedClaim (o autônomo)");
+    assert(mergedExtra.verificationLevel === "VERIFICACAO_PARCIAL", "Caso Extra: verificationLevel é VERIFICACAO_PARCIAL exclusivamente devido ao modelClaim autônomo");
   }
 
   if (failed) {
