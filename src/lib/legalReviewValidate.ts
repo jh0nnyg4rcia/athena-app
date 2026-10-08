@@ -8,6 +8,12 @@ import {
   matchOfficialHost,
   type SourceFamily,
 } from "./legalReviewSources";
+import {
+  mergeAuditedPropositionUnits,
+  type PropositionUnit,
+  type CoverageSummary,
+  type AuditedPropositionInput,
+} from "./legalReviewPropositions";
 import type {
   ConsultedLegalSource,
   LegalChangeCategory,
@@ -23,6 +29,13 @@ import type {
   LegalSourceType,
   LegalUnverifiedClaim,
   LegalVerificationLevel,
+  ChangeValidationResult,
+  ChangeValidationStatus,
+  ChangeResolutionState,
+  HumanReviewDecision,
+  CoordinatedQuestionGroup,
+  EditorialIntegrityStatus,
+  EditorialIntegrityValidation,
 } from "./legalReviewTypes";
 import type {
   DiagnosticHostFamily,
@@ -215,22 +228,65 @@ export function consultedUrlSet(urls: string[]): Set<string> {
   return found;
 }
 
-export function describeConsultedSources(urls: string[]): ConsultedLegalSource[] {
-  const seen = new Set<string>();
-  const out: ConsultedLegalSource[] = [];
-  for (const raw of urls) {
-    const href = safeHttpsUrl(raw);
-    const canonical = canonicalSourceUrl(raw);
-    if (!href || !canonical || seen.has(canonical)) continue;
-    seen.add(canonical);
-    const host = matchOfficialHost(href);
-    out.push({
-      url: href,
-      official: Boolean(host),
-      institution: host?.label || "",
-    });
+function deterministicHash10(str: string): string {
+  let h1 = 0xdeadbeef ^ str.length;
+  let h2 = 0x41c64e6d ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
   }
-  return out;
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const part1 = (h1 >>> 0).toString(16).padStart(8, "0");
+  const part2 = ((h2 >>> 0) & 0xff).toString(16).padStart(2, "0");
+  return (part1 + part2).slice(0, 10);
+}
+
+/**
+ * Deriva deterministicamente um identificador estável para a fonte a partir da URL canônica.
+ * Mesma URL canônica = mesmo sourceId estável, imune à ordem e merge.
+ */
+export function computeSourceId(rawUrl: string): string {
+  const canonical = canonicalSourceUrl(rawUrl) || String(rawUrl || "").trim().toLowerCase();
+  const hash = deterministicHash10(canonical);
+  return `SRC-${hash}`;
+}
+
+export function describeConsultedSources(
+  sourcesOrUrls: Array<string | ConsultedLegalSource>
+): ConsultedLegalSource[] {
+  const map = new Map<string, ConsultedLegalSource>();
+  for (const item of sourcesOrUrls) {
+    if (!item) continue;
+    const rawUrl = typeof item === "string" ? item : item.url;
+    const href = safeHttpsUrl(rawUrl);
+    const canonical = canonicalSourceUrl(rawUrl);
+    if (!href || !canonical) continue;
+    const sourceId = (typeof item === "object" && item.sourceId) ? item.sourceId : computeSourceId(canonical);
+    const existing = map.get(canonical);
+    if (!existing) {
+      const host = matchOfficialHost(href);
+      const title = typeof item === "object" ? item.title : undefined;
+      const snippet = typeof item === "object" ? item.snippet : undefined;
+      map.set(canonical, {
+        sourceId,
+        url: href,
+        official: Boolean(host),
+        institution: host?.label || (typeof item === "object" ? item.institution : "") || "",
+        ...(title ? { title } : {}),
+        ...(snippet ? { snippet } : {}),
+      });
+    } else {
+      // Merge seguro de metadados: não perde títulos ou snippets mais detalhados
+      if (typeof item === "object") {
+        if (!existing.title && item.title) existing.title = item.title;
+        if (!existing.snippet && item.snippet) existing.snippet = item.snippet;
+        if (!existing.institution && item.institution) existing.institution = item.institution;
+      }
+    }
+  }
+  return Array.from(map.values());
 }
 
 function sourceTypeFits(sourceType: LegalSourceType, family: string): boolean {
@@ -656,6 +712,635 @@ export function changeLacksNormativeSpecificity(
   return false;
 }
 
+export interface CollateralDeletionCheckResult {
+  hasUnjustifiedDeletion: boolean;
+  suppressedUnit?: string;
+  reason?: string;
+}
+
+export function detectUnjustifiedCollateralDeletion(change: {
+  type: LegalChangeType;
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  reason: string;
+  evidence?: LegalReviewEvidence[];
+}): CollateralDeletionCheckResult {
+  if (change.type === "REMOCAO") {
+    return { hasUnjustifiedDeletion: false };
+  }
+
+  const orig = String(change.originalExcerpt || "");
+  const rev = String(change.revisedExcerpt || "");
+  const reasonText = String(change.reason || "");
+  const evidenceText = (change.evidence || [])
+    .map((e) => `${e.title || ""} ${e.supportExplanation || ""}`)
+    .join(" ");
+
+  // 1. Unidades materiais críticas gerais (institutos dogmáticos, exemplos consolidados, autoridades)
+  const CRITICAL_UNITS = [
+    {
+      label: "rol de culpados",
+      pattern: /\b(?:rol\s+d[oe]s?\s+culpados|lançamento\s+no\s+rol)\b/i,
+    },
+    {
+      label: "livramento condicional",
+      pattern: /\blivramento\s+condicional\b/i,
+    },
+    {
+      label: "sanções disciplinares",
+      pattern: /\bsan[çc][õo]es\s+disciplinares(?:\s+administrativas)?\b/i,
+    },
+    {
+      label: "contexto regional latino-americano",
+      pattern: /\b(?:latino[- ]americano|direito\s+internacional\s+regional)\b/i,
+    },
+    {
+      label: "embaixadas/legação",
+      pattern: /\bembaixadas?\/(?:lega[çc][ãa]o|lega[çc][õo]es)\b/i,
+    },
+  ];
+
+  for (const unit of CRITICAL_UNITS) {
+    if (unit.pattern.test(orig) && !unit.pattern.test(rev)) {
+      // Regra estrutural de revogação vs extinção material:
+      // Se a justificativa alega revogação de dispositivo para suprimir instituto ou conceito material,
+      // a evidência deve comprovar a extinção normativa definitiva do instituto, e não mera alteração de regime processual.
+      const arguesRevocation = /\b(?:revoga[çc][aã]o|revogad[ao]|extin[çc][ãa]o)\b/i.test(reasonText);
+      const provesDefinitiveExtinction = /\b(?:tr[âa]nsito\s+em\s+julgado|extin[çc][ãa]o\s+(?:total|absoluta|definitiva)|inconstitucionalidade\s+total)\b/i.test(evidenceText);
+      if (arguesRevocation && !provesDefinitiveExtinction) {
+        return {
+          hasUnjustifiedDeletion: true,
+          suppressedUnit: unit.label,
+          reason: `Supressão indevida de "${unit.label}": a razão alega revogação, mas a evidência não comprova a extinção normativa definitiva do instituto.`,
+        };
+      }
+
+      // Se a reason sequer menciona a unidade suprimida
+      if (!unit.pattern.test(reasonText)) {
+        return {
+          hasUnjustifiedDeletion: true,
+          suppressedUnit: unit.label,
+          reason: `Supressão colateral de "${unit.label}" sem justificativa expressa na razão do patch.`,
+        };
+      }
+
+      // Se menciona na reason, mas não há evidência oficial consultada demonstrando sua falsidade jurídica
+      const evidenceHasProof = (change.evidence || []).some(
+        (e) => e.official && e.consulted && e.supportsChange && unit.pattern.test(`${e.title} ${e.supportExplanation}`)
+      );
+      if (!evidenceHasProof) {
+        return {
+          hasUnjustifiedDeletion: true,
+          suppressedUnit: unit.label,
+          reason: `Supressão de "${unit.label}" sem suporte em evidência oficial comprovando sua falsidade jurídica.`,
+        };
+      }
+    }
+  }
+
+  // 2. Supressão genérica de blocos de exemplo válidos (ex: "ex: ...", "tais como ...")
+  const exampleMatch = orig.match(/\((?:ex|exemplo|exemplos):\s*([^)]+)\)/i) || orig.match(/\btais\s+como\s+([^,.;]+(?:,\s*[^,.;]+)*)/i);
+  if (exampleMatch) {
+    const exampleContent = exampleMatch[1].trim();
+    if (exampleContent.length > 5) {
+      const exampleWords = exampleContent.split(/\s+/).filter((w) => w.length > 4);
+      const survivingWords = exampleWords.filter((w) => rev.toLowerCase().includes(w.toLowerCase()));
+      if (exampleWords.length >= 2 && survivingWords.length === 0) {
+        const reasonExplainsExample = exampleWords.some((w) => reasonText.toLowerCase().includes(w.toLowerCase()));
+        if (!reasonExplainsExample) {
+          return {
+            hasUnjustifiedDeletion: true,
+            suppressedUnit: `exemplo (${exampleContent.slice(0, 30)}...)`,
+            reason: "Supressão colateral de exemplo válido do original sem justificativa jurídica na razão do patch.",
+          };
+        }
+      }
+    }
+  }
+
+  // 3. Ressalva válida suprimida colateralmente (ex.: ", ressalvada a hipótese legal.")
+  const ressalvaMatch = orig.match(/,\s*(ressalvad[ao][^,.;]*|salvo[^,.;]*)/i);
+  if (ressalvaMatch) {
+    const ressalvaText = ressalvaMatch[1].trim();
+    if (!rev.toLowerCase().includes("ressalvad") && !rev.toLowerCase().includes("salvo")) {
+      const reasonExplainsRessalva = reasonText.toLowerCase().includes("ressalv") || reasonText.toLowerCase().includes("salvo");
+      if (!reasonExplainsRessalva) {
+        return {
+          hasUnjustifiedDeletion: true,
+          suppressedUnit: ressalvaText,
+          reason: "Supressão colateral de ressalva válida sem justificativa jurídica na razão do patch.",
+        };
+      }
+    }
+  }
+
+  return { hasUnjustifiedDeletion: false };
+}
+
+export interface DualCheckResult {
+  failed: boolean;
+  reason?: string;
+}
+
+/**
+ * Dual Check V3 Genérico:
+ * Verifica consistência entre literalidade legal e qualificação jurisprudencial vinculante aplicável.
+ * Não depende de números de artigos nem nomes de casos concretos.
+ */
+export function checkStatuteAndJurisprudenceDualCheck(
+  change: {
+    originalExcerpt: string;
+    revisedExcerpt: string;
+    reason: string;
+    evidence?: LegalReviewEvidence[];
+  },
+  lessonContext?: string
+): DualCheckResult {
+  const evidenceList = Array.isArray(change.evidence) ? change.evidence : [];
+  const text = `${change.originalExcerpt}\n${change.revisedExcerpt}\n${change.reason}\n${evidenceList.map((e) => `${e.title || ""} ${e.supportExplanation || ""}`).join("\n")}`;
+  const rev = String(change.revisedExcerpt || "");
+  const reasonText = String(change.reason || "");
+
+  // A. Inconsistência Interna entre Justificativa/Evidência e Texto Revisado:
+  // Se a razão ou a evidência do patch reconhece qualificação vinculante
+  // (interpretação conforme, regime preferencial, ressalva, condicionante, exceção admitida),
+  // mas o trecho revisado reproduz a regra legal sem incorporar essa qualificação:
+  const QUALIFICATION_MARKERS_REASON =
+    /\b(?:interpreta[çc][aã]o\s+conforme|forma\s+preferencial(?:mente)?|preferencialmente|regime\s+preferencial|preferencial\b|admitidas?\s+exce[çc][õo]es|ressalvada[s]?|condicionad[ao]|desde\s+que|n[ãa]o\s+[ée]\s+autom[áa]tico|n[ãa]o\s+[ée]\s+absolut[ao]|flexibiliza[çc][aã]o|excepcionad[ao])\b/i;
+
+  const reasonClaimsQualification = QUALIFICATION_MARKERS_REASON.test(reasonText);
+  const evidenceClaimsQualification = evidenceList.some((e) =>
+    QUALIFICATION_MARKERS_REASON.test(e.supportExplanation || "")
+  );
+
+  if (reasonClaimsQualification || evidenceClaimsQualification) {
+    const QUALIFICATION_MARKERS_REVISED =
+      /\b(?:preferencial(?:mente)?|interpreta[çc][aã]o\s+conforme|ressalva(?:-se|da[s]?)?|salvo|desde\s+que|exce[çc][aã]o|exce[çc][õo]es|admitid[ao]|condicionad[ao]|jurisprud[êe]ncia|STF|STJ|entendimento|sucessivas)\b/i;
+
+    if (!QUALIFICATION_MARKERS_REVISED.test(rev)) {
+      return {
+        failed: true,
+        reason: "A razão ou evidência do patch reconhece qualificação/interpretação vinculante que não foi incorporada à redação revista (omissão de ressalva vinculante material).",
+      };
+    }
+  }
+
+  // B. Afirmação de Jurisprudência Vinculante sem comprovação oficial do próprio Tribunal:
+  const hasCourtClaim = /\b(?:STF|Supremo\s+Tribunal\s+Federal|STJ|Superior\s+Tribunal\s+de\s+Justi[çc]a|jurisprudência\s+vinculante|interpretação\s+conforme)\b/i.test(change.reason);
+  if (hasCourtClaim && evidenceList.length > 0) {
+    const hasCourtEvidence = evidenceList.some(
+      (e) =>
+        (evidenceSupportsFamily(e, "STF") ||
+          evidenceSupportsFamily(e, "STJ") ||
+          /\b(?:stf|stj)\.jus\.br\b/i.test(e.url || "")) &&
+        e.official &&
+        e.consulted &&
+        e.supportsChange
+    );
+    if (!hasCourtEvidence) {
+      return {
+        failed: true,
+        reason: "Afirmação de interpretação vinculante do STF/STJ exige comprovação oficial do próprio tribunal competente (Dual Check).",
+      };
+    }
+  }
+
+  // C. Contexto da Própria Aula (lessonContext):
+  // Se o contexto da aula indica que o dispositivo ou matéria foi objeto de controle vinculante
+  // (julgamento de constitucionalidade, ADI, ADC, interpretação conforme),
+  // uma alteração sustentada exclusivamente por lei ordinária sem qualquer fonte jurisprudencial falha o Dual Check.
+  if (lessonContext && typeof lessonContext === "string" && lessonContext.length > 50) {
+    const patchArticles = Array.from(text.matchAll(/\bart(?:igo|\.)?\s*(\d+[º°]?(?:-[A-Za-z]+)?)/gi)).map((m) =>
+      m[1].toLowerCase()
+    );
+
+    if (patchArticles.length > 0) {
+      const paragraphs = lessonContext.split(/\n\s*\n/);
+      for (const para of paragraphs) {
+        const hasJudicialControl =
+          /\b(?:STF|Supremo\s+Tribunal\s+Federal|STJ|Superior\s+Tribunal\s+de\s+Justi[çc]a|ADI|ADIs|ADC|ADPF|repercuss[aã]o\s+geral|s[úu]mula\s+vinculante)\b/i.test(para) &&
+          /\b(?:inconstitucional|interpreta[çc][aã]o\s+conforme|inconstitucionalidade|declarou|declarado|julgamento|julgou|decidiu|fixou|ac[óo]rd[aã]o)\b/i.test(para);
+
+        if (hasJudicialControl) {
+          const matchesPatchArticle = patchArticles.some((art) => {
+            const artRegex = new RegExp(`\\bart(?:igo|\\.)?\\s*${art.replace("-", "\\-")}\\b`, "i");
+            return artRegex.test(para);
+          });
+
+          if (matchesPatchArticle) {
+            const hasCourtEvidence = evidenceList.some(
+              (e) =>
+                (evidenceSupportsFamily(e, "STF") ||
+                  evidenceSupportsFamily(e, "STJ") ||
+                  evidenceSupportsFamily(e, "CNJ") ||
+                  /\b(?:stf|stj|cnj)\.jus\.br\b/i.test(e.url || "")) &&
+                e.official &&
+                e.consulted &&
+                e.supportsChange
+            );
+            if (!hasCourtEvidence) {
+              return {
+                failed: true,
+                reason: "O bloco da aula identifica que este dispositivo ou matéria foi submetido a julgamento vinculante de constitucionalidade; alteração baseada exclusivamente em legislação ordinária exige comprovação jurisprudencial (Dual Check).",
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { failed: false };
+}
+
+export interface SemanticCompletenessResult {
+  failed: boolean;
+  reason?: string;
+}
+
+/**
+ * Gate de Completude Semântica Genérico:
+ * Impede que enumerações parciais sejam apresentadas como taxativas ou omitam hipóteses
+ * essenciais expressamente comprovadas pelas fontes oficiais consultadas.
+ */
+export function checkSemanticCompleteness(change: {
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  reason: string;
+  evidence?: LegalReviewEvidence[];
+}): SemanticCompletenessResult {
+  const rev = String(change.revisedExcerpt || "");
+  const evidenceList = Array.isArray(change.evidence) ? change.evidence : [];
+
+  // 1. Rol aparentemente exaustivo em geral:
+  const exhaustiveMarker = /\b(?:s[ãa]o\s+(?:exclusivamente|taxativamente|apenas)|somente\s+(?:as|os)|rol\s+taxativo|taxativamente|exclusivamente|apenas\s+(?:em|nas?|nos?|com))\b/i.test(rev);
+  if (exhaustiveMarker) {
+    for (const ev of evidenceList) {
+      const exp = `${ev.title || ""} ${ev.supportExplanation || ""}`;
+      const evCountMatch = exp.match(/\b(?:quatro|cinco|seis|4|5|6)\s+(?:hip[óo]teses|exce[çc][õo]es|requisitos|casos)\b/i);
+      const revCountMatch = rev.match(/\b(?:tr[êe]s|duas|uma|1|2|3)\s+(?:hip[óo]teses|exce[çc][õo]es|requisitos|casos)\b/i);
+      if (evCountMatch && revCountMatch) {
+        return {
+          failed: true,
+          reason: "Completude semântica: a fonte oficial comprova mais hipóteses/exceções do que as apresentadas no rol taxativo do texto revisado.",
+        };
+      }
+    }
+  }
+
+  // 2. Apresentação de exceção isolada em regra geral sem qualificação:
+  const singleExceptionMatch = rev.match(/\bexceto\s+([^,.;]+)/i);
+  if (singleExceptionMatch) {
+    const isQualifiedAsPartialOrLiteral =
+      /\b(?:segundo\s+a\s+literalidade|na\s+letra\s+da\s+lei|literalmente|texto\s+legal|observadas\s+as\s+demais|al[ée]m\s+d[ea]|exemplificativamente)\b/i.test(rev);
+
+    if (!isQualifiedAsPartialOrLiteral) {
+      const evidenceProvesMultipleExceptions = evidenceList.some((e) => {
+        const exp = `${e.title || ""} ${e.supportExplanation || ""}`.toLowerCase();
+        return (
+          /\b(?:exce[çc][õo]es|outras\s+hip[óo]teses|demais\s+casos|al[ée]m\s+d[eo])\b/i.test(exp) &&
+          (exp.match(/,/g) || []).length >= 2
+        );
+      });
+
+      if (evidenceProvesMultipleExceptions) {
+        return {
+          failed: true,
+          reason: "Completude semântica: apresentação de exceção única sem qualificação estrita quando a fonte oficial comprova múltiplas exceções vinculantes.",
+        };
+      }
+    }
+  }
+
+  return { failed: false };
+}
+
+export interface PropositionSupportResult {
+  failed: boolean;
+  reason?: string;
+}
+
+export function checkEffectivePropositionSupport(change: {
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  reason: string;
+  evidence?: LegalReviewEvidence[];
+}): PropositionSupportResult {
+  const evidenceList = Array.isArray(change.evidence) ? change.evidence : [];
+  if (evidenceList.length === 0) return { failed: false };
+
+  const revised = String(change.revisedExcerpt || "");
+  const propMatches = revised.match(/(?:Proposi[çc][ãa]o\s*\d+|Requisito\s*\d+|Item\s*\d+|Norma\s*[A-Z])/gi);
+  if (propMatches && propMatches.length >= 3) {
+    let coveredCount = 0;
+    for (const prop of propMatches) {
+      const hasSupport = evidenceList.some((e) =>
+        e.official && e.consulted && e.supportsChange && new RegExp(prop, "i").test(`${e.title} ${e.supportExplanation}`)
+      );
+      if (hasSupport) coveredCount += 1;
+    }
+    if (coveredCount < propMatches.length) {
+      return {
+        failed: true,
+        reason: `Atomicidade probatória: o patch introduz ${propMatches.length} proposições materiais, mas a evidência comprova apenas ${coveredCount}. O patch integral não pode ser confirmado sem atomização.`,
+      };
+    }
+  }
+
+  return { failed: false };
+}
+
+export interface InstitutionalProvenanceResult {
+  failed: boolean;
+  claimedInstitutions?: string[];
+  reason?: string;
+}
+
+/**
+ * Gate de Proveniência Institucional V2:
+ * Avalia vínculo entre a proposição atribuída a uma autoridade/órgão e a evidência da respectiva família.
+ * Impede que afirmações atribuídas a uma instituição usem evidências exclusivas de outra.
+ */
+export function checkInstitutionalProvenance(change: {
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  reason: string;
+  evidence?: LegalReviewEvidence[];
+}): InstitutionalProvenanceResult {
+  const rev = String(change.revisedExcerpt || "");
+  const evidenceList = Array.isArray(change.evidence) ? change.evidence : [];
+
+  const MONITORED_INSTITUTIONS = [
+    {
+      family: "STF" as const,
+      pattern: /\b(?:o\s+)?STF\b[^\n.!?]*\b(?:fixou|declarou|ressalvou|excluiu|determinou|decidiu|julgou|entendeu|assentou)\b([^\n.!?]*)/i,
+      keywordMatcher: /\b(?:STF|Supremo|ADI|ADC|ADPF|repercussão\s+geral|súmula\s+vinculante)\b/i,
+    },
+    {
+      family: "STJ" as const,
+      pattern: /\b(?:o\s+)?STJ\b[^\n.!?]*\b(?:fixou|sumulou|decidiu|entendeu|assentou|determinou)\b([^\n.!?]*)/i,
+      keywordMatcher: /\b(?:STJ|Superior\s+Tribunal|repetitivo|súmula\s+(?!vinculante))\b/i,
+    },
+    {
+      family: "CNJ" as const,
+      pattern: /\b(?:o\s+)?CNJ\b[^\n.!?]*\b(?:prev[êe]|estabeleceu|regulamentou|determinou|fixou|editou)\b([^\n.!?]*)/i,
+      keywordMatcher: /\b(?:CNJ|Conselho\s+Nacional\s+de\s+Justiça|resolução\s+(?:n[º°]\s*)?\d+)\b/i,
+    },
+    {
+      family: "CNMP" as const,
+      pattern: /\b(?:o\s+)?CNMP\b[^\n.!?]*\b(?:prev[êe]|estabeleceu|regulamentou|determinou|fixou|editou)\b([^\n.!?]*)/i,
+      keywordMatcher: /\b(?:CNMP|Conselho\s+Nacional\s+do\s+Ministério\s+Público)\b/i,
+    },
+  ];
+
+  for (const inst of MONITORED_INSTITUTIONS) {
+    const match = rev.match(inst.pattern);
+    if (match) {
+      // 1. Proposição atribuída exige evidência oficial da respectiva família
+      const hasFamilyEvidence = evidenceList.some(
+        (e) =>
+          (evidenceSupportsFamily(e, inst.family) || inst.keywordMatcher.test(e.url || "")) &&
+          e.official &&
+          e.consulted &&
+          e.supportsChange
+      );
+      if (!hasFamilyEvidence) {
+        return {
+          failed: true,
+          claimedInstitutions: [inst.family],
+          reason: `Proposição jurídica atribuída nominalmente a ${inst.family} sem evidência oficial comprobatória da respectiva instituição.`,
+        };
+      }
+
+      // 2. Vínculo Proposição → Evidência (Detecção de Proveniência Cruzada):
+      // Se a proposição atribuída a esta instituição traz termos materiais específicos,
+      // mas as fontes dessa instituição não dão suporte e a matéria está presente em fontes de OUTRA instituição,
+      // há desvio de atribuição institucional.
+      const claimedProposition = match[0];
+      const claimedNouns = Array.from(claimedProposition.matchAll(/\b[a-záàâãéèêíïóôõöúç]{6,}\b/gi))
+        .map((m) => m[0].toLowerCase())
+        .filter(
+          (w) =>
+            ![
+              "tribunal",
+              "decidiu",
+              "declarou",
+              "ressalvou",
+              "fixou",
+              "entendeu",
+              "determinou",
+              "previu",
+              "conforme",
+              "segundo",
+              "também",
+              "processos",
+              "processo",
+              "contudo",
+              "artigo",
+              "parágrafo",
+              "inciso",
+              "alínea",
+              "caput",
+              "dispositivo",
+              "norma",
+              "normas",
+              "constitucional",
+              "inconstitucional",
+              "constitucionalidade",
+              "inconstitucionalidade",
+            ].includes(w)
+        );
+
+      if (claimedNouns.length > 0) {
+        const instEvidenceMatches = evidenceList.filter((e) => evidenceSupportsFamily(e, inst.family));
+        const instEvidenceText = instEvidenceMatches.map((e) => `${e.title || ""} ${e.supportExplanation || ""}`.toLowerCase()).join(" ");
+
+        const otherEvidences = evidenceList.filter(
+          (e) => !evidenceSupportsFamily(e, inst.family) && MONITORED_INSTITUTIONS.some((m) => evidenceSupportsFamily(e, m.family))
+        );
+        const otherEvidenceText = otherEvidences.map((e) => `${e.title || ""} ${e.supportExplanation || ""}`.toLowerCase()).join(" ");
+
+        if (otherEvidences.length > 0) {
+          const crossAttributed = claimedNouns.filter(
+            (noun) => !instEvidenceText.includes(noun) && otherEvidenceText.includes(noun)
+          );
+
+          if (crossAttributed.length > 0) {
+            return {
+              failed: true,
+              claimedInstitutions: [inst.family],
+              reason: `Violação de proveniência institucional: a proposição atribuída a ${inst.family} traz matéria ("${crossAttributed.join(", ")}") sem respaldo nas fontes de ${inst.family}, correspondente a fontes de outra instituição.`,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return { failed: false };
+}
+
+export interface NormativeSemanticDriftResult {
+  hasDrift: boolean;
+  dimensions: string[];
+  reason?: string;
+}
+
+/**
+ * Gate de Desvio Semântico-Normativo V2:
+ * Avalia de forma genérica e estruturada se o patch alterou modalidade normativa ou prazos
+ * sem suporte probatório ou justificativa adequada.
+ */
+export function detectNormativeSemanticDrift(change: {
+  originalExcerpt: string;
+  revisedExcerpt: string;
+  reason: string;
+  evidence?: LegalReviewEvidence[];
+}): NormativeSemanticDriftResult {
+  const orig = String(change.originalExcerpt || "");
+  const rev = String(change.revisedExcerpt || "");
+  const reasonText = String(change.reason || "");
+  const evidenceList = Array.isArray(change.evidence) ? change.evidence : [];
+  const dimensions: string[] = [];
+
+  // A. Modalidade Normativa (Dever cogente vs Faculdade discricionária)
+  const origHasDuty = /(?<!\p{L})(?:dever[áa]|deve|obrigat[óo]ri[ao]|imperativamente|impõe-se|exige-se)(?!\p{L})/iu.test(orig);
+  const revHasDiscretion = /(?<!\p{L})(?:poder[áa]|pode|facultativ[ao]|a\s+crit[ée]rio|faculta-se|discricionari(?:o|a|amente))(?!\p{L})/iu.test(rev);
+
+  if (origHasDuty && revHasDiscretion) {
+    const evidenceSupportsDiscretion = evidenceList.some((e) =>
+      /(?<!\p{L})(?:faculdade|poder[áa]|discricion[áa]ri[ao]|facultad[ao]|discricionariedade)(?!\p{L})/iu.test(e.supportExplanation || "")
+    );
+    const reasonExplainsDiscretion = /(?<!\p{L})(?:faculdade|poder[áa]|discricion[áa]ri[ao]|discricionariedade)(?!\p{L})/iu.test(reasonText);
+    if (!evidenceSupportsDiscretion && !reasonExplainsDiscretion) {
+      dimensions.push("modalidade_dever_para_faculdade");
+      return {
+        hasDrift: true,
+        dimensions,
+        reason: "Desvio semântico-normativo: conversão indevida de dever legal cogente em faculdade discricionária ('poderá') sem suporte oficial ou justificativa no patch.",
+      };
+    }
+  }
+
+  // B. Prazos genéricos (horas, dias, meses, anos)
+  const deadlineRegex = /(?<!\p{L})prazo\s+(?:m[áa]ximo\s+)?de\s+(?:at[ée]\s+)?(\d+)\s*(horas?|dias?|meses|m[êe]s|anos?)(?!\p{L})/iu;
+  const origDeadlineMatch = orig.match(deadlineRegex);
+  const revDeadlineMatch = rev.match(deadlineRegex);
+
+  if (origDeadlineMatch) {
+    const origDeadlineStr = origDeadlineMatch[0];
+    const reasonMentionsDeadline = /(?<!\p{L})(?:prazo|temporal|horas?|dias?|meses|anos?|revoga[çc][aã]o|altera[çc][aã]o\s+de\s+prazo)(?!\p{L})/iu.test(reasonText);
+    const evidenceMentionsDeadline = evidenceList.some((e) =>
+      /(?<!\p{L})(?:prazo|temporal|horas?|dias?|meses|anos?)(?!\p{L})/iu.test(e.supportExplanation || "")
+    );
+
+    if (!revDeadlineMatch) {
+      // Prazo foi suprimido
+      if (!reasonMentionsDeadline && !evidenceMentionsDeadline) {
+        dimensions.push("supressao_de_prazo");
+        return {
+          hasDrift: true,
+          dimensions,
+          reason: `Desvio semântico-normativo: supressão do prazo legal vinculante ("${origDeadlineStr}") sem justificativa na razão do patch.`,
+        };
+      }
+    } else {
+      // Prazo foi alterado
+      const origValue = `${origDeadlineMatch[1]} ${origDeadlineMatch[2].toLowerCase()}`;
+      const revValue = `${revDeadlineMatch[1]} ${revDeadlineMatch[2].toLowerCase()}`;
+      if (origValue !== revValue && !reasonMentionsDeadline && !evidenceMentionsDeadline) {
+        dimensions.push("alteracao_de_prazo");
+        return {
+          hasDrift: true,
+          dimensions,
+          reason: `Desvio semântico-normativo: alteração do prazo ("${origValue}" para "${revValue}") sem justificativa na razão ou na evidência do patch.`,
+        };
+      }
+    }
+  }
+
+  return { hasDrift: false, dimensions };
+}
+
+export interface ShouldRunCoverageInput {
+  content: string;
+  parsedMain: NormalizedAudit;
+  sectionIndex?: number;
+}
+
+export interface CoverageDecision {
+  run: boolean;
+  reasons: string[];
+  skipReason?: string;
+}
+
+/**
+ * Decisão Adaptativa de Execução da Coverage Pass:
+ * Determina se a passagem de cobertura é necessária com base em sinais objetivos da Main Review.
+ * Evita chamadas redundantes e caras ao modelo quando a Main já foi suficiente.
+ */
+export function shouldRunCoveragePass(input: ShouldRunCoverageInput): CoverageDecision {
+  const { content, parsedMain } = input;
+  const reasons: string[] = [];
+
+  const statuteMatches = content.match(/\b(?:art(?:igo|\.)?\s*\d+|inciso\s+[A-Z0-9]+|§\s*\d+|parágrafo\s+único)\b/gi) || [];
+  const courtMatches = content.match(/\b(?:STF|STJ|CNJ|TST|TSE|ADI|ADPF|ADC|súmula\s+vinculante|repercussão\s+geral|recurso\s+repetitivo)\b/gi) || [];
+  const enumMatches = content.match(/(?:^|\n)\s*(?:[0-9]+[.)]|[A-Z][.)]|[-*•])\s+/g) || [];
+
+  const normativeDensity = statuteMatches.length;
+  const judicialComplexity = courtMatches.length;
+  const enumerationCount = enumMatches.length;
+
+  const acceptedCount = (parsedMain.changes || []).filter((c) => c.confirmation === "CONFIRMADO").length;
+  const rejectedCount = (parsedMain.changes || []).filter((c) => c.confirmation === "NAO_CONFIRMADO").length;
+  const unverifiedCount = (parsedMain.unverifiedClaims || []).length;
+  const repairableCount = (parsedMain.repairablePatches || []).length;
+
+  // Sinal 1: Alta densidade normativa sem alterações encontradas na Main (possível falso negativo)
+  if (normativeDensity >= 4 && acceptedCount === 0 && content.length > 800) {
+    reasons.push("HIGH_NORMATIVE_DENSITY_ZERO_FINDINGS");
+  }
+
+  // Sinal 2: Presença de jurisprudência complexa com baixa cobertura de alterações
+  if (judicialComplexity >= 3 && acceptedCount === 0 && content.length > 600) {
+    reasons.push("COMPLEX_JURISPRUDENCE_LOW_COVERAGE");
+  }
+
+  // Sinal 3: Densidade de enumerações elevada em conteúdo longo com poucos achados
+  if (enumerationCount >= 5 && acceptedCount <= 1 && content.length > 1200) {
+    reasons.push("HIGH_ENUMERATION_DENSITY");
+  }
+
+  // Sinal 4: Incerteza / pendências da Main (unverified claims ou patches rejeitados/reparáveis)
+  if (unverifiedCount > 0 || repairableCount > 0 || rejectedCount > 1) {
+    reasons.push("MAIN_VALIDATION_UNCERTAINTY");
+  }
+
+  // Sinal 5: Desproporção entre tamanho e achados em texto com marcadores normativos
+  if (content.length > 2500 && (normativeDensity >= 3 || judicialComplexity >= 2) && acceptedCount <= 1) {
+    reasons.push("SUSPICIOUS_CONTENT_SIZE_RATIO");
+  }
+
+  if (reasons.length > 0) {
+    return {
+      run: true,
+      reasons,
+    };
+  }
+
+  const skipReason = acceptedCount > 0
+    ? "sufficient_main_coverage"
+    : normativeDensity < 3
+      ? "low_normative_density"
+      : "standard_content_no_risk";
+
+  return {
+    run: false,
+    reasons: [],
+    skipReason,
+  };
+}
+
 /**
  * Determina as famílias de fontes oficiais obrigatórias para sustentar uma alteração jurídica.
  *
@@ -784,13 +1469,19 @@ export function requiredFamiliesForChange(change: {
   return finalRequired;
 }
 
+export const MAX_LEGAL_CHANGE_REASON_CHARS = 500;
+
 function legalRefusalCodes(
   change: Omit<LegalReviewChange, "verified" | "confirmation">,
-  modelConfirmation: LegalConfirmation
+  modelConfirmation: LegalConfirmation,
+  lessonContext?: string
 ): ValidationReasonCode[] {
   if (modelConfirmation === "NAO_CONFIRMADO") return ["MODEL_UNCONFIRMED"];
+  if (!change.reason || !change.reason.trim()) return ["REASON_EMPTY"];
+  if (change.reason.length > MAX_LEGAL_CHANGE_REASON_CHARS) return ["REASON_TOO_LONG"];
   if (changeLacksNormativeSpecificity(change)) return ["SOURCE_SPECIFICITY_FAILED"];
   if (changeContainsUngroundedInvention(change)) return ["NORMATIVE_INVENTION"];
+
   const introducedStatutes = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
   if (introducedStatutes.length > 0) {
     const covered = introducedStatutes.every((statute) =>
@@ -801,23 +1492,54 @@ function legalRefusalCodes(
   const required = requiredFamiliesForChange(change);
   if (required.length) {
     const covered = required.every((family) => change.evidence.some((item) => evidenceSupportsFamily(item, family)));
-    return covered ? [] : ["COURT_FAMILY_FAILED"];
+    if (!covered) return ["COURT_FAMILY_FAILED"];
   }
+
+  // V2.1: Deletion Safety Gate
+  if (detectUnjustifiedCollateralDeletion(change).hasUnjustifiedDeletion) {
+    return ["COLLATERAL_DELETION_FAILED"];
+  }
+
+  // V2.3: Institutional Provenance Gate
+  if (checkInstitutionalProvenance(change).failed) {
+    return ["INSTITUTIONAL_PROVENANCE_FAILED"];
+  }
+
+  // V2.3: Normative Semantic Drift
+  if (detectNormativeSemanticDrift(change).hasDrift) {
+    return ["NORMATIVE_DRIFT_FAILED"];
+  }
+
+  // V2.1/V2.2: Statute + Jurisprudence Dual Check
+  if (checkStatuteAndJurisprudenceDualCheck(change, lessonContext).failed) {
+    return ["DUAL_CHECK_FAILED"];
+  }
+
+  // V2.1: Completude Semântica
+  if (checkSemanticCompleteness(change).failed) {
+    return ["INCOMPLETE_ENUMERATION_FAILED"];
+  }
+
+  // V2.1: Suporte Probatório Integral
+  if (checkEffectivePropositionSupport(change).failed) {
+    return ["UNSUPPORTED_PROPOSITION_FAILED"];
+  }
+
   if (!isMaterialLegalChange(change)) return [];
   return change.evidence.some(evidenceConfirmsMaterialClaim) ? [] : ["EVIDENCE_INSUFFICIENT"];
 }
 
 function confirmChange(
   change: Omit<LegalReviewChange, "verified" | "confirmation">,
-  modelConfirmation: LegalConfirmation
+  modelConfirmation: LegalConfirmation,
+  lessonContext?: string
 ): LegalConfirmation {
   if (modelConfirmation === "NAO_CONFIRMADO") return "NAO_CONFIRMADO";
+  if (!change.reason || !change.reason.trim()) return "NAO_CONFIRMADO";
+  if (change.reason.length > MAX_LEGAL_CHANGE_REASON_CHARS) return "NAO_CONFIRMADO";
   if (changeLacksNormativeSpecificity(change)) return "NAO_CONFIRMADO";
   if (changeContainsUngroundedInvention(change)) return "NAO_CONFIRMADO";
 
-  // Verificação de diplomas normativos expressamente introduzidos na revisão:
-  // Se o trecho revisado introduzir diplomas normativos específicos não presentes no original,
-  // cada diploma introduzido deve ser amparado por ao menos uma evidência oficial consultada.
   const introducedStatutes = newlyIntroducedStatutes(change.originalExcerpt, change.revisedExcerpt);
   if (introducedStatutes.length > 0) {
     const statutesCovered = introducedStatutes.every((statute) =>
@@ -829,13 +1551,44 @@ function confirmChange(
   const required = requiredFamiliesForChange(change);
   if (required.length) {
     const covered = required.every((family) => change.evidence.some((item) => evidenceSupportsFamily(item, family)));
-    return covered ? "CONFIRMADO" : "NAO_CONFIRMADO";
+    if (!covered) return "NAO_CONFIRMADO";
   }
+
+  // V2.1: Deletion Safety Gate
+  if (detectUnjustifiedCollateralDeletion(change).hasUnjustifiedDeletion) {
+    return "NAO_CONFIRMADO";
+  }
+
+  // V2.3: Institutional Provenance Gate
+  if (checkInstitutionalProvenance(change).failed) {
+    return "NAO_CONFIRMADO";
+  }
+
+  // V2.3: Normative Semantic Drift
+  if (detectNormativeSemanticDrift(change).hasDrift) {
+    return "NAO_CONFIRMADO";
+  }
+
+  // V2.1/V2.2: Statute + Jurisprudence Dual Check
+  if (checkStatuteAndJurisprudenceDualCheck(change, lessonContext).failed) {
+    return "NAO_CONFIRMADO";
+  }
+
+  // V2.1: Completude Semântica
+  if (checkSemanticCompleteness(change).failed) {
+    return "NAO_CONFIRMADO";
+  }
+
+  // V2.1: Suporte Probatório Integral
+  if (checkEffectivePropositionSupport(change).failed) {
+    return "NAO_CONFIRMADO";
+  }
+
   if (!isMaterialLegalChange(change)) return modelConfirmation;
   return change.evidence.some(evidenceConfirmsMaterialClaim) ? "CONFIRMADO" : "NAO_CONFIRMADO";
 }
 
-function readChange(value: unknown, index: number, consulted: Set<string>): LegalReviewChange | null {
+function readChange(value: unknown, index: number, consulted: Set<string>, lessonContext?: string): LegalReviewChange | null {
   const record = asRecord(value);
   if (!record) return null;
   const type = oneOf(record.type, CHANGE_TYPES, "CORRECAO");
@@ -846,12 +1599,20 @@ function readChange(value: unknown, index: number, consulted: Set<string>): Lega
   if (type !== "ACRESCIMO" && type !== "REMOCAO" && originalExcerpt.trim() === revisedExcerpt.trim()) {
     return null;
   }
-  const sources = Array.isArray(record.sources)
+  const rawSources = Array.isArray(record.sources) && record.sources.length > 0
     ? record.sources.map(readSource).filter((item): item is LegalReviewSource => Boolean(item)).slice(0, 6)
     : [];
   const evidence = Array.isArray(record.evidence)
     ? record.evidence.map((item) => readEvidence(item, consulted)).filter((item): item is LegalReviewEvidence => Boolean(item)).slice(0, 6)
     : [];
+  const sources = rawSources.length > 0
+    ? rawSources
+    : evidence.map((e) => ({
+        title: e.title,
+        url: e.url,
+        official: e.official,
+        institution: e.institution,
+      }));
   const category = oneOf(record.category, CATEGORIES, "CONCEITO");
   const draft = {
     id: clip(record.id, 40) || `change-${index + 1}`,
@@ -867,7 +1628,7 @@ function readChange(value: unknown, index: number, consulted: Set<string>): Lega
   const modelConfirmation: LegalConfirmation = record.confirmation === "NAO_CONFIRMADO" || record.verified === false
     ? "NAO_CONFIRMADO"
     : "CONFIRMADO";
-  const confirmation = confirmChange(draft, modelConfirmation);
+  const confirmation = confirmChange(draft, modelConfirmation, lessonContext);
   return {
     ...draft,
     confirmation,
@@ -1474,6 +2235,10 @@ export interface NormalizedAudit {
   validationLog?: LegalAuditValidationLog;
   /** Transitório. Alegações autônomas do modelo sobre a aula, separadas de pendências derivadas de patches. */
   autonomousClaims?: LegalUnverifiedClaim[];
+  /** Cobertura proposicional determinística (V2.3.2-B). */
+  coverageSummary?: CoverageSummary;
+  auditedUnits?: AuditedPropositionInput[];
+  editorialIntegrity?: EditorialIntegrityValidation;
 }
 
 export type LiteralRejectReason =
@@ -1714,6 +2479,512 @@ export function outsidePatchBytesIdentical(
   return original.slice(originalAt) === appliedMarkdown.slice(appliedAt);
 }
 
+function normalizeEditorialText(text: string): string {
+  return (text || "").replace(/\r\n/g, "\n");
+}
+
+export function isMaterialEditorialChange(change: Pick<LegalReviewChange, "type" | "category" | "severity">): boolean {
+  if (isMaterialLegalChange(change)) return true;
+  if (change.type === "REMOCAO" || change.type === "CORRECAO" || change.type === "ATUALIZACAO") return true;
+  if (change.severity === "ALTA" || change.severity === "MEDIA") return true;
+  return false;
+}
+
+export function extractCurrentExcerptInReviewed(
+  reviewedDoc: string,
+  orig: string,
+  rev: string,
+  before = "",
+  after = ""
+): string {
+  if (orig) {
+    const origSpans = findLiteralSpans(reviewedDoc, orig, before, after);
+    if (origSpans.length > 0) return orig;
+    const origPlain = findLiteralSpans(reviewedDoc, orig, "", "");
+    if (origPlain.length > 0) return orig;
+  }
+  if (rev) {
+    const revSpans = findLiteralSpans(reviewedDoc, rev, "", "");
+    if (revSpans.length > 0) return rev;
+  }
+  if (before && after) {
+    const bIdx = reviewedDoc.indexOf(before);
+    if (bIdx !== -1) {
+      const aIdx = reviewedDoc.indexOf(after, bIdx + before.length);
+      if (aIdx !== -1) {
+        return reviewedDoc.substring(bIdx + before.length, aIdx).trim();
+      }
+    }
+  }
+  return "Trecho modificado ou não localizado";
+}
+
+export type SingleSpanPatchResult =
+  | { ok: true; doc: string; message?: never; reason?: never }
+  | { ok: false; doc?: never; message: string; reason: "NOT_FOUND" | "AMBIGUOUS" };
+
+export type CoordinatedQuestionPatchResult =
+  | { ok: true; doc: string; message?: never }
+  | { ok: false; doc?: never; message: string };
+
+export function applySingleSpanPatch(
+  doc: string,
+  targetExcerpt: string,
+  replacementText: string,
+  beforeContext = "",
+  afterContext = ""
+): SingleSpanPatchResult {
+  const normDoc = normalizeEditorialText(doc);
+  const normTarget = normalizeEditorialText(targetExcerpt);
+  const normBefore = normalizeEditorialText(beforeContext);
+  const normAfter = normalizeEditorialText(afterContext);
+
+  let spans = findLiteralSpans(normDoc, normTarget, normBefore, normAfter);
+  if (spans.length === 0 && (!normBefore && !normAfter)) {
+    spans = findLiteralSpans(normDoc, normTarget, "", "");
+  }
+
+  if (spans.length === 0) {
+    return {
+      ok: false,
+      reason: "NOT_FOUND",
+      message: "Trecho de destino não localizado no documento revisado.",
+    };
+  }
+
+  if (spans.length > 1) {
+    return {
+      ok: false,
+      reason: "AMBIGUOUS",
+      message: `Trecho de destino possui ${spans.length} ocorrências e não pôde ser desambiguado unicamente. Utilize 'Editar manualmente' para especificar o contexto.`,
+    };
+  }
+
+  const span = spans[0];
+  const nextDoc = normDoc.slice(0, span.start) + replacementText + normDoc.slice(span.end);
+  return { ok: true, doc: nextDoc };
+}
+
+export function findQuestionCoordinationGroups(
+  reviewedDoc: string,
+  changes: LegalReviewChange[],
+  problematicChangeIds: string[]
+): CoordinatedQuestionGroup[] {
+  const challengeIdx = reviewedDoc.indexOf("[ATHENA_CHALLENGE]");
+  if (challengeIdx === -1) return [];
+
+  const rawJson = reviewedDoc.substring(challengeIdx + "[ATHENA_CHALLENGE]".length).trim();
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    return [];
+  }
+
+  if (!parsed || !Array.isArray(parsed.questions)) return [];
+
+  const groups: CoordinatedQuestionGroup[] = [];
+  const probSet = new Set(problematicChangeIds);
+
+  parsed.questions.forEach((q: any, idx: number) => {
+    const qText = String(q.text || "");
+    const qExplanation = String(q.explanation || "");
+    const qOptions = Array.isArray(q.options) ? q.options.map(String) : [];
+
+    const matchedChangeIds: string[] = [];
+
+    for (const chg of changes) {
+      const orig = chg.originalExcerpt || "";
+      const rev = chg.revisedExcerpt || "";
+      const cleanOrig = orig.replace(/\\"/g, '"').replace(/^"|"$/g, "").trim();
+      const cleanRev = rev.replace(/\\"/g, '"').replace(/^"|"$/g, "").trim();
+
+      const inQuestion =
+        (cleanOrig && (qText.includes(cleanOrig) || qExplanation.includes(cleanOrig) || qOptions.some((o: string) => o.includes(cleanOrig)))) ||
+        (cleanRev && (qText.includes(cleanRev) || qExplanation.includes(cleanRev) || qOptions.some((o: string) => o.includes(cleanRev)))) ||
+        (orig.includes(`"text":`) && cleanOrig && (cleanOrig.includes(qText.slice(0, 30)) || qText.includes(cleanOrig.slice(0, 30)))) ||
+        (orig.includes(`"explanation":`) && cleanOrig && (cleanOrig.includes(qExplanation.slice(0, 30)) || qExplanation.includes(cleanOrig.slice(0, 30))));
+
+      if (inQuestion) {
+        matchedChangeIds.push(chg.id);
+      }
+    }
+
+    if (matchedChangeIds.length > 0) {
+      const pendingChangeIds = matchedChangeIds.filter((id) => probSet.has(id));
+      groups.push({
+        questionIndex: idx,
+        questionId: String(q.id || `q${idx + 1}`),
+        subject: String(q.subject || ""),
+        text: qText,
+        options: qOptions,
+        correctIndex: typeof q.correctIndex === "number" ? q.correctIndex : 0,
+        explanation: qExplanation,
+        changeIds: Array.from(new Set(matchedChangeIds)),
+        pendingChangeIds: Array.from(new Set(pendingChangeIds)),
+      });
+    }
+  });
+
+  return groups;
+}
+
+export function applyCoordinatedQuestionPatch(
+  reviewedDoc: string,
+  questionIndex: number,
+  updatedQuestion: {
+    text: string;
+    options: string[];
+    correctIndex: number;
+    explanation: string;
+  }
+): CoordinatedQuestionPatchResult {
+  const challengeIdx = reviewedDoc.indexOf("[ATHENA_CHALLENGE]");
+  if (challengeIdx === -1) {
+    return { ok: false, message: "Marcador [ATHENA_CHALLENGE] não encontrado no documento." };
+  }
+
+  const rawJson = reviewedDoc.substring(challengeIdx + "[ATHENA_CHALLENGE]".length).trim();
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    return { ok: false, message: "JSON do desafio [ATHENA_CHALLENGE] inválido." };
+  }
+
+  if (!parsed || !Array.isArray(parsed.questions) || !parsed.questions[questionIndex]) {
+    return { ok: false, message: `Questão no índice ${questionIndex} não localizada no desafio.` };
+  }
+
+  const q = parsed.questions[questionIndex];
+  q.text = updatedQuestion.text;
+  q.options = updatedQuestion.options;
+  q.correctIndex = updatedQuestion.correctIndex;
+  q.explanation = updatedQuestion.explanation;
+
+  const formattedJson = JSON.stringify(parsed, null, 2);
+  const nextDoc = reviewedDoc.substring(0, challengeIdx) + "[ATHENA_CHALLENGE]\n" + formattedJson + "\n";
+  return { ok: true, doc: nextDoc };
+}
+
+export function validateEditorialIntegrity(
+  originalContent: string,
+  reviewedMarkdown: string,
+  changes: LegalReviewChange[],
+  options?: {
+    verificationLevel?: LegalVerificationLevel;
+    technicalExecutionCompleted?: boolean;
+    humanDecisions?: Record<string, HumanReviewDecision>;
+  }
+): EditorialIntegrityValidation {
+  const originalDoc = normalizeEditorialText(originalContent);
+  const reviewedDoc = normalizeEditorialText(reviewedMarkdown);
+
+  const changeResults: ChangeValidationResult[] = [];
+  const problematicChanges: string[] = [];
+  const failureReasons: string[] = [];
+
+  for (let i = 0; i < changes.length; i++) {
+    const change = changes[i];
+    const changeId = change.id || `change-${i + 1}`;
+    const orig = normalizeEditorialText(change.originalExcerpt);
+    const rev = normalizeEditorialText(change.revisedExcerpt);
+    const before = normalizeEditorialText(change.beforeContext || "");
+    const after = normalizeEditorialText(change.afterContext || "");
+    const material = isMaterialEditorialChange(change);
+    const currentReviewedExcerpt = extractCurrentExcerptInReviewed(reviewedDoc, orig, rev, before, after);
+
+    const decision = options?.humanDecisions?.[changeId];
+
+    // 1. Identificar correspondência no conteúdo original
+    const spansWithCtx = findLiteralSpans(originalDoc, orig, before, after);
+    const spansPlain = findLiteralSpans(originalDoc, orig, "", "");
+
+    let originalMatchesInOriginal = 0;
+    if (spansWithCtx.length === 1) {
+      originalMatchesInOriginal = 1;
+    } else if (spansWithCtx.length === 0) {
+      if (spansPlain.length === 1) {
+        originalMatchesInOriginal = 1;
+      } else if (spansPlain.length > 1) {
+        originalMatchesInOriginal = spansPlain.length;
+      }
+    } else {
+      originalMatchesInOriginal = spansWithCtx.length;
+    }
+
+    const hasDistinguishingContext = before.length > 0 || after.length > 0;
+    const origStillInReviewed = hasDistinguishingContext
+      ? findLiteralSpans(reviewedDoc, orig, before, after).length > 0
+      : findLiteralSpans(reviewedDoc, orig, "", "").length > 0;
+
+    // Se houve decisão humana registrada:
+    if (decision) {
+      if (decision.action === "REJECT") {
+        changeResults.push({
+          changeId,
+          status: "REJECTED",
+          resolutionState: "REJECTED_BY_CEO",
+          applied: false,
+          material,
+          detail: `Alteração rejeitada pelo CEO: ${decision.rejectionReason || "Sem justificativa"}.`,
+          originalFoundInOriginal: originalMatchesInOriginal > 0,
+          originalMatchesInOriginal,
+          revisedFoundInReviewed: rev.length > 0 ? findLiteralSpans(reviewedDoc, rev, "", "").length > 0 : false,
+          originalStillInReviewed: origStillInReviewed,
+          decision,
+          currentReviewedExcerpt,
+        });
+        continue;
+      }
+
+      if (decision.action === "APPLY" || decision.action === "EDIT") {
+        let targetInReviewed = false;
+        if (decision.action === "APPLY") {
+          targetInReviewed = rev.length > 0
+            ? findLiteralSpans(reviewedDoc, rev, "", "").length > 0
+            : !origStillInReviewed;
+        } else {
+          const hasCustomText = Boolean(decision.customText && findLiteralSpans(reviewedDoc, decision.customText, "", "").length > 0);
+          const hasRev = Boolean(rev && findLiteralSpans(reviewedDoc, rev, "", "").length > 0);
+          targetInReviewed = hasCustomText || hasRev || !origStillInReviewed;
+        }
+
+        if (targetInReviewed && !origStillInReviewed) {
+          const resState: ChangeResolutionState = decision.action === "APPLY" ? "APPLIED_BY_CEO" : "EDITED_BY_CEO";
+          changeResults.push({
+            changeId,
+            status: "APPLIED",
+            resolutionState: resState,
+            applied: true,
+            material,
+            detail: decision.action === "APPLY" ? "Alteração aplicada pelo CEO." : "Alteração editada e aplicada pelo CEO.",
+            originalFoundInOriginal: originalMatchesInOriginal > 0,
+            originalMatchesInOriginal,
+            revisedFoundInReviewed: true,
+            originalStillInReviewed: false,
+            decision,
+            currentReviewedExcerpt,
+          });
+          continue;
+        }
+
+        // Falhou na aplicação
+        changeResults.push({
+          changeId,
+          status: "INCONSISTENT",
+          resolutionState: "BLOCKED",
+          applied: false,
+          material,
+          detail: "Alteração aprovada pelo CEO não pôde ser confirmada no texto revisado (trecho inconsistente ou original remanescente).",
+          originalFoundInOriginal: originalMatchesInOriginal > 0,
+          originalMatchesInOriginal,
+          revisedFoundInReviewed: targetInReviewed,
+          originalStillInReviewed: origStillInReviewed,
+          decision,
+          currentReviewedExcerpt,
+        });
+        problematicChanges.push(changeId);
+        failureReasons.push(`${changeId}: Decisão do CEO pendente de consolidação no texto revisado.`);
+        continue;
+      }
+    }
+
+    // Sem decisão humana prévia: validação automatizada determinística
+    if (originalMatchesInOriginal === 0) {
+      changeResults.push({
+        changeId,
+        status: "NOT_IN_ORIGINAL",
+        resolutionState: "BLOCKED",
+        applied: false,
+        material,
+        detail: "Trecho original não foi localizado no documento original da aula.",
+        originalFoundInOriginal: false,
+        originalMatchesInOriginal: 0,
+        revisedFoundInReviewed: false,
+        originalStillInReviewed: false,
+        currentReviewedExcerpt,
+      });
+      problematicChanges.push(changeId);
+      failureReasons.push(`${changeId}: Trecho original não encontrado na aula original.`);
+      continue;
+    }
+
+    if (originalMatchesInOriginal > 1) {
+      changeResults.push({
+        changeId,
+        status: "AMBIGUOUS",
+        resolutionState: "BLOCKED",
+        applied: false,
+        material,
+        detail: `Trecho original possui ${originalMatchesInOriginal} ocorrências e o contexto não permitiu desambiguação única.`,
+        originalFoundInOriginal: true,
+        originalMatchesInOriginal,
+        revisedFoundInReviewed: false,
+        originalStillInReviewed: origStillInReviewed,
+        currentReviewedExcerpt,
+      });
+      problematicChanges.push(changeId);
+      failureReasons.push(`${changeId}: Trecho original ambíguo.`);
+      continue;
+    }
+
+    if (change.type === "REMOCAO") {
+      if (origStillInReviewed) {
+        changeResults.push({
+          changeId,
+          status: "MISSING",
+          resolutionState: "PENDING",
+          applied: false,
+          material,
+          detail: "Trecho original cuja remoção foi determinada ainda permanece presente no Markdown revisado.",
+          originalFoundInOriginal: true,
+          originalMatchesInOriginal,
+          revisedFoundInReviewed: rev.length > 0 ? findLiteralSpans(reviewedDoc, rev, "", "").length > 0 : true,
+          originalStillInReviewed: true,
+          currentReviewedExcerpt,
+        });
+        problematicChanges.push(changeId);
+        failureReasons.push(`${changeId}: Trecho que deveria ser removido continua no Markdown revisado.`);
+        continue;
+      }
+
+      if (rev.length > 0) {
+        const revInReviewed = findLiteralSpans(reviewedDoc, rev, "", "").length > 0;
+        if (!revInReviewed) {
+          changeResults.push({
+            changeId,
+            status: "PARTIALLY_APPLIED",
+            resolutionState: "PENDING",
+            applied: false,
+            material,
+            detail: "Trecho original foi removido, mas o texto substituto proposto não foi incorporado no Markdown revisado.",
+            originalFoundInOriginal: true,
+            originalMatchesInOriginal,
+            revisedFoundInReviewed: false,
+            originalStillInReviewed: false,
+            currentReviewedExcerpt,
+          });
+          problematicChanges.push(changeId);
+          failureReasons.push(`${changeId}: Remoção parcial; texto substituto não incorporado.`);
+          continue;
+        }
+      }
+
+      changeResults.push({
+        changeId,
+        status: "APPLIED",
+        resolutionState: "APPLIED_AUTOMATICALLY",
+        applied: true,
+        material,
+        detail: "Remoção efetivamente incorporada ao Markdown revisado.",
+        originalFoundInOriginal: true,
+        originalMatchesInOriginal,
+        revisedFoundInReviewed: true,
+        originalStillInReviewed: false,
+        currentReviewedExcerpt,
+      });
+      continue;
+    }
+
+    // Outros tipos: CORRECAO, ATUALIZACAO, PRECISAO, ACRESCIMO, REESTRUTURACAO
+    const revInReviewed = findLiteralSpans(reviewedDoc, rev, "", "").length > 0;
+
+    if (!revInReviewed) {
+      if (origStillInReviewed) {
+        changeResults.push({
+          changeId,
+          status: "MISSING",
+          resolutionState: "PENDING",
+          applied: false,
+          material,
+          detail: "Trecho revisado proposto não consta no Markdown revisado e o trecho original permanece inalterado.",
+          originalFoundInOriginal: true,
+          originalMatchesInOriginal,
+          revisedFoundInReviewed: false,
+          originalStillInReviewed: true,
+          currentReviewedExcerpt,
+        });
+        problematicChanges.push(changeId);
+        failureReasons.push(`${changeId}: Alteração ausente; texto original permanece inalterado.`);
+      } else {
+        changeResults.push({
+          changeId,
+          status: "PARTIALLY_APPLIED",
+          resolutionState: "PENDING",
+          applied: false,
+          material,
+          detail: "Trecho original foi modificado, mas o trecho revisado proposto não foi incorporado com exatidão.",
+          originalFoundInOriginal: true,
+          originalMatchesInOriginal,
+          revisedFoundInReviewed: false,
+          originalStillInReviewed: false,
+          currentReviewedExcerpt,
+        });
+        problematicChanges.push(changeId);
+        failureReasons.push(`${changeId}: Alteração parcialmente aplicada ou divergente.`);
+      }
+      continue;
+    }
+
+    if (origStillInReviewed && orig !== rev) {
+      changeResults.push({
+        changeId,
+        status: "MISSING",
+        resolutionState: "PENDING",
+        applied: false,
+        material,
+        detail: "Trecho original ainda permanece presente no Markdown revisado, coexistindo com trecho revisado.",
+        originalFoundInOriginal: true,
+        originalMatchesInOriginal,
+        revisedFoundInReviewed: true,
+        originalStillInReviewed: true,
+        currentReviewedExcerpt,
+      });
+      problematicChanges.push(changeId);
+      failureReasons.push(`${changeId}: Trecho original ainda permanece presente com o trecho revisado.`);
+      continue;
+    }
+
+    changeResults.push({
+      changeId,
+      status: "APPLIED",
+      resolutionState: "APPLIED_AUTOMATICALLY",
+      applied: true,
+      material,
+      detail: "Alteração efetivamente incorporada ao Markdown revisado.",
+      originalFoundInOriginal: true,
+      originalMatchesInOriginal,
+      revisedFoundInReviewed: true,
+      originalStillInReviewed: false,
+      currentReviewedExcerpt,
+    });
+  }
+
+  const passed = problematicChanges.length === 0;
+  const status: EditorialIntegrityStatus = passed
+    ? "EDITORIAL_REVIEW_SUCCESS"
+    : "EDITORIAL_REVIEW_INCOMPLETE";
+  const appliedChanges = changeResults.filter((r) => r.applied).length;
+  const pendingChangesCount = changeResults.filter((r) => r.resolutionState === "PENDING" || r.resolutionState === "BLOCKED").length;
+  const resolvedChangesCount = changeResults.filter((r) => r.resolutionState === "APPLIED_BY_CEO" || r.resolutionState === "EDITED_BY_CEO" || r.resolutionState === "REJECTED_BY_CEO").length;
+
+  return {
+    status,
+    passed,
+    executionCompleted: options?.technicalExecutionCompleted ?? true,
+    editorialIntegrityPassed: passed,
+    legalVerificationPassed: options?.verificationLevel === "VERIFICADO_COM_FONTES",
+    totalChanges: changes.length,
+    appliedChanges,
+    problematicChanges,
+    changeResults,
+    failureReasons,
+    pendingChangesCount,
+    resolvedChangesCount,
+  };
+}
+
 export type ClassifiedLegalAudit =
   | { ok: true; audit: NormalizedAudit }
   | { ok: false; error: LegalReviewValidationError };
@@ -1758,11 +3029,39 @@ function validationFailure(
   return { ok: false, error };
 }
 
+export function sanitizeReviewedMarkdown(text: string): string {
+  let cleaned = (text || "").trim();
+  // Remove preâmbulos conversacionais iniciais e saudações finais
+  cleaned = cleaned.replace(/^(?:aqui est[aá] [^\n]*\n+|segue [^\n]*\n+|revis[aã]o jur[ií]dica[^\n]*\n+)+/i, "").trim();
+  cleaned = cleaned.replace(/(?:\n+[^\n]*(?:espero ter ajudado|atenciosamente|bons estudos)[^\n]*)+$/i, "").trim();
+
+  // Remove cercas de código markdown
+  if (cleaned.startsWith("```markdown") && cleaned.endsWith("```")) {
+    cleaned = cleaned.slice(11, -3).trim();
+  } else if (cleaned.startsWith("```") && cleaned.endsWith("```")) {
+    cleaned = cleaned.slice(3, -3).trim();
+  } else {
+    const fenceMatch = cleaned.match(/```(?:markdown)?\s*\n([\s\S]*?)\n```/i);
+    if (fenceMatch && fenceMatch[1].trim().length >= 20) {
+      cleaned = fenceMatch[1].trim();
+    }
+  }
+
+  // Segunda passagem para preâmbulos internos
+  cleaned = cleaned.replace(/^(?:aqui est[aá] [^\n]*\n+|segue [^\n]*\n+|revis[aã]o jur[ií]dica[^\n]*\n+)+/i, "").trim();
+  cleaned = cleaned.replace(/(?:\n+[^\n]*(?:espero ter ajudado|atenciosamente|bons estudos)[^\n]*)+$/i, "").trim();
+  return cleaned;
+}
+
 /** Classifica a auditoria e preserva o motivo. O texto jurídico não entra no erro. */
 export function classifyLegalAudit(
   raw: unknown,
   originalMarkdown: string,
-  search: { webSearchExecuted: boolean; consultedUrls?: string[] }
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] },
+  options?: {
+    coverageSummary?: CoverageSummary;
+    integralRewrite?: boolean;
+  }
 ): ClassifiedLegalAudit {
   const record = asRecord(raw);
   if (!record) {
@@ -1792,7 +3091,7 @@ export function classifyLegalAudit(
     );
   }
   const drafts = declared.flatMap((item, index) => {
-    const change = readChange(item, index, consulted);
+    const change = readChange(item, index, consulted, original);
     if (!change) return [];
     const source = asRecord(item);
     const modelConfirmation: LegalConfirmation = source?.confirmation === "NAO_CONFIRMADO" || source?.verified === false
@@ -1803,7 +3102,7 @@ export function classifyLegalAudit(
       beforeContext: literalContext(source?.beforeContext),
       afterContext: literalContext(source?.afterContext),
       key: `${index}:${change.id}`,
-      refusalCodes: legalRefusalCodes(change, modelConfirmation),
+      refusalCodes: legalRefusalCodes(change, modelConfirmation, original),
     }];
   });
   const unreadable = declared.flatMap((item, index) => {
@@ -1816,6 +3115,37 @@ export function classifyLegalAudit(
     }];
   });
   const unreadMaterial = unreadable.length > 0;
+
+  const rawAuditedUnits: AuditedPropositionInput[] | undefined = Array.isArray(record.auditedUnits)
+    ? (record.auditedUnits as unknown[]).flatMap((item) => {
+        const r = asRecord(item);
+        if (!r || typeof r.id !== "string" || !r.id) return [];
+        const status = r.status === "AUDITED_CORRECT" || r.status === "AUDITED_INCORRECT" ? r.status : undefined;
+        if (!status) return [];
+        const evidenceSourceIds = Array.isArray(r.evidenceSourceIds)
+          ? (r.evidenceSourceIds as unknown[]).filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
+          : undefined;
+        return [{
+          id: r.id,
+          status,
+          ...(typeof r.changeId === "string" && r.changeId ? { changeId: r.changeId } : {}),
+          ...(evidenceSourceIds ? { evidenceSourceIds } : {}),
+        }];
+      })
+    : undefined;
+
+  const rawReviewedMarkdown = typeof record.reviewedMarkdown === "string" ? record.reviewedMarkdown.trim() : null;
+  const reviewedMarkdown = rawReviewedMarkdown && rawReviewedMarkdown.length >= 20
+    ? sanitizeReviewedMarkdown(rawReviewedMarkdown)
+    : undefined;
+
+  if (reviewedMarkdown && original.length >= 200 && reviewedMarkdown.length < original.length * 0.4) {
+    return validationFailure(
+      "A aula revisada parece truncada ou excessivamente resumida. A aula publicada não foi alterada.",
+      "invalid_audit",
+      emptyCoverage("invalid_audit", 0, "INVALID_LENGTH", "INVALID_LENGTH")
+    );
+  }
 
   return {
     ok: true,
@@ -1831,6 +3161,10 @@ export function classifyLegalAudit(
       unreadMaterial,
       rawChangeCount: declared.length,
       unreadable,
+      coverageSummary: options?.coverageSummary,
+      auditedUnits: rawAuditedUnits,
+      reviewedMarkdown,
+      integralRewrite: options?.integralRewrite,
     }),
   };
 }
@@ -1935,7 +3269,9 @@ function statuteTextMatch(
 function earlierLegalBlock(codes: ValidationReasonCode[]): boolean {
   return codes.includes("MODEL_UNCONFIRMED")
     || codes.includes("SOURCE_SPECIFICITY_FAILED")
-    || codes.includes("NORMATIVE_INVENTION");
+    || codes.includes("NORMATIVE_INVENTION")
+    || codes.includes("REASON_EMPTY")
+    || codes.includes("REASON_TOO_LONG");
 }
 
 function predicateMetadata(
@@ -2092,7 +3428,7 @@ export function extractConciseHeadline(change: { originalExcerpt: string; revise
  * Constrói justificativa objetiva acompanhada do requisito faltante específico,
  * substituindo explicações prolixas por diagnóstico direto e acionável.
  */
-export function buildObjectiveUnverifiedReason(change: LegalReviewChange): string {
+export function buildObjectiveUnverifiedReason(change: LegalReviewChange, lessonContext?: string): string {
   if (changeLacksNormativeSpecificity(change)) {
     return "Perda de especificidade normativa: informação específica confirmada por fonte oficial foi substituída por expressão genérica. Requisito faltante: preservação dos elementos normativos específicos da fonte oficial.";
   }
@@ -2121,6 +3457,36 @@ export function buildObjectiveUnverifiedReason(change: LegalReviewChange): strin
     }
   }
 
+  const delCheck = detectUnjustifiedCollateralDeletion(change);
+  if (delCheck.hasUnjustifiedDeletion) {
+    return `Supressão colateral injustificada: ${delCheck.reason || "unidade material correta removida sem suporte oficial"}. Requisito faltante: preservação do trecho válido ou prova em fonte primária de sua invalidade.`;
+  }
+
+  const provCheck = checkInstitutionalProvenance(change);
+  if (provCheck.failed) {
+    return `Violação de proveniência institucional: ${provCheck.reason || "atribuição institucional sem respaldo específico"}. Requisito faltante: comprovação em fonte oficial do respectivo órgão e delimitação correta da autoria do comando normativo.`;
+  }
+
+  const driftCheck = detectNormativeSemanticDrift(change);
+  if (driftCheck.hasDrift) {
+    return `Desvio semântico-normativo: ${driftCheck.reason || "alteração de modalidade ou prazo vinculante"}. Requisito faltante: conformidade estrita com o caráter cogente e com os prazos fixados na norma primária.`;
+  }
+
+  const dualCheck = checkStatuteAndJurisprudenceDualCheck(change, lessonContext);
+  if (dualCheck.failed) {
+    return `Incompatibilidade com controle de constitucionalidade ou jurisprudência vinculante: ${dualCheck.reason || "verificação dupla obrigatória"}. Requisito faltante: comprovação em fonte oficial do STF e adequação à interpretação vinculante.`;
+  }
+
+  const compCheck = checkSemanticCompleteness(change);
+  if (compCheck.failed) {
+    return `Completude semântica insuficiente: ${compCheck.reason || "rol incompleto apresentado como exaustivo"}. Requisito faltante: explicitação de todas as exceções ou qualificação estrita da literalidade legal.`;
+  }
+
+  const propCheck = checkEffectivePropositionSupport(change);
+  if (propCheck.failed) {
+    return `Atomicidade probatória: ${propCheck.reason || "evidência não sustenta todas as proposições"}. Requisito faltante: comprovação em fonte oficial de cada alegação material introduzida.`;
+  }
+
   if (isMaterialLegalChange(change) && !change.evidence.some(evidenceConfirmsMaterialClaim)) {
     return "Evidências apresentadas não comprovam suficientemente a alteração material. Requisito faltante: documento oficial comprobatório com suporte efetivo à alteração.";
   }
@@ -2141,6 +3507,10 @@ function finalizePatchAudit(input: {
   unreadMaterial: boolean;
   rawChangeCount: number;
   unreadable: Array<{ changeId: string; reasonCodes: ValidationReasonCode[] }>;
+  coverageSummary?: CoverageSummary;
+  auditedUnits?: AuditedPropositionInput[];
+  reviewedMarkdown?: string;
+  integralRewrite?: boolean;
 }): NormalizedAudit {
   const applicable = input.drafts.filter((draft) => draft.change.confirmation === "CONFIRMADO");
   const appliedResult = applyLiteralPatches(input.original, applicable.map((draft) => ({
@@ -2217,27 +3587,44 @@ function finalizePatchAudit(input: {
   for (const change of changes) {
     if (change.confirmation !== "NAO_CONFIRMADO") continue;
     const headline = extractConciseHeadline(change);
-    const objectiveReason = buildObjectiveUnverifiedReason(change);
+    const objectiveReason = buildObjectiveUnverifiedReason(change, input.original);
     pushClaim(headline, objectiveReason);
   }
 
   const rejectedMaterial = input.unreadMaterial || changes.some((change) => (
     isMaterialLegalChange(change) && change.confirmation !== "CONFIRMADO"
   ));
-  const reviewedMarkdown = changes.length === 0 && !rejectedMaterial ? input.original : appliedResult.markdown;
-  const outcome: LegalReviewOutcome = changes.length === 0 && !rejectedMaterial
+
+  let reviewedMarkdown: string;
+  const rawReviewed = typeof input.reviewedMarkdown === "string" ? input.reviewedMarkdown.trim() : "";
+  const isIntegralReview = Boolean(input.integralRewrite && rawReviewed.length >= 20);
+
+  if (isIntegralReview) {
+    reviewedMarkdown = rawReviewed;
+  } else {
+    reviewedMarkdown = changes.length === 0 && !rejectedMaterial ? input.original : appliedResult.markdown;
+  }
+
+  const outcome: LegalReviewOutcome = (changes.length === 0 && reviewedMarkdown === input.original && !rejectedMaterial)
     ? "SEM_ALTERACOES_RELEVANTES"
     : "ALTERACOES_NECESSARIAS";
   const material = changes.filter(isMaterialLegalChange);
   const officialSourcesConsulted = input.consultedSources.some((source) => source.official);
-  const verificationLevel = enforceVerificationLevel({
+  const diffConsistent = isIntegralReview
+    ? (reviewedMarkdown === input.original || reviewedMarkdown.length >= input.original.length * 0.4)
+    : (reviewedMarkdown === input.original || outsidePatchBytesIdentical(input.original, reviewedMarkdown, appliedResult.applied));
+
+  let verificationLevel = enforceVerificationLevel({
     webSearchExecuted: input.search.webSearchExecuted && input.consultedSources.length > 0,
     officialSourcesConsulted,
     allMaterialChangesConfirmed: material.every((change) => change.confirmation === "CONFIRMADO"),
     hasUnverified: unverifiedClaims.length > 0,
-    diffConsistent: reviewedMarkdown === input.original || outsidePatchBytesIdentical(input.original, reviewedMarkdown, appliedResult.applied),
+    diffConsistent,
     manuallyEdited: false,
   });
+  if (input.coverageSummary && !input.coverageSummary.complete && verificationLevel === "VERIFICADO_COM_FONTES") {
+    verificationLevel = "VERIFICACAO_PARCIAL";
+  }
   const limitedClaims = unverifiedClaims.slice(0, 40);
   const predicateDiagnostics: RefusalPredicateDiagnostic[] = [];
   for (let position = 0; position < input.drafts.length && predicateDiagnostics.length < 40; position += 1) {
@@ -2285,6 +3672,16 @@ function finalizePatchAudit(input: {
   if (input.rawChangeCount > 0 && appliedResult.applied.length === 0) pushReason("NO_APPLICABLE_PATCH");
   if (!input.search.webSearchExecuted || input.consultedSources.length === 0) pushReason("MISSING_REQUIRED_SEARCH");
 
+  const editorialIntegrity = validateEditorialIntegrity(
+    input.original,
+    reviewedMarkdown,
+    changes,
+    { verificationLevel }
+  );
+  if (!editorialIntegrity.passed) {
+    pushReason("EDITORIAL_INTEGRITY_INCOMPLETE");
+  }
+
   return {
     outcome,
     confidence: input.confidence,
@@ -2298,6 +3695,9 @@ function finalizePatchAudit(input: {
     repairablePatches,
     appliedPatchInputs,
     autonomousClaims: autonomousClaims.slice(0, 40),
+    coverageSummary: input.coverageSummary,
+    auditedUnits: input.auditedUnits,
+    editorialIntegrity,
     validationLog: {
       validationOutcome: "accepted",
       validationReasonCodes,
@@ -2314,6 +3714,19 @@ function finalizePatchAudit(input: {
       followUpSkipReason: repairablePatches.length > 0 ? "insufficient_remaining" : "no_repairable_patch",
       rejectedPatches,
       ...(predicateDiagnostics.length ? { predicateDiagnostics } : {}),
+      ...(input.coverageSummary ? {
+        propositionCount: input.coverageSummary.total,
+        highRiskPropositionCount: input.coverageSummary.highRiskTotal,
+        auditedCorrectCount: input.coverageSummary.auditedCorrect,
+        auditedIncorrectCount: input.coverageSummary.auditedIncorrect,
+        notAuditedCount: input.coverageSummary.notAudited,
+        indeterminateCount: input.coverageSummary.indeterminate,
+        coverageRate: input.coverageSummary.coverageRate,
+        highRiskCoverageRate: input.coverageSummary.highRiskCoverageRate,
+        coverageCompletenessPassed: input.coverageSummary.complete,
+        pendingByType: input.coverageSummary.pendingByType,
+        pendingByRisk: input.coverageSummary.pendingByRisk,
+      } : {}),
     },
   };
 }
@@ -2338,7 +3751,8 @@ function extractAutonomousClaims(
 
 function revalidateChangeWithConsulted(
   change: LegalReviewChange,
-  consulted: Set<string>
+  consulted: Set<string>,
+  lessonContext?: string
 ): LegalReviewChange {
   const updatedEvidence = change.evidence.map((ev) => {
     const canonical = canonicalSourceUrl(ev.url);
@@ -2356,7 +3770,7 @@ function revalidateChangeWithConsulted(
     if (evidenceModelSupport.has(ev)) evidenceModelSupport.set(updated, modelSupports);
     return updated;
   });
-  const confirmation = confirmChange({ ...change, evidence: updatedEvidence }, "CONFIRMADO");
+  const confirmation = confirmChange({ ...change, evidence: updatedEvidence }, "CONFIRMADO", lessonContext);
   return {
     ...change,
     evidence: updatedEvidence,
@@ -2365,9 +3779,9 @@ function revalidateChangeWithConsulted(
   };
 }
 
-function refusalCodesForChange(change: LegalReviewChange): ValidationReasonCode[] {
+function refusalCodesForChange(change: LegalReviewChange, lessonContext?: string): ValidationReasonCode[] {
   if (change.confirmation === "CONFIRMADO") return [];
-  const objectiveCodes = legalRefusalCodes(change, "CONFIRMADO");
+  const objectiveCodes = legalRefusalCodes(change, "CONFIRMADO", lessonContext);
   if (objectiveCodes.length > 0) return objectiveCodes;
   return ["MODEL_UNCONFIRMED"];
 }
@@ -2406,7 +3820,7 @@ export function mergePatchAudits(
   const pushDraft = (change: LegalReviewChange, beforeContext: string, afterContext: string, key: string) => {
     if (seenDraft.has(change.id)) return;
     seenDraft.add(change.id);
-    const refusalCodes = refusalCodesForChange(change);
+    const refusalCodes = refusalCodesForChange(change, originalMarkdown);
     drafts.push({ change, beforeContext, afterContext, key, refusalCodes });
   };
 
@@ -2428,7 +3842,7 @@ export function mergePatchAudits(
         continue;
       }
       const context = followContext.get(replacement.id);
-      const revalidatedReplacement = revalidateChangeWithConsulted(replacement, consulted);
+      const revalidatedReplacement = revalidateChangeWithConsulted(replacement, consulted, originalMarkdown);
       pushDraft(revalidatedReplacement, context?.beforeContext || "", context?.afterContext || "", `repair:${replacement.id}`);
       continue;
     }
@@ -2438,7 +3852,7 @@ export function mergePatchAudits(
   for (const change of follow.changes) {
     if (acceptedIds.has(change.id) || seenDraft.has(change.id) || heldIds.has(change.id)) continue;
     const context = followContext.get(change.id);
-    const revalidatedChange = revalidateChangeWithConsulted(change, consulted);
+    const revalidatedChange = revalidateChangeWithConsulted(change, consulted, originalMarkdown);
     pushDraft(revalidatedChange, context?.beforeContext || "", context?.afterContext || "", `follow:${change.id}`);
   }
 
@@ -2459,7 +3873,7 @@ export function mergePatchAudits(
     .filter((claim) => !retiredExcerpts.has(claim.excerpt.trim()))
     .map((claim) => ({ excerpt: claim.excerpt, reason: claim.reason }));
 
-  return finalizePatchAudit({
+  const mergedAudit = finalizePatchAudit({
     original: String(originalMarkdown || ""),
     drafts,
     held,
@@ -2472,14 +3886,148 @@ export function mergePatchAudits(
     rawChangeCount: drafts.length + held.length,
     unreadable: [],
   });
+  mergedAudit.auditedUnits = mergeAuditedPropositionUnits(
+    current.auditedUnits,
+    follow.auditedUnits
+  );
+  return mergedAudit;
+}
+
+/**
+ * Incorpora os achados da passagem de cobertura ao resultado já auditado.
+ * Os patches de cobertura não podem sobrepor patches já aprovados na primeira fase.
+ * São validados sob as mesmas regras estritas de evidência e confirmação.
+ */
+export function mergeCoverageAudits(
+  originalMarkdown: string,
+  current: NormalizedAudit,
+  coverage: NormalizedAudit,
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] },
+  consultedSources: ConsultedLegalSource[]
+): NormalizedAudit {
+  // Se a passagem de cobertura não gerou nenhuma alteração e nenhum claim, mantém current intacto,
+  // mas incorpora auditedUnits aditivamente se fornecidas.
+  if (
+    (!coverage.changes || coverage.changes.length === 0) &&
+    (!coverage.unverifiedClaims || coverage.unverifiedClaims.length === 0)
+  ) {
+    return {
+      ...current,
+      auditedUnits: mergeAuditedPropositionUnits(current.auditedUnits, coverage.auditedUnits),
+      consultedSources,
+    };
+  }
+
+  const currentContext = new Map((current.appliedPatchInputs || []).map((item) => [item.id, item]));
+  for (const patch of current.repairablePatches || []) {
+    if (!currentContext.has(patch.id)) {
+      currentContext.set(patch.id, { id: patch.id, beforeContext: patch.beforeContext, afterContext: patch.afterContext });
+    }
+  }
+
+  const coverageContext = new Map((coverage.appliedPatchInputs || []).map((item) => [item.id, item]));
+  for (const patch of coverage.repairablePatches || []) {
+    if (!coverageContext.has(patch.id)) {
+      coverageContext.set(patch.id, { id: patch.id, beforeContext: patch.beforeContext, afterContext: patch.afterContext });
+    }
+  }
+
+  const consulted = consultedUrlSet(search.consultedUrls || []);
+  const held: LegalReviewChange[] = [];
+  const drafts: PatchDraft[] = [];
+  const seenDraft = new Set<string>();
+
+  const pushDraft = (change: LegalReviewChange, beforeContext: string, afterContext: string, key: string) => {
+    if (seenDraft.has(change.id)) return;
+    seenDraft.add(change.id);
+    const refusalCodes = refusalCodesForChange(change);
+    drafts.push({ change, beforeContext, afterContext, key, refusalCodes });
+  };
+
+  // 1. Manter todos os patches já avaliados de current
+  for (const change of current.changes) {
+    const context = currentContext.get(change.id);
+    pushDraft(change, context?.beforeContext || "", context?.afterContext || "", `kept:${change.id}`);
+  }
+
+  // Identificar vãos textuais dos patches confirmados da primeira fase para proteger contra sobreposição
+  const currentSpans: Array<{ start: number; end: number }> = [];
+  for (const draft of drafts) {
+    if (draft.change.confirmation === "CONFIRMADO") {
+      const spans = findLiteralSpans(originalMarkdown, draft.change.originalExcerpt, draft.beforeContext, draft.afterContext);
+      if (spans.length === 1) {
+        currentSpans.push(spans[0]);
+      }
+    }
+  }
+
+  // 2. Adicionar patches da cobertura, garantindo ID único e não sobreposição com a fase 1
+  let covIndex = 1;
+  for (const change of coverage.changes) {
+    let uniqueId = change.id;
+    if (seenDraft.has(uniqueId) || current.changes.some((c) => c.id === uniqueId)) {
+      uniqueId = `cov_${change.id}_${covIndex++}`;
+    }
+    const context = coverageContext.get(change.id);
+    const covSpans = findLiteralSpans(originalMarkdown, change.originalExcerpt, context?.beforeContext || "", context?.afterContext || "");
+    const overlapsCurrent = covSpans.length === 1 && currentSpans.some((cur) => rangesOverlap(cur, covSpans[0]));
+
+    let modifiedChange: LegalReviewChange = {
+      ...change,
+      id: uniqueId,
+    };
+    if (overlapsCurrent) {
+      modifiedChange = {
+        ...modifiedChange,
+        confirmation: "NAO_CONFIRMADO",
+        verified: false,
+        reason: "Sobreposição com patch já validado na primeira fase da auditoria.",
+      };
+    }
+
+    const revalidatedChange = revalidateChangeWithConsulted(modifiedChange, consulted, originalMarkdown);
+    pushDraft(revalidatedChange, context?.beforeContext || "", context?.afterContext || "", `coverage:${uniqueId}`);
+  }
+
+  // 3. Claims autônomos
+  const candidateClaims = [
+    ...extractAutonomousClaims(current, current.changes),
+    ...extractAutonomousClaims(coverage, coverage.changes),
+  ];
+  const modelClaims = candidateClaims.map((claim) => ({ excerpt: claim.excerpt, reason: claim.reason }));
+
+  const mergedAudit = finalizePatchAudit({
+    original: String(originalMarkdown || ""),
+    drafts,
+    held,
+    search,
+    consultedSources,
+    reviewNotes: current.reviewNotes
+      ? (coverage.reviewNotes ? `${current.reviewNotes}\n\n[Coverage Pass]\n${coverage.reviewNotes}` : current.reviewNotes)
+      : coverage.reviewNotes,
+    confidence: current.confidence,
+    modelClaims,
+    unreadMaterial: false,
+    rawChangeCount: drafts.length + held.length,
+    unreadable: [],
+  });
+  mergedAudit.auditedUnits = mergeAuditedPropositionUnits(
+    current.auditedUnits,
+    coverage.auditedUnits
+  );
+  return mergedAudit;
 }
 
 export function normalizeLegalAudit(
   raw: unknown,
   originalMarkdown: string,
-  search: { webSearchExecuted: boolean; consultedUrls?: string[] }
+  search: { webSearchExecuted: boolean; consultedUrls?: string[] },
+  options?: {
+    coverageSummary?: CoverageSummary;
+    integralRewrite?: boolean;
+  }
 ): NormalizedAudit | null {
-  const classified = classifyLegalAudit(raw, originalMarkdown, search);
+  const classified = classifyLegalAudit(raw, originalMarkdown, search, options);
   return classified.ok ? classified.audit : null;
 }
 
@@ -2536,6 +4084,7 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
     "confidence",
     "verificationLevel",
     "summary",
+    "auditedUnits",
     "changes",
     "unverifiedClaims",
     "reviewNotes",
@@ -2558,6 +4107,23 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
         restructures: { type: "integer" },
       },
     },
+    auditedUnits: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "status", "changeId", "evidenceSourceIds"],
+        properties: {
+          id: { type: "string" },
+          status: { type: "string", enum: ["AUDITED_CORRECT", "AUDITED_INCORRECT"] },
+          changeId: { type: ["string", "null"] },
+          evidenceSourceIds: {
+            type: "array",
+            items: { type: "string" },
+          },
+        },
+      },
+    },
     changes: {
       type: "array",
       items: {
@@ -2575,7 +4141,6 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
           "reason",
           "verified",
           "confirmation",
-          "sources",
           "evidence",
         ],
         properties: {
@@ -2590,20 +4155,6 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
           reason: { type: "string" },
           verified: { type: "boolean" },
           confirmation: { type: "string", enum: ["CONFIRMADO", "NAO_CONFIRMADO"] },
-          sources: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["title", "url", "official", "institution"],
-              properties: {
-                title: { type: "string" },
-                url: { type: "string" },
-                official: { type: "boolean" },
-                institution: { type: "string" },
-              },
-            },
-          },
           evidence: {
             type: "array",
             items: evidenceSchema,

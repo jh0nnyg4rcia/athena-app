@@ -27,6 +27,15 @@ export const VALIDATION_REASON_CODES = [
   "UNREADABLE_CHANGE",
   "MISSING_REQUIRED_SEARCH",
   "NO_APPLICABLE_PATCH",
+  "COLLATERAL_DELETION_FAILED",
+  "DUAL_CHECK_FAILED",
+  "INCOMPLETE_ENUMERATION_FAILED",
+  "UNSUPPORTED_PROPOSITION_FAILED",
+  "INSTITUTIONAL_PROVENANCE_FAILED",
+  "NORMATIVE_DRIFT_FAILED",
+  "REASON_EMPTY",
+  "REASON_TOO_LONG",
+  "EDITORIAL_INTEGRITY_INCOMPLETE",
 ] as const;
 
 export type ValidationReasonCode = (typeof VALIDATION_REASON_CODES)[number];
@@ -166,6 +175,27 @@ export interface LegalAuditValidationLog {
   rejectedPatches: RejectedPatchDiagnostic[];
   /** Só o log. Ausente quando nenhum predicado de tribunal ou diploma foi avaliado. */
   predicateDiagnostics?: RefusalPredicateDiagnostic[];
+  coverageEligible?: boolean;
+  coverageExecuted?: boolean;
+  coverageSkipReason?: string;
+  coverageReasonCodes?: string[];
+  mainCallCount?: number;
+  coverageCallCount?: number;
+  repairCallCount?: number;
+  totalModelCalls?: number;
+  propositionCount?: number;
+  highRiskPropositionCount?: number;
+  auditedCorrectCount?: number;
+  auditedIncorrectCount?: number;
+  notAuditedCount?: number;
+  indeterminateCount?: number;
+  coverageRate?: number;
+  highRiskCoverageRate?: number;
+  directedCoverageEligible?: boolean;
+  directedCoverageBatchCount?: number;
+  coverageCompletenessPassed?: boolean;
+  pendingByType?: Record<string, number>;
+  pendingByRisk?: Record<string, number>;
 }
 
 const REASONS = new Set<string>(VALIDATION_REASON_CODES);
@@ -424,10 +454,144 @@ export function sanitizeValidationLog(value: unknown): LegalAuditValidationLog |
   if (typeof record.incompleteReason === "string" && INCOMPLETE_REASONS.has(record.incompleteReason)) {
     log.incompleteReason = record.incompleteReason as ValidationIncompleteReason;
   }
+  if (record.coverageEligible !== undefined) {
+    log.coverageEligible = record.coverageEligible === true;
+  }
+  if (record.coverageExecuted !== undefined) {
+    log.coverageExecuted = record.coverageExecuted === true;
+  }
+  if (typeof record.coverageSkipReason === "string") {
+    log.coverageSkipReason = record.coverageSkipReason.slice(0, 100);
+  }
+  if (Array.isArray(record.coverageReasonCodes)) {
+    log.coverageReasonCodes = record.coverageReasonCodes.map(String).slice(0, 20);
+  }
+  if (typeof record.mainCallCount === "number" && Number.isFinite(record.mainCallCount)) {
+    log.mainCallCount = finiteCount(record.mainCallCount);
+  }
+  if (typeof record.coverageCallCount === "number" && Number.isFinite(record.coverageCallCount)) {
+    log.coverageCallCount = finiteCount(record.coverageCallCount);
+  }
+  if (typeof record.repairCallCount === "number" && Number.isFinite(record.repairCallCount)) {
+    log.repairCallCount = finiteCount(record.repairCallCount);
+  }
+  if (typeof record.totalModelCalls === "number" && Number.isFinite(record.totalModelCalls)) {
+    log.totalModelCalls = finiteCount(record.totalModelCalls);
+  }
+  if (typeof record.propositionCount === "number" && Number.isFinite(record.propositionCount)) {
+    log.propositionCount = finiteCount(record.propositionCount);
+  }
+  if (typeof record.highRiskPropositionCount === "number" && Number.isFinite(record.highRiskPropositionCount)) {
+    log.highRiskPropositionCount = finiteCount(record.highRiskPropositionCount);
+  }
+  if (typeof record.auditedCorrectCount === "number" && Number.isFinite(record.auditedCorrectCount)) {
+    log.auditedCorrectCount = finiteCount(record.auditedCorrectCount);
+  }
+  if (typeof record.auditedIncorrectCount === "number" && Number.isFinite(record.auditedIncorrectCount)) {
+    log.auditedIncorrectCount = finiteCount(record.auditedIncorrectCount);
+  }
+  if (typeof record.notAuditedCount === "number" && Number.isFinite(record.notAuditedCount)) {
+    log.notAuditedCount = finiteCount(record.notAuditedCount);
+  }
+  if (typeof record.indeterminateCount === "number" && Number.isFinite(record.indeterminateCount)) {
+    log.indeterminateCount = finiteCount(record.indeterminateCount);
+  }
+  if (typeof record.coverageRate === "number" && Number.isFinite(record.coverageRate)) {
+    log.coverageRate = Math.max(0, Math.min(1, record.coverageRate));
+  }
+  if (typeof record.highRiskCoverageRate === "number" && Number.isFinite(record.highRiskCoverageRate)) {
+    log.highRiskCoverageRate = Math.max(0, Math.min(1, record.highRiskCoverageRate));
+  }
+  if (record.directedCoverageEligible !== undefined) {
+    log.directedCoverageEligible = record.directedCoverageEligible === true;
+  }
+  if (typeof record.directedCoverageBatchCount === "number" && Number.isFinite(record.directedCoverageBatchCount)) {
+    log.directedCoverageBatchCount = finiteCount(record.directedCoverageBatchCount);
+  }
+  if (record.coverageCompletenessPassed !== undefined) {
+    log.coverageCompletenessPassed = record.coverageCompletenessPassed === true;
+  }
+  if (record.pendingByType && typeof record.pendingByType === "object" && !Array.isArray(record.pendingByType)) {
+    log.pendingByType = record.pendingByType as Record<string, number>;
+  }
+  if (record.pendingByRisk && typeof record.pendingByRisk === "object" && !Array.isArray(record.pendingByRisk)) {
+    log.pendingByRisk = record.pendingByRisk as Record<string, number>;
+  }
   return log;
 }
 
 export function validationLogFromUnknown(error: unknown): LegalAuditValidationLog | undefined {
   if (!error || typeof error !== "object" || !("validationLog" in error)) return undefined;
   return sanitizeValidationLog((error as { validationLog?: unknown }).validationLog);
+}
+
+export interface LegalReviewFailureDiagnostic {
+  responseId?: string | null;
+  responseStatus?: string | null;
+  responseModel?: string | null;
+  incompleteDetails?: { reason?: string } | null;
+  responseError?: unknown;
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null;
+  outputItemCount?: number;
+  outputItemTypes?: string[];
+  webSearchCallCount?: number;
+  outputTextLength?: number;
+  rejectionReason: string;
+  rejectionDetail?: string | null;
+  validationReasonCodes?: string[];
+  validationLog?: LegalAuditValidationLog;
+  elapsedMs?: number | null;
+  configuredTimeoutMs?: number | null;
+  configuredBudgetMs?: number | null;
+  rawOutputSample?: string | null;
+  rawOutputText?: string | null;
+  parseError?: string | null;
+}
+
+export function sanitizeDiagnosticText(text: string): string {
+  if (!text) return "";
+  let clean = String(text);
+  if (typeof process !== "undefined" && process?.env) {
+    const envKey = process.env.OPENAI_API_KEY;
+    if (envKey && envKey.length > 5) {
+      clean = clean.split(envKey).join("[REDACTED_ENV_OPENAI_KEY]");
+    }
+  }
+  clean = clean.replace(/sk-[A-Za-z0-9_-]{10,}/g, "[REDACTED_OPENAI_KEY]");
+  clean = clean.replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, "Bearer [REDACTED_TOKEN]");
+  clean = clean.replace(/aiza[0-9A-Za-z\-_]{20,}/gi, "[REDACTED_GOOGLE_KEY]");
+  clean = clean.replace(/password\s*[:=]\s*["'][^"']+["']/gi, 'password: "[REDACTED]"');
+  return clean;
+}
+
+export function buildFailureDiagnostic(
+  input: Partial<LegalReviewFailureDiagnostic> & { rejectionReason: string }
+): LegalReviewFailureDiagnostic {
+  const sample = input.rawOutputSample || (input.rawOutputText ? input.rawOutputText.slice(0, 2000) : null);
+  return {
+    responseId: input.responseId ? sanitizeDiagnosticText(String(input.responseId)) : null,
+    responseStatus: input.responseStatus ? String(input.responseStatus) : null,
+    responseModel: input.responseModel ? String(input.responseModel) : null,
+    incompleteDetails: input.incompleteDetails ? { reason: input.incompleteDetails.reason ? String(input.incompleteDetails.reason) : undefined } : null,
+    responseError: input.responseError ? JSON.parse(sanitizeDiagnosticText(JSON.stringify(input.responseError))) : null,
+    usage: input.usage ? {
+      input_tokens: typeof input.usage.input_tokens === "number" ? input.usage.input_tokens : undefined,
+      output_tokens: typeof input.usage.output_tokens === "number" ? input.usage.output_tokens : undefined,
+      total_tokens: typeof input.usage.total_tokens === "number" ? input.usage.total_tokens : undefined,
+    } : null,
+    outputItemCount: typeof input.outputItemCount === "number" ? input.outputItemCount : 0,
+    outputItemTypes: Array.isArray(input.outputItemTypes) ? input.outputItemTypes.map(String) : [],
+    webSearchCallCount: typeof input.webSearchCallCount === "number" ? input.webSearchCallCount : 0,
+    outputTextLength: typeof input.outputTextLength === "number" ? input.outputTextLength : 0,
+    rejectionReason: String(input.rejectionReason),
+    rejectionDetail: input.rejectionDetail ? sanitizeDiagnosticText(String(input.rejectionDetail)) : null,
+    validationReasonCodes: Array.isArray(input.validationReasonCodes) ? input.validationReasonCodes.map(String) : [],
+    validationLog: input.validationLog ? sanitizeValidationLog(input.validationLog) : undefined,
+    elapsedMs: typeof input.elapsedMs === "number" ? input.elapsedMs : null,
+    configuredTimeoutMs: typeof input.configuredTimeoutMs === "number" ? input.configuredTimeoutMs : null,
+    configuredBudgetMs: typeof input.configuredBudgetMs === "number" ? input.configuredBudgetMs : null,
+    rawOutputSample: sample ? sanitizeDiagnosticText(sample) : null,
+    rawOutputText: input.rawOutputText ? sanitizeDiagnosticText(input.rawOutputText) : null,
+    parseError: input.parseError ? sanitizeDiagnosticText(String(input.parseError)) : null,
+  };
 }

@@ -4,6 +4,7 @@ import {
   MAX_REVIEWABLE_CHARS,
   emptyReviewIndex,
   formatReviewDate,
+  type HumanReviewDecision,
   type LegalReviewIndex,
   type LegalReviewView,
   type StoredCatalogLesson,
@@ -18,6 +19,11 @@ import {
   type LegalReviewTraceCounts,
 } from "./legalReviewTrace";
 import { candidateMarkdownAccepted } from "./legalReviewPublish";
+import {
+  applyCoordinatedQuestionPatch,
+  applySingleSpanPatch,
+  validateEditorialIntegrity,
+} from "../lib/legalReviewValidate";
 import {
   LegalReviewError,
   hashCatalogSnapshot,
@@ -251,6 +257,12 @@ export async function startLegalReview(
       candidateHash: hashLessonContent(audit.reviewedMarkdown),
       auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
       sourceHistory: [],
+      editorialIntegrity: audit.editorialIntegrity || validateEditorialIntegrity(
+        processing.originalContent,
+        audit.reviewedMarkdown,
+        audit.changes,
+        { verificationLevel: audit.verificationLevel }
+      ),
     };
     await tracedFirestore(trace, "complete", () => repo.complete(pending));
     trace.success(reviewCounts(pending));
@@ -368,6 +380,12 @@ export async function startLegalReviewSection(
       candidateHash: hashLessonContent(audit.reviewedMarkdown),
       auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
       sourceHistory: [],
+      editorialIntegrity: audit.editorialIntegrity || validateEditorialIntegrity(
+        processing.originalContent,
+        audit.reviewedMarkdown,
+        audit.changes,
+        { verificationLevel: audit.verificationLevel }
+      ),
     };
     await tracedFirestore(trace, "complete", () => repo.complete(pending));
     trace.success(reviewCounts(pending));
@@ -453,6 +471,12 @@ export async function startLegalReviewTest(
       candidateHash: hashLessonContent(audit.reviewedMarkdown),
       auditedCandidateHash: hashLessonContent(audit.reviewedMarkdown),
       sourceHistory: [],
+      editorialIntegrity: audit.editorialIntegrity || validateEditorialIntegrity(
+        processing.originalContent,
+        audit.reviewedMarkdown,
+        audit.changes,
+        { verificationLevel: audit.verificationLevel }
+      ),
     };
     await tracedFirestore(trace, "complete", () => repo.complete(pending));
     trace.success(reviewCounts(pending));
@@ -537,6 +561,12 @@ export async function reauditLegalReview(
           note: "Fontes da auditoria anterior à nova revisão da candidata.",
         },
       ].slice(-6),
+      editorialIntegrity: audit.editorialIntegrity || validateEditorialIntegrity(
+        current.originalContent,
+        audit.reviewedMarkdown,
+        audit.changes,
+        { verificationLevel: audit.verificationLevel }
+      ),
     };
     await tracedFirestore(trace, "complete", () => repo.complete(pending));
     trace.success(reviewCounts(pending));
@@ -572,9 +602,235 @@ export async function approveLegalReview(
   if (current && reviewCannotBePublished(current)) {
     throw new LegalReviewError(LEGAL_REVIEW_TEST_PUBLISH_MESSAGE, 403);
   }
+  if (current && current.verificationLevel === "FALHA_NA_VERIFICACAO") {
+    throw new LegalReviewError(
+      "A aprovação integral está bloqueada porque a verificação em fontes oficiais falhou ou é insuficiente. A aula publicada não foi alterada.",
+      403
+    );
+  }
+  if (current) {
+    const integrity = current.editorialIntegrity || validateEditorialIntegrity(
+      current.originalContent,
+      current.reviewedMarkdown,
+      current.changes,
+      {
+        verificationLevel: current.verificationLevel,
+        humanDecisions: current.humanDecisions,
+      }
+    );
+    if (!integrity.passed || integrity.status === "EDITORIAL_REVIEW_INCOMPLETE") {
+      throw new LegalReviewError(
+        `A aprovação está bloqueada por integridade editorial incompleta (alterações não aplicadas ou inconsistentes: ${integrity.problematicChanges.join(", ")}). A aula publicada não foi alterada.`,
+        400
+      );
+    }
+  }
   const result = await repo.approve(reviewId, uid, email, now);
   if (!result.ok) {
     throw new LegalReviewError(LEGAL_REVIEW_CONFLICT_MESSAGE, 409);
   }
   return { reviewId, lesson: result.lesson };
+}
+
+export async function resolveHumanLegalReviewChange(
+  repo: LegalReviewRepository,
+  reviewId: string,
+  params: {
+    changeId: string;
+    action: "APPLY" | "EDIT" | "REJECT";
+    customText?: string;
+    rejectionReason?: string;
+    targetContext?: string;
+  },
+  uid: string,
+  email: string,
+  now = Date.now()
+): Promise<LegalReviewView> {
+  if (!isCeoEmail(email)) {
+    throw new LegalReviewError("A resolução de pendências exige a identidade autenticada do CEO.", 403);
+  }
+  const current = await repo.get(reviewId);
+  if (!current || current.status !== "pending_approval") {
+    throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+  }
+
+  const change = current.changes.find((c) => c.id === params.changeId);
+  if (!change) {
+    throw new LegalReviewError(`Alteração ${params.changeId} não encontrada nesta revisão.`, 404);
+  }
+
+  let nextMarkdown = current.reviewedMarkdown;
+  let decision: HumanReviewDecision;
+
+  if (params.action === "REJECT") {
+    if (!params.rejectionReason || !params.rejectionReason.trim()) {
+      throw new LegalReviewError("A justificativa é obrigatória para rejeitar uma alteração jurídica.", 400);
+    }
+    decision = {
+      changeId: params.changeId,
+      action: "REJECT",
+      state: "REJECTED_BY_CEO",
+      rejectionReason: params.rejectionReason.trim(),
+      decidedAt: now,
+      decidedByUid: uid,
+      decidedByEmail: email,
+    };
+  } else if (params.action === "APPLY") {
+    const targetExcerpt = change.originalExcerpt;
+    const replacementText = change.revisedExcerpt || "";
+    const patch = applySingleSpanPatch(
+      current.reviewedMarkdown,
+      targetExcerpt,
+      replacementText,
+      change.beforeContext || "",
+      change.afterContext || ""
+    );
+
+    if (patch.ok === false) {
+      throw new LegalReviewError(
+        `Não foi possível aplicar automaticamente a alteração ${params.changeId}: ${patch.message}`,
+        400
+      );
+    }
+
+    nextMarkdown = patch.doc;
+    decision = {
+      changeId: params.changeId,
+      action: "APPLY",
+      state: "APPLIED_BY_CEO",
+      decidedAt: now,
+      decidedByUid: uid,
+      decidedByEmail: email,
+    };
+  } else if (params.action === "EDIT") {
+    const customText = typeof params.customText === "string" ? params.customText : "";
+    const targetExcerpt = params.targetContext || change.originalExcerpt;
+    const patch = applySingleSpanPatch(
+      current.reviewedMarkdown,
+      targetExcerpt,
+      customText,
+      change.beforeContext || "",
+      change.afterContext || ""
+    );
+
+    if (patch.ok === false) {
+      throw new LegalReviewError(
+        `Não foi possível aplicar a edição manual da alteração ${params.changeId}: ${patch.message}`,
+        400
+      );
+    }
+
+    nextMarkdown = patch.doc;
+    decision = {
+      changeId: params.changeId,
+      action: "EDIT",
+      state: "EDITED_BY_CEO",
+      customText,
+      targetContext: params.targetContext,
+      decidedAt: now,
+      decidedByUid: uid,
+      decidedByEmail: email,
+    };
+  } else {
+    throw new LegalReviewError(`Ação desconhecida: ${String((params as any).action)}`, 400);
+  }
+
+  const nextDecisions: Record<string, HumanReviewDecision> = {
+    ...(current.humanDecisions || {}),
+    [params.changeId]: decision,
+  };
+
+  const integrity = validateEditorialIntegrity(
+    current.originalContent,
+    nextMarkdown,
+    current.changes,
+    {
+      verificationLevel: current.verificationLevel,
+      humanDecisions: nextDecisions,
+    }
+  );
+
+  if (typeof repo.saveHumanDecisions === "function") {
+    const saved = await repo.saveHumanDecisions(reviewId, nextMarkdown, nextDecisions, integrity, now);
+    return publicReview(saved);
+  }
+
+  const saved = await repo.saveCandidate(reviewId, nextMarkdown, now);
+  saved.humanDecisions = nextDecisions;
+  saved.editorialIntegrity = integrity;
+  return publicReview(saved);
+}
+
+export async function resolveHumanCoordinatedQuestion(
+  repo: LegalReviewRepository,
+  reviewId: string,
+  params: {
+    questionIndex: number;
+    changeIds: string[];
+    question: {
+      text: string;
+      options: string[];
+      correctIndex: number;
+      explanation: string;
+    };
+  },
+  uid: string,
+  email: string,
+  now = Date.now()
+): Promise<LegalReviewView> {
+  if (!isCeoEmail(email)) {
+    throw new LegalReviewError("A resolução de questões exige a identidade autenticada do CEO.", 403);
+  }
+  const current = await repo.get(reviewId);
+  if (!current || current.status !== "pending_approval") {
+    throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+  }
+
+  const patch = applyCoordinatedQuestionPatch(
+    current.reviewedMarkdown,
+    params.questionIndex,
+    params.question
+  );
+
+  if (patch.ok === false) {
+    throw new LegalReviewError(`Falha ao aplicar questão coordenada: ${patch.message}`, 400);
+  }
+
+  const nextMarkdown = patch.doc;
+  const nextDecisions: Record<string, HumanReviewDecision> = {
+    ...(current.humanDecisions || {}),
+  };
+
+  for (const cid of params.changeIds) {
+    const matchedChange = current.changes.find((c) => c.id === cid);
+    nextDecisions[cid] = {
+      changeId: cid,
+      action: "EDIT",
+      state: "EDITED_BY_CEO",
+      customText: matchedChange?.revisedExcerpt || `Atualizado na Questão ${params.questionIndex + 1} em coordenação conjunta.`,
+      decidedAt: now,
+      decidedByUid: uid,
+      decidedByEmail: email,
+    };
+  }
+
+  const integrity = validateEditorialIntegrity(
+    current.originalContent,
+    nextMarkdown,
+    current.changes,
+    {
+      verificationLevel: current.verificationLevel,
+      humanDecisions: nextDecisions,
+    }
+  );
+
+  if (typeof repo.saveHumanDecisions === "function") {
+    const saved = await repo.saveHumanDecisions(reviewId, nextMarkdown, nextDecisions, integrity, now);
+    return publicReview(saved);
+  }
+
+  const saved = await repo.saveCandidate(reviewId, nextMarkdown, now);
+  saved.humanDecisions = nextDecisions;
+  saved.editorialIntegrity = integrity;
+  return publicReview(saved);
 }

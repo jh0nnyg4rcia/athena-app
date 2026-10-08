@@ -114,7 +114,7 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { LegalReviewPanel } from './components/LegalReviewPanel';
-import { approveLegalReview, reauditLegalReview, rejectLegalReview, requestLegalReview, requestLegalReviewTest, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { approveLegalReview, reauditLegalReview, rejectLegalReview, requestLegalReview, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
 import { LEGAL_REVIEW_TEST_MATERIAL } from './lib/legalReviewTestMaterial';
 import { legalReviewButtonVisible, legalReviewTestButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
@@ -4682,11 +4682,11 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setHomologatedLessonState(null);
   };
 
-  const openLegalReview = (day: number, part: number, blockIndex: number) => {
+  const openLegalReview = (day: number, part: number, blockIndex?: number) => {
     setLegalReviewTestMode(false);
     setLegalReviewDay(day);
     setLegalReviewPart(part);
-    setLegalReviewBlock(blockIndex);
+    setLegalReviewBlock(typeof blockIndex === 'number' ? blockIndex : null);
     setLegalReviewError(null);
     setLegalReviewNotice(null);
     setLegalReview(null);
@@ -4794,12 +4794,17 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
   };
 
   const runLegalReview = async (force: boolean) => {
-    if (legalReviewDay === null || legalReviewPart === null || legalReviewBlock === null) return;
+    if (legalReviewDay === null || legalReviewPart === null) return;
     setLegalReviewBusy(true);
     setLegalReviewError(null);
     setLegalReviewPhase('running');
     try {
-      const result = await requestLegalReview(legalReviewDay, legalReviewPart, legalReviewBlock, force);
+      const result = await requestLegalReview(
+        legalReviewDay,
+        legalReviewPart,
+        legalReviewBlock !== null ? legalReviewBlock : undefined,
+        force
+      );
       if (result.alreadyReviewed) {
         setLegalReviewNotice({ lastReviewDate: result.lastReviewDate || '' });
         setLegalReviewPhase('notice');
@@ -4824,6 +4829,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
     if (legalReview.previewOnly || typeof legalReview.blockIndex === 'number') {
       setLegalReviewError('A prévia desta parte não substitui a aula publicada. Nenhuma aula foi alterada.');
+      return;
+    }
+    if (legalReview.verificationLevel === 'FALHA_NA_VERIFICACAO') {
+      setLegalReviewError('A aprovação integral está bloqueada: as afirmações jurídicas materiais não foram devidamente verificadas em fontes oficiais.');
       return;
     }
     if (!confirm('Substituir a aula publicada por esta versão revisada? A versão anterior fica guardada no histórico da revisão.')) return;
@@ -7361,24 +7370,24 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
 
                                   <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
                                     {legalReviewTestButtonVisible(Boolean(isCEO)) && (
-                                    <button
-                                      type="button"
-                                      onClick={openLegalReviewTest}
-                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Testa o revisor com material sintético. O catálogo dos alunos não é alterado."
-                                    >
-                                      Testar Revisor Jurídico
-                                    </button>
+                                      <button
+                                        type="button"
+                                        onClick={openLegalReviewTest}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                        title="Testa o revisor com material sintético. O catálogo dos alunos não é alterado."
+                                      >
+                                        Testar Revisor Jurídico
+                                      </button>
                                     )}
                                     {legalReviewButtonVisible(Boolean(isCEO), reviewReady) && tDay !== undefined && (
                                       <button
                                         type="button"
-                                        onClick={() => openLegalReview(tDay, tMatIdx ?? 0, currentBlockIndex)}
+                                        onClick={() => openLegalReview(tDay, tMatIdx ?? 0)}
                                         className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                        title="Audita somente a parte aberta. A aula publicada não é alterada."
+                                        title="Revisão jurídica editorial integral da aula em cache com qualidade técnica aprofundada."
                                       >
                                         <Search size={14} />
-                                        Revisar esta parte
+                                        Revisar
                                       </button>
                                     )}
                                     <button
@@ -8045,6 +8054,30 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
       onBack={() => setLegalReviewPhase('result')}
       onSaveCandidate={(markdown) => { void saveOpenLegalReviewCandidate(markdown); }}
       onReaudit={() => { void reauditOpenLegalReview(); }}
+      onResolveChange={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await resolveLegalReviewChange(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar resolução da alteração.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onResolveQuestion={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await resolveLegalReviewQuestion(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar resolução da questão coordenada.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
       testMode={legalReviewTestMode}
       sectionPreview={legalReviewBlock !== null && !legalReviewTestMode}
       testDraft={legalReviewTestDraft}

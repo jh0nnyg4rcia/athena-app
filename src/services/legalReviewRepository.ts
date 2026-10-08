@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isSectionReviewKey } from "../lib/catalogBlock";
-import type { LegalReviewIndex, LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
+import type { EditorialIntegrityValidation, HumanReviewDecision, LegalReviewIndex, LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
 
 export function hashLessonContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -89,6 +89,13 @@ export interface LegalReviewRepository {
   touchProcessing(lessonId: string, reviewId: string, now: number): Promise<boolean>;
   get(reviewId: string): Promise<LegalReviewView | null>;
   saveCandidate(reviewId: string, markdown: string, now: number): Promise<LegalReviewView>;
+  saveHumanDecisions?(
+    reviewId: string,
+    markdown: string,
+    humanDecisions: Record<string, HumanReviewDecision>,
+    editorialIntegrity: EditorialIntegrityValidation,
+    now: number
+  ): Promise<LegalReviewView>;
   reject(reviewId: string, uid: string, now: number): Promise<LegalReviewView>;
   approve(reviewId: string, uid: string, email: string, now: number): Promise<
     | { ok: true; lesson: StoredCatalogLesson }
@@ -171,5 +178,7 @@ export function publicReview(review: LegalReviewView): LegalReviewView {
     candidateHash: review.candidateHash || "",
     auditedCandidateHash: review.auditedCandidateHash || "",
     sourceHistory: review.sourceHistory || [],
+    editorialIntegrity: review.editorialIntegrity,
+    humanDecisions: review.humanDecisions || {},
   };
 }

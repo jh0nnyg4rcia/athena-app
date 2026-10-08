@@ -3,16 +3,38 @@
  * Este módulo não pode ser importado pelo cliente.
  */
 import OpenAI from "openai";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   INVALID_AUDIT_MESSAGE,
   LEGAL_REVIEW_JSON_SCHEMA,
+  canonicalSourceUrl,
   describeConsultedSources,
   explainLegalAuditFailure,
+  isOfficialLegalUrl,
   mergePatchAudits,
+  mergeCoverageAudits,
   normalizeLegalAudit,
+  shouldRunCoveragePass,
   type NormalizedAudit,
   type RepairablePatch,
 } from "../lib/legalReviewValidate";
+import {
+  extractPropositionUnits,
+  formatPropositionsForPrompt,
+  validateAuditedUnits,
+  evaluateCoverageCompleteness,
+  prepareDirectedCoverageBatches,
+  coverageEvidenceSatisfied,
+  mergeAuditedPropositionUnits,
+  DIRECTED_COVERAGE_BATCH_SIZE,
+  DIRECTED_COVERAGE_JSON_SCHEMA,
+  type DirectedCoverageAuditItem,
+  type AuditedPropositionInput,
+  type PropositionUnit,
+  type PropositionAuditStatus,
+  type CoverageSummary,
+} from "../lib/legalReviewPropositions";
 import {
   computeFollowUpEligibility,
   type FollowUpSkipReason,
@@ -20,16 +42,27 @@ import {
   type ValidationIncompleteReason,
   type ValidationReasonCode,
   type ValidationResponseStatus,
+  type LegalReviewFailureDiagnostic,
+  buildFailureDiagnostic,
+  sanitizeDiagnosticText,
 } from "../lib/legalReviewDiagnostics";
 import { searchDomainsForLesson } from "../lib/legalReviewSources";
-import { buildLegalReviewInstructions, buildUntrustedLessonInput } from "./legalReviewPrompt";
+import type { LegalReviewChange } from "../lib/legalReviewTypes";
+import {
+  buildLegalReviewInstructions,
+  buildUntrustedLessonInput,
+  buildCoverageReviewInstructions,
+  buildCoverageUntrustedInput,
+  buildDirectedCoverageInstructions,
+  buildDirectedCoverageUntrustedInput,
+} from "./legalReviewPrompt";
 import { redactProviderError } from "./openaiServerService";
 import { createLegalReviewTrace, type LegalReviewTrace, type LegalReviewTraceCounts } from "./legalReviewTrace";
 
 const DEFAULT_OPENAI_REVIEW_MODEL = "gpt-5.6";
 /** A Function tem 600s. Este orçamento deixa validação, Firestore e a resposta HTTP de fora da espera da OpenAI. */
-export const OPENAI_AUDIT_BUDGET_MS = 250_000;
-export const OPENAI_ATTEMPT_TIMEOUT_MS = 200_000;
+export const OPENAI_AUDIT_BUDGET_MS = 420_000;
+export const OPENAI_ATTEMPT_TIMEOUT_MS = 360_000;
 /** Nova geração só começa se ainda houver orçamento para outra tentativa de 200s. */
 export const MIN_GENERATION_RETRY_REMAINING_MS = 200_000;
 /** Follow-up só começa se ainda houver pelo menos 75s. */
@@ -74,6 +107,8 @@ export interface AuditLessonInput {
   /** Índice zero-based da parte interna. Ausente na revisão do documento inteiro. */
   sectionIndex?: number;
   trace?: LegalReviewTrace;
+  /** Controle da passagem de cobertura. Se omitido, ativo em produção e inativo em testes locais com callModel. */
+  enableCoveragePass?: boolean;
   /** Só testes locais. Produção usa a Responses API. */
   callModel?: (input: {
     model: string;
@@ -81,6 +116,7 @@ export interface AuditLessonInput {
     userInput: string;
     lessonText: string;
     timeoutMs: number;
+    schema?: Record<string, unknown>;
   }) => Promise<ReviewModelResponse>;
 }
 
@@ -88,9 +124,32 @@ export interface AuditLessonResult extends NormalizedAudit {
   model: string;
   webSearchUsed: boolean;
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  coverageEligible?: boolean;
+  coverageExecuted?: boolean;
+  coverageSkipReason?: string;
+  coverageReasonCodes?: string[];
+  mainCallCount?: number;
+  coverageCallCount?: number;
+  repairCallCount?: number;
+  totalModelCalls?: number;
+  coverageSummary?: CoverageSummary;
+  propositionCount?: number;
+  highRiskPropositionCount?: number;
+  auditedCorrectCount?: number;
+  auditedIncorrectCount?: number;
+  notAuditedCount?: number;
+  indeterminateCount?: number;
+  coverageRate?: number;
+  highRiskCoverageRate?: number;
+  directedCoverageEligible?: boolean;
+  directedCoverageBatchCount?: number;
+  coverageCompletenessPassed?: boolean;
+  pendingByType?: Record<string, number>;
+  pendingByRisk?: Record<string, number>;
 }
 
 export interface ReviewModelResponse {
+  id?: string;
   model?: string;
   output_text?: string | null;
   output?: unknown;
@@ -134,8 +193,80 @@ function rejectedResponseLog(
   };
 }
 
-function invalidAuditError(log: LegalAuditValidationLog): Error {
-  return Object.assign(new Error(INVALID_AUDIT_MESSAGE), { validationLog: log });
+function invalidAuditError(log: LegalAuditValidationLog, extra?: { diagnostic?: LegalReviewFailureDiagnostic }): Error {
+  return Object.assign(new Error(INVALID_AUDIT_MESSAGE), { validationLog: log, ...extra });
+}
+
+export function buildFailureDiagnosticFromResponse(
+  response: ReviewModelResponse,
+  extra: {
+    rejectionReason: string;
+    rejectionDetail?: string | null;
+    validationLog?: LegalAuditValidationLog;
+    parseError?: string | null;
+    rawParsed?: unknown;
+  }
+): LegalReviewFailureDiagnostic {
+  const outputItems = Array.isArray(response.output) ? response.output : [];
+  const outputTypes = outputItems.map((item: any) => item?.type || typeof item);
+  const webSearchCalls = outputItems.filter((item: any) => item?.type === "web_search_call" || item?.action?.sources).length;
+  const rawText = typeof response.output_text === "string" ? response.output_text : "";
+
+  return buildFailureDiagnostic({
+    responseId: response.id || null,
+    responseStatus: response.status || null,
+    responseModel: response.model || null,
+    incompleteDetails: response.incomplete_details || null,
+    responseError: response.error || null,
+    usage: response.usage || null,
+    outputItemCount: outputItems.length,
+    outputItemTypes: outputTypes,
+    webSearchCallCount: webSearchCalls,
+    outputTextLength: rawText.length,
+    rawOutputText: rawText,
+    rejectionReason: extra.rejectionReason,
+    rejectionDetail: extra.rejectionDetail || null,
+    validationReasonCodes: extra.validationLog?.validationReasonCodes || [],
+    validationLog: extra.validationLog,
+    parseError: extra.parseError || null,
+  });
+}
+
+export function persistDiagnosticFiles(
+  diagnostic: LegalReviewFailureDiagnostic,
+  rawOutputText?: string | null,
+  targetDir?: string
+): { errorFile: string; outputFile?: string } {
+  const tmpDir = targetDir || path.join(process.cwd(), "tmp");
+  try {
+    fs.mkdirSync(tmpDir, { recursive: true });
+  } catch {
+    // Ignore error
+  }
+  const errorFile = path.join(tmpDir, "last-legal-review-error.json");
+  const outputFile = path.join(tmpDir, "last-legal-review-output.txt");
+
+  try {
+    const sanitizedDiag = JSON.parse(sanitizeDiagnosticText(JSON.stringify(diagnostic, null, 2)));
+    if (sanitizedDiag.rawOutputText && sanitizedDiag.rawOutputText.length > 4000) {
+      sanitizedDiag.rawOutputText = sanitizedDiag.rawOutputText.slice(0, 4000) + "... [TRUNCATED_IN_JSON_SEE_OUTPUT_TXT]";
+    }
+    fs.writeFileSync(errorFile, JSON.stringify(sanitizedDiag, null, 2), "utf8");
+  } catch {
+    // Falha silenciosa para respeitar contrato do servidor sem log desestruturado
+  }
+
+  const textToSave = rawOutputText || diagnostic.rawOutputText;
+  if (typeof textToSave === "string") {
+    try {
+      fs.writeFileSync(outputFile, sanitizeDiagnosticText(textToSave), "utf8");
+    } catch {
+      // Falha silenciosa para respeitar contrato do servidor
+    }
+    return { errorFile, outputFile };
+  }
+
+  return { errorFile };
 }
 
 function requireKey(): string {
@@ -245,6 +376,8 @@ export function buildReviewCreateParams(input: {
   reasoningEffort?: "medium" | "high";
   /** Só o follow-up informa 12000. A chamada principal permanece em 16000. */
   maxOutputTokens?: number;
+  schema?: Record<string, unknown>;
+  schemaName?: string;
 }) {
   return {
     model: input.model,
@@ -271,9 +404,9 @@ export function buildReviewCreateParams(input: {
     text: {
       format: {
         type: "json_schema" as const,
-        name: "auditoria_juridica",
+        name: input.schemaName ?? "auditoria_juridica",
         strict: true,
-        schema: LEGAL_REVIEW_JSON_SCHEMA,
+        schema: input.schema ?? LEGAL_REVIEW_JSON_SCHEMA,
       },
     },
   };
@@ -294,22 +427,66 @@ export function interpretReviewResponse(
   requestedModel: string
 ): AuditLessonResult {
   if (!servedModelAccepted(requestedModel, response.model)) {
-    throw new Error(
+    const error = new Error(
       `O modelo que respondeu (${response.model || "desconhecido"}) não é o modelo solicitado (${requestedModel}). A revisão não foi concluída. A aula publicada não foi alterada.`
     );
+    const diagnostic = buildFailureDiagnosticFromResponse(response, {
+      rejectionReason: "MODEL_MISMATCH",
+      rejectionDetail: error.message,
+    });
+    (error as any).diagnostic = diagnostic;
+    throw error;
   }
-  if (response.error) throw invalidAuditError(rejectedResponseLog("RESPONSE_ERROR", response));
+  if (response.error) {
+    const log = rejectedResponseLog("RESPONSE_ERROR", response);
+    const diagnostic = buildFailureDiagnosticFromResponse(response, {
+      rejectionReason: "RESPONSE_ERROR",
+      validationLog: log,
+      rejectionDetail: typeof response.error === "object" ? JSON.stringify(response.error) : String(response.error),
+    });
+    throw invalidAuditError(log, { diagnostic });
+  }
   if (response.status === "incomplete") {
-    throw invalidAuditError(rejectedResponseLog("RESPONSE_INCOMPLETE", response, incompleteReasonOf(response)));
+    const incompleteReason = incompleteReasonOf(response);
+    const log = rejectedResponseLog("RESPONSE_INCOMPLETE", response, incompleteReason);
+    const diagnostic = buildFailureDiagnosticFromResponse(response, {
+      rejectionReason: "RESPONSE_INCOMPLETE",
+      validationLog: log,
+      rejectionDetail: `Status incomplete: reason=${incompleteReason || "unspecified"}`,
+    });
+    throw invalidAuditError(log, { diagnostic });
   }
-  if (response.status === "failed") throw invalidAuditError(rejectedResponseLog("RESPONSE_FAILED", response));
+  if (response.status === "failed") {
+    const log = rejectedResponseLog("RESPONSE_FAILED", response);
+    const diagnostic = buildFailureDiagnosticFromResponse(response, {
+      rejectionReason: "RESPONSE_FAILED",
+      validationLog: log,
+      rejectionDetail: "Response status failed",
+    });
+    throw invalidAuditError(log, { diagnostic });
+  }
   const text = (response.output_text || "").trim();
-  if (!text) throw invalidAuditError(rejectedResponseLog("EMPTY_OUTPUT", response));
+  if (!text) {
+    const log = rejectedResponseLog("EMPTY_OUTPUT", response);
+    const diagnostic = buildFailureDiagnosticFromResponse(response, {
+      rejectionReason: "EMPTY_OUTPUT",
+      validationLog: log,
+      rejectionDetail: "output_text vazio ou contendo apenas espaços em branco",
+    });
+    throw invalidAuditError(log, { diagnostic });
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(text);
-  } catch {
-    throw invalidAuditError(rejectedResponseLog("JSON_PARSE_FAILED", response));
+  } catch (parseErr) {
+    const log = rejectedResponseLog("JSON_PARSE_FAILED", response);
+    const diagnostic = buildFailureDiagnosticFromResponse(response, {
+      rejectionReason: "JSON_PARSE_FAILED",
+      validationLog: log,
+      parseError: parseErr instanceof Error ? parseErr.message : String(parseErr),
+      rejectionDetail: `JSON.parse falhou: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+    });
+    throw invalidAuditError(log, { diagnostic });
   }
   const consultedUrls = extractConsultedSourceUrls(response.output);
   const audit = normalizeLegalAudit(raw, originalMarkdown, {
@@ -321,6 +498,13 @@ export function interpretReviewResponse(
     if (error.validationLog) {
       error.validationLog = { ...error.validationLog, responseStatus: responseStatusOf(response.status) };
     }
+    const diagnostic = buildFailureDiagnosticFromResponse(response, {
+      rejectionReason: "AUDIT_CONTRACT_INVALID",
+      validationLog: error.validationLog,
+      rejectionDetail: "Classificação da auditoria falhou perante contrato do ATHENA",
+      rawParsed: raw,
+    });
+    (error as any).diagnostic = diagnostic;
     throw error;
   }
   return {
@@ -339,10 +523,21 @@ async function createResponse(
   lessonText: string,
   timeoutMs: number,
   reasoningEffort: "medium" | "high" = "medium",
-  maxOutputTokens = 16000
+  maxOutputTokens = 16000,
+  schema?: Record<string, unknown>,
+  schemaName?: string
 ) {
   return client.responses.create(
-    buildReviewCreateParams({ model, instructions, userInput, lessonText, reasoningEffort, maxOutputTokens }),
+    buildReviewCreateParams({
+      model,
+      instructions,
+      userInput,
+      lessonText,
+      reasoningEffort,
+      maxOutputTokens,
+      schema,
+      schemaName,
+    }),
     { timeout: timeoutMs, maxRetries: OPENAI_REVIEW_SDK_MAX_RETRIES }
   );
 }
@@ -470,6 +665,8 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   const trace = input.trace ?? createLegalReviewTrace({ testMode: false, requestedModel, write: () => {} });
   const instructions = buildLegalReviewInstructions(input.reviewDate);
   const baseline = input.publishedContent || input.content;
+  const propositionInventory = extractPropositionUnits(input.content);
+  const propositionsFormatted = formatPropositionsForPrompt(propositionInventory);
   let userInput = buildUntrustedLessonInput({
     reviewDate: input.reviewDate,
     lessonId: input.lessonId,
@@ -480,6 +677,7 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
     content: input.content,
     publishedContent: input.publishedContent,
     sectionIndex: input.sectionIndex,
+    propositionsFormatted,
   });
   const startedAt = Date.now();
   const remaining = () => OPENAI_AUDIT_BUDGET_MS - (Date.now() - startedAt);
@@ -544,22 +742,48 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
       }
       if (isTimeout(error) && tryNumber > 0) trace.noteFailure(openAiTimeoutDiagnostic(OPENAI_TIMEOUT_GENERATION_RETRY), "openai");
       else trace.noteFailure(error, "openai");
-      throw reviewFailureForOpenAIError(error);
+      const failureErr = reviewFailureForOpenAIError(error);
+      const diagnostic = buildFailureDiagnostic({
+        rejectionReason: isTimeout(error) ? "OPENAI_TIMEOUT" : "OPENAI_REQUEST_FAILED",
+        rejectionDetail: error instanceof Error ? error.message : String(error),
+        elapsedMs: Date.now() - callStart,
+        configuredTimeoutMs: timeoutMs,
+        configuredBudgetMs: OPENAI_AUDIT_BUDGET_MS,
+      });
+      (failureErr as any).diagnostic = diagnostic;
+      persistDiagnosticFiles(diagnostic);
+      throw failureErr;
     }
   }
   if (!response) {
     const failure = new Error("A OpenAI não concluiu a auditoria. A aula publicada não foi alterada.");
+    const diagnostic = buildFailureDiagnostic({
+      rejectionReason: "OPENAI_NO_RESPONSE",
+      rejectionDetail: "Nenhuma resposta retornada após esgotar tentativas",
+      elapsedMs: Date.now() - startedAt,
+      configuredTimeoutMs: Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining()),
+      configuredBudgetMs: OPENAI_AUDIT_BUDGET_MS,
+    });
+    (failure as any).diagnostic = diagnostic;
+    persistDiagnosticFiles(diagnostic);
     trace.noteFailure(failure, "openai");
     throw failure;
   }
 
   let parsed = read(response, { mainCallElapsedMs });
   if (parsed instanceof Error) {
+    if ((parsed as any).diagnostic) {
+      (parsed as any).diagnostic.elapsedMs = mainCallElapsedMs;
+      (parsed as any).diagnostic.configuredTimeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
+      (parsed as any).diagnostic.configuredBudgetMs = OPENAI_AUDIT_BUDGET_MS;
+      persistDiagnosticFiles((parsed as any).diagnostic, (parsed as any).diagnostic.rawOutputText);
+    }
     trace.noteFailure(parsed, "validation");
     throw parsed;
   }
   const repairable = parsed.repairablePatches ?? [];
   const lacksSources = !parsed.webSearchUsed;
+  let repairCallCount = 0;
   const firstUrls = extractConsultedSourceUrls(response.output);
   // No máximo um follow-up. Patches já validados não são refeitos.
   if ((repairable.length > 0 || lacksSources) && remaining() >= MIN_FOLLOW_UP_REMAINING_MS) {
@@ -573,6 +797,7 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
       })
       : `${userInput}\n\n${reviewFollowUpInstruction(parsed)}`;
     trace.openaiStart();
+    repairCallCount = 1;
     try {
       response = input.callModel
         ? await input.callModel({
@@ -608,6 +833,7 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
           parsed = {
             ...parsed,
             ...merged,
+            auditedUnits: merged.auditedUnits,
             model: response.model || parsed.model,
             webSearchUsed: consultedUrls.length > 0,
             usage: readUsage(response.usage) ?? parsed.usage,
@@ -623,9 +849,417 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
     }
   }
 
-  delete parsed.repairablePatches;
-  delete parsed.appliedPatchInputs;
-  delete parsed.validationLog;
-  delete parsed.autonomousClaims;
-  return parsed;
+  // Validação proposicional determinística (V2.3.2-B)
+  const initialValidation = validateAuditedUnits(
+    propositionInventory,
+    parsed.auditedUnits || [],
+    parsed.changes,
+    parsed.consultedSources
+  );
+  const unitStatuses = new Map<string, PropositionAuditStatus>(initialValidation.unitStatuses);
+  let pendingUnits = initialValidation.pendingUnits;
+
+  // Passagem de Cobertura Adaptativa / Dirigida:
+  const coverageDecision = shouldRunCoveragePass({
+    content: input.content,
+    parsedMain: parsed,
+    sectionIndex: input.sectionIndex,
+  });
+
+  const shouldRunCoverage = input.enableCoveragePass !== undefined
+    ? input.enableCoveragePass
+    : input.callModel
+      ? false
+      : (pendingUnits.length > 0 || coverageDecision.run);
+
+  let coverageExecuted = false;
+  let coverageCallCount = 0;
+  let coverageSkipReason: string | undefined = undefined;
+  let directedBatchesCount = 0;
+
+  if (!shouldRunCoverage) {
+    coverageSkipReason = input.callModel && input.enableCoveragePass === undefined
+      ? "disabled_in_test_mode"
+      : (pendingUnits.length === 0 ? "all_propositions_resolved" : coverageDecision.skipReason || "sufficient_main_coverage");
+  } else if (remaining() < MIN_FOLLOW_UP_REMAINING_MS) {
+    coverageSkipReason = "insufficient_remaining";
+  } else if (pendingUnits.length > 0) {
+    // COVERAGE DIRIGIDA: lotes compactos apenas para pendências
+    const directedBatches = prepareDirectedCoverageBatches(pendingUnits, DIRECTED_COVERAGE_BATCH_SIZE);
+    directedBatchesCount = directedBatches.length;
+    const acceptedPatchesForCoverage = (parsed.changes || [])
+      .filter((c) => c.confirmation === "CONFIRMADO")
+      .map((c) => ({
+        id: c.id,
+        type: c.type,
+        originalExcerpt: c.originalExcerpt,
+        revisedExcerpt: c.revisedExcerpt,
+        reason: c.reason,
+      }));
+    const directedInstructions = buildDirectedCoverageInstructions(input.reviewDate);
+
+    for (const batch of directedBatches) {
+      if (remaining() < MIN_FOLLOW_UP_REMAINING_MS) {
+        break; // unidades pendentes continuam NOT_AUDITED / INDETERMINATE
+      }
+      coverageExecuted = true;
+      coverageCallCount += 1;
+      const coverageTimeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
+      const directedUser = buildDirectedCoverageUntrustedInput({
+        reviewDate: input.reviewDate,
+        lessonId: input.lessonId,
+        day: input.day,
+        part: input.part,
+        subject: input.subject,
+        topic: input.topic,
+        batchPayload: batch.formattedPayload,
+        acceptedPatches: acceptedPatchesForCoverage,
+      });
+
+      trace.openaiStart();
+      try {
+        const coverageResponse = input.callModel
+          ? await input.callModel({
+              model: requestedModel,
+              instructions: directedInstructions,
+              userInput: directedUser,
+              lessonText: input.content,
+              timeoutMs: coverageTimeoutMs,
+              schema: DIRECTED_COVERAGE_JSON_SCHEMA,
+            })
+          : await createResponse(
+              client as OpenAI,
+              requestedModel,
+              directedInstructions,
+              directedUser,
+              input.content,
+              coverageTimeoutMs,
+              "high",
+              8000,
+              DIRECTED_COVERAGE_JSON_SCHEMA,
+              "coverage_dirigida"
+            );
+        trace.openaiEnd(coverageResponse.model);
+
+        const covUrls = extractConsultedSourceUrls(coverageResponse.output);
+        const currentUrls = (parsed.consultedSources || []).map((s) => s.url);
+        const combinedUrls = [...currentUrls, ...covUrls];
+        const covConsulted = describeConsultedSources(combinedUrls);
+
+        const text = (coverageResponse.output_text || "").trim();
+        let covData: { coverageAudits?: DirectedCoverageAuditItem[]; reviewNotes?: string; changes?: unknown[] } | null = null;
+        try {
+          covData = JSON.parse(text);
+        } catch {
+          const contentText = (coverageResponse.output as any)?.find?.((i: any) => i.type === "message")?.content?.find?.((c: any) => c.type === "text")?.text;
+          if (contentText) {
+            try { covData = JSON.parse(contentText); } catch {}
+          }
+        }
+
+        if (covData && Array.isArray((covData as any).changes) && !Array.isArray(covData.coverageAudits)) {
+          const coverageParsed = read(coverageResponse);
+          if (!(coverageParsed instanceof Error) && coverageParsed.changes && coverageParsed.changes.length > 0) {
+            const merged = mergeCoverageAudits(
+              baseline,
+              parsed,
+              coverageParsed,
+              { webSearchExecuted: combinedUrls.length > 0, consultedUrls: combinedUrls },
+              describeConsultedSources(combinedUrls)
+            );
+            parsed = {
+              ...parsed,
+              ...merged,
+              model: coverageResponse.model || parsed.model,
+              webSearchUsed: combinedUrls.length > 0,
+            };
+          }
+        } else if (covData && Array.isArray(covData.coverageAudits)) {
+          const newCoverageChanges: LegalReviewChange[] = [];
+          const incomingCoverageUnits: AuditedPropositionInput[] = [];
+
+          for (const item of covData.coverageAudits) {
+            const unit = propositionInventory.find((u) => u.id === item.id);
+            if (!unit) continue;
+            if (item.status === "AUDITED_CORRECT") {
+              let evidenceOk = true;
+              if (unit.riskLevel === "HIGH") {
+                const rawEvidenceIds = Array.isArray(item.evidenceSourceIds)
+                  ? item.evidenceSourceIds.filter((id) => typeof id === "string" && Boolean(id.trim()))
+                  : [];
+                if (rawEvidenceIds.length === 0) {
+                  evidenceOk = false;
+                } else {
+                  const resolvedSources = covConsulted.filter((s) =>
+                    rawEvidenceIds.some(
+                      (ref) => ref === s.sourceId || canonicalSourceUrl(ref) === canonicalSourceUrl(s.url)
+                    )
+                  );
+                  evidenceOk = resolvedSources.length > 0 && coverageEvidenceSatisfied(unit, resolvedSources);
+                }
+              }
+              unitStatuses.set(unit.id, evidenceOk ? "AUDITED_CORRECT" : "INDETERMINATE");
+              incomingCoverageUnits.push({
+                id: unit.id,
+                status: "AUDITED_CORRECT",
+                changeId: null,
+                evidenceSourceIds: Array.isArray(item.evidenceSourceIds) ? item.evidenceSourceIds : [],
+              });
+            } else if (item.status === "AUDITED_INCORRECT") {
+              if (item.change && item.change.originalExcerpt && item.change.revisedExcerpt) {
+                const evidenceUrl = item.change.evidenceUrl;
+                const isOfficial = evidenceUrl ? isOfficialLegalUrl(evidenceUrl) : false;
+                const evidenceItem = evidenceUrl ? [{
+                  institution: item.change.institution || "OFICIAL",
+                  title: item.change.evidenceTitle || "Fonte oficial",
+                  url: evidenceUrl,
+                  official: isOfficial,
+                  consulted: true,
+                  supportsChange: true,
+                  supportExplanation: item.change.reason || "Correção proposicional na passagem de cobertura.",
+                  sourceType: (unit.type === "PRECEDENT_MAPPING" || unit.type === "SUMULA_MAPPING" || unit.type === "THEME_MAPPING" ? "ACORDAO" : "LEI") as any,
+                }] : [];
+                const sourceItem = evidenceUrl ? [{
+                  title: item.change.evidenceTitle || "Fonte oficial",
+                  url: evidenceUrl,
+                  official: isOfficial,
+                  institution: item.change.institution || "OFICIAL",
+                }] : [];
+                const ch: LegalReviewChange = {
+                  id: `cov_${unit.id}`,
+                  type: "CORRECAO",
+                  severity: unit.riskLevel === "HIGH" ? "ALTA" : "MEDIA",
+                  category: (unit.type === "PRECEDENT_MAPPING" || unit.type === "SUMULA_MAPPING" || unit.type === "THEME_MAPPING" ? "JURISPRUDENCIA" : "LEGISLACAO") as any,
+                  originalExcerpt: item.change.originalExcerpt,
+                  revisedExcerpt: item.change.revisedExcerpt,
+                  reason: item.change.reason || "Correção na passagem de cobertura dirigida.",
+                  verified: isOfficial,
+                  confirmation: isOfficial ? "CONFIRMADO" : "NAO_CONFIRMADO",
+                  sources: sourceItem,
+                  evidence: evidenceItem,
+                };
+                newCoverageChanges.push(ch);
+                unitStatuses.set(unit.id, isOfficial ? "AUDITED_INCORRECT" : "INDETERMINATE");
+                incomingCoverageUnits.push({
+                  id: unit.id,
+                  status: "AUDITED_INCORRECT",
+                  changeId: ch.id,
+                  evidenceSourceIds: [],
+                });
+              } else {
+                unitStatuses.set(unit.id, "INDETERMINATE");
+                incomingCoverageUnits.push({
+                  id: unit.id,
+                  status: "AUDITED_INCORRECT",
+                  changeId: null,
+                  evidenceSourceIds: [],
+                });
+              }
+            }
+          }
+
+          // Incorpora auditedUnits de cobertura aditivamente por ID
+          parsed.auditedUnits = mergeAuditedPropositionUnits(
+            parsed.auditedUnits,
+            incomingCoverageUnits,
+            propositionInventory
+          );
+
+          if (newCoverageChanges.length > 0) {
+            const syntheticCoverageAudit: NormalizedAudit = {
+              outcome: "ALTERACOES_NECESSARIAS",
+              confidence: parsed.confidence,
+              verificationLevel: "VERIFICADO_COM_FONTES",
+              summary: { totalChanges: newCoverageChanges.length, corrections: newCoverageChanges.length, additions: 0, removals: 0, updates: 0, precisions: 0, restructures: 0 },
+              changes: newCoverageChanges,
+              unverifiedClaims: [],
+              reviewedMarkdown: parsed.reviewedMarkdown,
+              reviewNotes: covData?.reviewNotes || "Cobertura dirigida concluída.",
+              consultedSources: covConsulted,
+              auditedUnits: incomingCoverageUnits,
+            };
+            const merged = mergeCoverageAudits(
+              baseline,
+              parsed,
+              syntheticCoverageAudit,
+              { webSearchExecuted: combinedUrls.length > 0, consultedUrls: combinedUrls },
+              describeConsultedSources(combinedUrls)
+            );
+            parsed = {
+              ...parsed,
+              ...merged,
+              auditedUnits: parsed.auditedUnits,
+              model: coverageResponse.model || parsed.model,
+              webSearchUsed: combinedUrls.length > 0,
+            };
+          } else {
+            parsed = {
+              ...parsed,
+              consultedSources: covConsulted,
+              webSearchUsed: combinedUrls.length > 0,
+            };
+          }
+        }
+
+        const covUsage = readUsage(coverageResponse.usage);
+        if (covUsage) {
+          parsed.usage = {
+            inputTokens: (parsed.usage?.inputTokens || 0) + covUsage.inputTokens,
+            outputTokens: (parsed.usage?.outputTokens || 0) + covUsage.outputTokens,
+            totalTokens: (parsed.usage?.totalTokens || 0) + covUsage.totalTokens,
+          };
+        }
+      } catch (coverageError) {
+        trace.noteFailure(coverageError, "coverage");
+      }
+    }
+  } else if (input.enableCoveragePass === true) {
+    // Compatibilidade: se enableCoveragePass foi forçado e pendingUnits era 0
+    coverageExecuted = true;
+    coverageCallCount = 1;
+    const coverageTimeoutMs = Math.min(OPENAI_ATTEMPT_TIMEOUT_MS, remaining());
+    const acceptedPatchesForCoverage = (parsed.changes || [])
+      .filter((c) => c.confirmation === "CONFIRMADO")
+      .map((c) => ({
+        id: c.id,
+        type: c.type,
+        originalExcerpt: c.originalExcerpt,
+        revisedExcerpt: c.revisedExcerpt,
+        reason: c.reason,
+      }));
+    const coverageInstructions = buildCoverageReviewInstructions(input.reviewDate);
+    const coverageUser = buildCoverageUntrustedInput({
+      reviewDate: input.reviewDate,
+      lessonId: input.lessonId,
+      day: input.day,
+      part: input.part,
+      subject: input.subject,
+      topic: input.topic,
+      content: input.content,
+      acceptedPatches: acceptedPatchesForCoverage,
+      sectionIndex: input.sectionIndex,
+    });
+
+    trace.openaiStart();
+    try {
+      const coverageResponse = input.callModel
+        ? await input.callModel({
+            model: requestedModel,
+            instructions: coverageInstructions,
+            userInput: coverageUser,
+            lessonText: input.content,
+            timeoutMs: coverageTimeoutMs,
+          })
+        : await createResponse(
+            client as OpenAI,
+            requestedModel,
+            coverageInstructions,
+            coverageUser,
+            input.content,
+            coverageTimeoutMs,
+            "high",
+            12000
+          );
+      trace.openaiEnd(coverageResponse.model);
+      const coverageParsed = read(coverageResponse);
+      if (!(coverageParsed instanceof Error)) {
+        if (coverageParsed.changes && coverageParsed.changes.length > 0) {
+          const coverageUrls = extractConsultedSourceUrls(coverageResponse.output);
+          const currentUrls = (parsed.consultedSources || []).map((s) => s.url);
+          const combinedUrls = [...currentUrls, ...coverageUrls];
+          const merged = mergeCoverageAudits(
+            baseline,
+            parsed,
+            coverageParsed,
+            { webSearchExecuted: combinedUrls.length > 0, consultedUrls: combinedUrls },
+            describeConsultedSources(combinedUrls)
+          );
+          const covUsage = readUsage(coverageResponse.usage);
+          parsed = {
+            ...parsed,
+            ...merged,
+            model: coverageResponse.model || parsed.model,
+            webSearchUsed: combinedUrls.length > 0,
+            usage: {
+              inputTokens: (parsed.usage?.inputTokens || 0) + (covUsage?.inputTokens || 0),
+              outputTokens: (parsed.usage?.outputTokens || 0) + (covUsage?.outputTokens || 0),
+              totalTokens: (parsed.usage?.totalTokens || 0) + (covUsage?.totalTokens || 0),
+            },
+          };
+        }
+      }
+    } catch (coverageError) {
+      trace.noteFailure(coverageError, "coverage");
+    }
+  }
+
+  // Completeness Gate (FASE 14 / FASE 15 / V2.3.2-H):
+  const finalValidation = validateAuditedUnits(
+    propositionInventory,
+    parsed.auditedUnits || [],
+    parsed.changes,
+    parsed.consultedSources
+  );
+
+  const consolidatedStatuses = new Map<string, PropositionAuditStatus>();
+  for (const u of propositionInventory) {
+    const finalSt = finalValidation.unitStatuses.get(u.id);
+    const directedSt = unitStatuses.get(u.id);
+    if (finalSt && finalSt !== "NOT_AUDITED") {
+      consolidatedStatuses.set(u.id, finalSt);
+    } else if (directedSt && directedSt !== "NOT_AUDITED") {
+      consolidatedStatuses.set(u.id, directedSt);
+    } else {
+      consolidatedStatuses.set(u.id, "NOT_AUDITED");
+    }
+  }
+
+  const coverageSummary = evaluateCoverageCompleteness(propositionInventory, consolidatedStatuses, {
+    attributedCorrectCount: finalValidation.attributedCorrectCount,
+    missingAttributionCount: finalValidation.missingAttributionCount,
+    invalidAttributionCount: finalValidation.invalidAttributionCount,
+  });
+  parsed.coverageSummary = coverageSummary;
+  if (!coverageSummary.complete && parsed.verificationLevel === "VERIFICADO_COM_FONTES") {
+    parsed.verificationLevel = "VERIFICACAO_PARCIAL";
+  }
+
+  const mainCallCount = 1;
+  const totalModelCalls = mainCallCount + repairCallCount + coverageCallCount;
+  const coverageEligible = pendingUnits.length > 0 || coverageDecision.run;
+  const coverageReasonCodes = coverageDecision.reasons;
+
+  const finalResult: AuditLessonResult = {
+    ...parsed,
+    model: parsed.model,
+    webSearchUsed: parsed.webSearchUsed,
+    coverageEligible,
+    coverageExecuted,
+    coverageSkipReason: coverageExecuted ? undefined : (coverageSkipReason || coverageDecision.skipReason || "sufficient_main_coverage"),
+    coverageReasonCodes,
+    mainCallCount,
+    coverageCallCount,
+    repairCallCount,
+    totalModelCalls,
+    coverageSummary,
+    propositionCount: coverageSummary.total,
+    highRiskPropositionCount: coverageSummary.highRiskTotal,
+    auditedCorrectCount: coverageSummary.auditedCorrect,
+    auditedIncorrectCount: coverageSummary.auditedIncorrect,
+    notAuditedCount: coverageSummary.notAudited,
+    indeterminateCount: coverageSummary.indeterminate,
+    coverageRate: coverageSummary.coverageRate,
+    highRiskCoverageRate: coverageSummary.highRiskCoverageRate,
+    directedCoverageEligible: pendingUnits.length > 0,
+    directedCoverageBatchCount: directedBatchesCount,
+    coverageCompletenessPassed: coverageSummary.complete,
+    pendingByType: coverageSummary.pendingByType,
+    pendingByRisk: coverageSummary.pendingByRisk,
+  };
+
+  delete finalResult.repairablePatches;
+  delete finalResult.appliedPatchInputs;
+  delete finalResult.validationLog;
+  delete finalResult.autonomousClaims;
+  return finalResult;
 }

@@ -6,6 +6,8 @@ import {
   approveLegalReview,
   reauditLegalReview,
   rejectLegalReview,
+  resolveHumanCoordinatedQuestion,
+  resolveHumanLegalReviewChange,
   saveLegalReviewCandidate,
   startLegalReview,
   startLegalReviewSection,
@@ -140,6 +142,54 @@ export function registerLegalReviewRoutes(
     }
     try {
       const review = await reauditLegalReview(repo, auditor, req.params.reviewId);
+      res.json({ review });
+    } catch (error) {
+      sendReviewError(res, error);
+    }
+  });
+
+  app.post("/api/legal-review/:reviewId/resolve-change", rateLimit(30, 60 * 60_000), requireCeo, async (req, res) => {
+    if (!isReviewId(req.params.reviewId)) {
+      res.status(400).json({ error: "Identificador de revisão inválido." });
+      return;
+    }
+    const { changeId, action, customText, rejectionReason, targetContext } = req.body || {};
+    if (!changeId || !action) {
+      res.status(400).json({ error: "Parâmetros 'changeId' e 'action' são obrigatórios." });
+      return;
+    }
+    try {
+      const review = await resolveHumanLegalReviewChange(
+        repo,
+        req.params.reviewId,
+        { changeId, action, customText, rejectionReason, targetContext },
+        req.athenaUser?.uid || "",
+        req.athenaUser?.email || ""
+      );
+      res.json({ review });
+    } catch (error) {
+      sendReviewError(res, error);
+    }
+  });
+
+  app.post("/api/legal-review/:reviewId/resolve-question", rateLimit(30, 60 * 60_000), requireCeo, async (req, res) => {
+    if (!isReviewId(req.params.reviewId)) {
+      res.status(400).json({ error: "Identificador de revisão inválido." });
+      return;
+    }
+    const { questionIndex, changeIds, question } = req.body || {};
+    if (typeof questionIndex !== "number" || !Array.isArray(changeIds) || !question) {
+      res.status(400).json({ error: "Parâmetros 'questionIndex', 'changeIds' e 'question' são obrigatórios." });
+      return;
+    }
+    try {
+      const review = await resolveHumanCoordinatedQuestion(
+        repo,
+        req.params.reviewId,
+        { questionIndex, changeIds, question },
+        req.athenaUser?.uid || "",
+        req.athenaUser?.email || ""
+      );
       res.json({ review });
     } catch (error) {
       sendReviewError(res, error);

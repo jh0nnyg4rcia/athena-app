@@ -23,6 +23,81 @@ export type LegalVerificationLevel =
   | "VERIFICACAO_PARCIAL"
   | "FALHA_NA_VERIFICACAO";
 
+export type EditorialIntegrityStatus =
+  | "EDITORIAL_REVIEW_SUCCESS"
+  | "EDITORIAL_REVIEW_INCOMPLETE";
+
+export type ChangeResolutionState =
+  | "APPLIED_AUTOMATICALLY"
+  | "APPLIED_BY_CEO"
+  | "EDITED_BY_CEO"
+  | "REJECTED_BY_CEO"
+  | "PENDING"
+  | "BLOCKED";
+
+export interface HumanReviewDecision {
+  changeId: string;
+  action: "APPLY" | "EDIT" | "REJECT";
+  state: ChangeResolutionState;
+  customText?: string;
+  rejectionReason?: string;
+  targetContext?: string;
+  decidedAt: number;
+  decidedByUid: string;
+  decidedByEmail: string;
+}
+
+export type ChangeValidationStatus =
+  | "APPLIED"
+  | "MISSING"
+  | "PARTIALLY_APPLIED"
+  | "NOT_IN_ORIGINAL"
+  | "AMBIGUOUS"
+  | "INCONSISTENT"
+  | "REJECTED";
+
+export interface ChangeValidationResult {
+  changeId: string;
+  status: ChangeValidationStatus;
+  resolutionState: ChangeResolutionState;
+  applied: boolean;
+  material: boolean;
+  detail: string;
+  originalFoundInOriginal: boolean;
+  originalMatchesInOriginal: number;
+  revisedFoundInReviewed: boolean;
+  originalStillInReviewed: boolean;
+  decision?: HumanReviewDecision;
+  currentReviewedExcerpt?: string;
+}
+
+export interface CoordinatedQuestionGroup {
+  questionIndex: number;
+  questionId: string;
+  subject: string;
+  text: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+  changeIds: string[];
+  pendingChangeIds: string[];
+}
+
+export interface EditorialIntegrityValidation {
+  status: EditorialIntegrityStatus;
+  passed: boolean;
+  executionCompleted: boolean;
+  editorialIntegrityPassed: boolean;
+  legalVerificationPassed: boolean;
+  totalChanges: number;
+  appliedChanges: number;
+  problematicChanges: string[];
+  changeResults: ChangeValidationResult[];
+  failureReasons: string[];
+  pendingChangesCount: number;
+  resolvedChangesCount: number;
+}
+
 export type LegalChangeType =
   | "CORRECAO"
   | "ATUALIZACAO"
@@ -67,9 +142,12 @@ export interface LegalReviewSource {
 
 /** Fonte devolvida pela ferramenta. Consultada não significa que comprova a alteração. */
 export interface ConsultedLegalSource {
+  sourceId?: string;
   url: string;
   official: boolean;
   institution: string;
+  title?: string;
+  snippet?: string;
 }
 
 export interface LegalReviewEvidence {
@@ -97,6 +175,8 @@ export interface LegalReviewChange {
   category: LegalChangeCategory;
   originalExcerpt: string;
   revisedExcerpt: string;
+  beforeContext?: string;
+  afterContext?: string;
   reason: string;
   verified: boolean;
   confirmation: LegalConfirmation;
@@ -167,6 +247,8 @@ export interface LegalReviewView {
   candidateHash: string;
   auditedCandidateHash: string;
   sourceHistory: LegalSourceHistoryEntry[];
+  editorialIntegrity?: EditorialIntegrityValidation;
+  humanDecisions?: Record<string, HumanReviewDecision>;
 }
 
 export interface StoredCatalogLesson {
@@ -229,4 +311,361 @@ export function formatReviewDate(now = new Date()): string {
   const month = parts.find((part) => part.type === "month")?.value || "01";
   const year = parts.find((part) => part.type === "year") || { value: "2026" };
   return `${day}/${month}/${year.value}`;
+}
+
+// =============================================================================
+// V2.3.3 MATERIAL EVIDENCE FOUNDATION (LEGISLAÇÃO & ATOS NORMATIVOS)
+// =============================================================================
+
+export type MaterialEvidenceType = "TOOL_GROUNDED" | "LOCAL_DETERMINISTIC";
+
+/**
+ * Origens oficiais permitidas em ambiente de produção.
+ * Nota: SYNTHETIC_FIXTURE é restrito aos ambientes de teste e PoC e não é aceito aqui.
+ */
+export type MaterialDocumentOrigin = "REMOTE_OFFICIAL_DOCUMENT" | "LOCAL_REAL_DOCUMENT";
+
+export type MaterialRevalidationPolicy = "IMMUTABLE" | "REVALIDATE_CONDITIONAL" | "DYNAMIC";
+
+export interface LegislationLocator {
+  type: "LEGISLATION";
+  statute: string;
+  article: string;
+  paragraph?: string;
+  item?: string;
+  subItem?: string;
+}
+
+export type MaterialEvidenceLocator = LegislationLocator;
+
+export interface MaterialEvidenceProvenance {
+  origin: MaterialDocumentOrigin;
+  sourceUrl: string;
+  retrievedAt: string;
+  rawContentHash: string;
+  normalizedContentHash: string;
+  contentType: "text/html" | "text/plain";
+  revalidationPolicy: MaterialRevalidationPolicy;
+  etag?: string;
+  lastModified?: string;
+}
+
+export interface MaterialEvidence {
+  evidenceId: string;
+  sourceId: string;
+  sourceUrl: string;
+  retrievedAt: string;
+  rawContentHash: string;
+  normalizedContentHash: string;
+  evidenceType: MaterialEvidenceType;
+  locator: MaterialEvidenceLocator;
+  materialText: string;
+  provenance: MaterialEvidenceProvenance;
+}
+
+export type MaterialEvidenceValidationReason =
+  | "VALID"
+  | "ORIGIN_NOT_ALLOWED"
+  | "SOURCE_ID_MISMATCH"
+  | "SOURCE_URL_MISMATCH"
+  | "RAW_HASH_MISMATCH"
+  | "NORMALIZED_HASH_MISMATCH"
+  | "LOCATOR_NOT_FOUND"
+  | "MATERIAL_TEXT_MISMATCH"
+  | "MATERIAL_EVIDENCE_UNAVAILABLE";
+
+export interface MaterialEvidenceVerificationResult {
+  valid: boolean;
+  reasonCode: MaterialEvidenceValidationReason;
+  details?: string;
+}
+
+// ============================================================================
+// ATHENA V2.3.4-A: ASSERTION BINDING FOUNDATION TYPES & FEATURE FLAG
+// ============================================================================
+
+/**
+ * Feature flag controlando a ativação do motor de Material Evidence Binding no runtime.
+ * Default: false (desacoplado do gate jurídico final).
+ */
+export const LEGAL_REVIEW_MATERIAL_BINDING = false;
+
+export interface SourceSpan {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export type ClaimMateriality = "MATERIAL" | "NON_MATERIAL";
+
+export type ClaimType =
+  | "DIRECT_NORMATIVE_ASSERTION"
+  | "COURT_RULING"
+  | "INTERPRETIVE_INFERENCE"
+  | "DOCTRINAL_SYNTHESIS"
+  | "NON_MATERIAL_PREAMBLE";
+
+export interface AtomicClaim {
+  claimId: string;
+  propositionId: string;
+  sourceSpan: SourceSpan;
+  normalizedClaim: string;
+  claimType: ClaimType;
+  materiality: ClaimMateriality;
+}
+
+export type QualifierType =
+  | "SCOPE"
+  | "FREQUENCY"
+  | "LIMIT"
+  | "PURPOSE"
+  | "CONDITION"
+  | "AUTHORITY"
+  | "TEMPORAL"
+  | "OTHER";
+
+export interface Qualifier {
+  type: QualifierType;
+  value: string;
+  sourceSpan: SourceSpan;
+}
+
+export type Polarity = "POSITIVE" | "NEGATIVE";
+
+export type Modality =
+  | "MAY"
+  | "MUST"
+  | "MUST_NOT"
+  | "DECLARES"
+  | "RECOGNIZES"
+  | "NOT_APPLICABLE"
+  | "OTHER";
+
+export type NormativeFunction =
+  | "DUTY"
+  | "PROHIBITION"
+  | "PERMISSION"
+  | "COMPETENCE"
+  | "CONSTITUTIVE_EFFECT"
+  | "DECLARATION";
+
+export type ReferencePresence =
+  | "NONE"
+  | "PARTIAL"
+  | "STRUCTURED";
+
+export type CanonicalTargetEvaluability =
+  | "EXPLICIT_IN_TEXT"
+  | "PROVIDED_BY_CONTEXT"
+  | "NOT_EVALUABLE_FROM_INPUT";
+
+export type SourceTargetEvaluability = CanonicalTargetEvaluability;
+
+export interface LegalSourceTargetComponents {
+  authority?: string;
+  sourceType?: string;
+  diploma?: string;
+  number?: string;
+  article?: string;
+  paragraph?: string;
+  inciso?: string;
+  alinea?: string;
+  precedentType?: string;
+  precedentNumber?: string;
+}
+
+export interface LegalSourceLocator {
+  authority?: string;
+  sourceType?: string;
+  diploma?: string;
+  number?: string;
+
+  article?: string;
+  paragraph?: string;
+  inciso?: string;
+  alinea?: string;
+
+  precedentType?: string;
+  precedentNumber?: string;
+
+  sourceSpan?: SourceSpan;
+  canonicalId?: string;
+}
+
+export type EvaluabilityReasonCode =
+  | "FULL_COMPONENTS_EXPLICIT_IN_TEXT"
+  | "COMPONENTS_PROVIDED_BY_CONTEXT"
+  | "PARTIAL_REFERENCE_MISSING_DIPLOMA"
+  | "PARTIAL_REFERENCE_MISSING_PROVISION"
+  | "PARTIAL_REFERENCE_MISSING_PARAGRAPH"
+  | "DIPLOMA_WITHOUT_PROVISION"
+  | "PROVISION_WITHOUT_DIPLOMA"
+  | "CONTEXT_NOT_DELIVERED"
+  | "NO_REFERENCE_IN_INPUT"
+  | "CANONICAL_TARGET_AMBIGUOUS"
+  | "TARGET_MORE_GRANULAR_THAN_INPUT"
+  | "TARGET_NOT_PRESENT_IN_INPUT";
+
+export interface EvaluabilityAssessment {
+  referencePresence: ReferencePresence;
+  canonicalTargetEvaluability: CanonicalTargetEvaluability;
+  reasonCode: EvaluabilityReasonCode;
+  missingComponents?: string[];
+  availableComponents?: LegalSourceTargetComponents;
+  availableLocators?: LegalSourceLocator[];
+  matchedLocator?: LegalSourceLocator;
+  requiredComponents?: LegalSourceTargetComponents;
+  precedentIdentityEvaluability: boolean;
+  precedentHoldingEvaluability: boolean;
+  contextHash?: string;
+  contextFieldsProvided?: string[];
+}
+
+export interface InputSufficiencyManifest {
+  propositionId: string;
+  legalSourceTargetEvaluability: SourceTargetEvaluability;
+  precedentIdentityEvaluability: boolean;
+  explicitProvisionInText: boolean;
+  referencePresence?: ReferencePresence;
+  reasonCode?: EvaluabilityReasonCode;
+}
+
+export type AssertionSpecKind =
+  | "RULE_PROHIBITION"
+  | "RULE_PERMISSION"
+  | "RULE_OBLIGATION"
+  | "COURT_RULING"
+  | "ORGANIZATIONAL_DUTY"
+  | "INTERPRETIVE_CLAIM";
+
+export interface AssertionSpec {
+  assertionId: string;
+  propositionId: string;
+  claimId: string;
+  sourceSpan: SourceSpan;
+  kind: AssertionSpecKind;
+  normativeFunction?: NormativeFunction;
+  subject: string;
+  predicate: string;
+  object: string;
+  polarity: Polarity;
+  modality: Modality;
+  qualifiers: Qualifier[];
+  legalSourceTarget: string;
+  requiredEvidenceKind: "LEGISLATION" | "JUDICIAL_DECISION" | "ADMINISTRATIVE_ACT";
+  goldenCorrectionReason?: string;
+}
+
+export type EvidenceDerivationMethod =
+  | "LEGISLATION_STRUCTURE"
+  | "ENUMERATED_DISPOSITIVO"
+  | "EXACT_TEXT_RULE";
+
+export interface JudicialDecisionLocator {
+  type: "JUDICIAL_DECISION";
+  court: "STF" | "STJ" | string;
+  processClass: string;
+  processNumber: number;
+  incident?: number;
+  dispositivoPoint?: number;
+  idAndamento?: number;
+  idDocumento?: number;
+}
+
+export type ExtendedEvidenceLocator = LegislationLocator | JudicialDecisionLocator;
+
+export interface EvidenceAssertion {
+  evidenceAssertionId: string;
+  evidenceId: string;
+  locator: ExtendedEvidenceLocator;
+  subject: string;
+  predicate: string;
+  object: string;
+  polarity: Polarity;
+  modality: Modality;
+  qualifiers: Qualifier[];
+  derivationMethod: EvidenceDerivationMethod;
+  evidenceText: string;
+}
+
+export type SupportLevel =
+  | "DIRECT_LITERAL"
+  | "DIRECT_NORMATIVE"
+  | "NECESSARY_INFERENCE"
+  | "INTERPRETIVE_INFERENCE"
+  | "UNSUPPORTED"
+  | "INDETERMINATE";
+
+export type PropositionMaterialStatus =
+  | "FULLY_SUPPORTED"
+  | "PARTIALLY_SUPPORTED"
+  | "CONTAINS_UNSUPPORTED_ADDITIONS"
+  | "CONTRADICTED"
+  | "UNSUPPORTED"
+  | "INDETERMINATE";
+
+export interface InferenceRule {
+  ruleId: string;
+  premises: string[];
+  conclusion: string;
+  scope: string;
+  version: string;
+  sourceAuthority: string;
+  sourceLocator: string;
+}
+
+export interface CanonicalEquivalenceRule {
+  ruleId: string;
+  expressionA: string;
+  expressionB: string;
+  canonicalConcept: string;
+  scope: string;
+  justification: string;
+  version: string;
+}
+
+export type AssertionBindingReasonCode =
+  | "INVALID_SOURCE_SPAN"
+  | "UNCOVERED_MATERIAL_GAP"
+  | "OVERLAPPING_CLAIMS"
+  | "ILLEGAL_NON_MATERIAL_CLAIM"
+  | "ASSERTION_SPEC_MISSING"
+  | "EVIDENCE_ASSERTION_MISSING"
+  | "EVIDENCE_SOURCE_MISMATCH"
+  | "EVIDENCE_LOCATOR_MISMATCH"
+  | "POLARITY_CONTRADICTION"
+  | "MODALITY_CONTRADICTION"
+  | "UNSUPPORTED_QUALIFIER_ADDITION"
+  | "QUALIFIER_EVIDENCE_MISSING"
+  | "QUALIFIER_CONTRADICTION"
+  | "INFERENCE_RULE_MISSING"
+  | "INFERENCE_SCOPE_MISMATCH"
+  | "CANONICAL_EQUIVALENCE_MISSING"
+  | "CANONICAL_EQUIVALENCE_SCOPE_MISMATCH"
+  | "DIRECT_LITERAL_MATCH"
+  | "DIRECT_NORMATIVE_MATCH"
+  | "EXPLICIT_INFERENCE_RULE_APPLIED"
+  | "INTERPRETIVE_GAP_NO_DISPOSITIVO_MATCH"
+  | "ASSERTION_NOT_GROUNDED_IN_EVIDENCE";
+
+export interface BoundClaimResult {
+  claimId: string;
+  assertionId: string;
+  supportLevel: SupportLevel;
+  matchedEvidenceAssertionId?: string;
+  evidenceLocator?: ExtendedEvidenceLocator;
+  reasonCode: AssertionBindingReasonCode | string;
+  missingElements?: string[];
+  inferenceRuleApplied?: string;
+}
+
+export interface MaterialBindingResult {
+  propositionId: string;
+  atomicClaimCount: number;
+  supportedAtomicClaimCount: number;
+  unsupportedAtomicClaimCount: number;
+  indeterminateAtomicClaimCount: number;
+  claims: BoundClaimResult[];
+  status: PropositionMaterialStatus;
+  reasonCodes: (AssertionBindingReasonCode | string)[];
 }

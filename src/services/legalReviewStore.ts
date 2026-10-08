@@ -1,4 +1,5 @@
 import firebaseConfig from "../../firebase-applet-config.json";
+import homologatedSeedsData from "../data/homologatedSeeds.json";
 import { embedChallengeInContent, extractChallengeFromText } from "../lib/objectiveChallenge";
 import {
   emptyReviewIndex,
@@ -116,8 +117,24 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
       try {
         const db = await loadDb();
         const snap = await readDoc(db, LESSONS, lessonId);
-        return asLesson(lessonId, snap.exists ? snap.data() : undefined);
+        const fromDb = asLesson(lessonId, snap.exists ? snap.data() : undefined);
+        if (fromDb) return fromDb;
+        const seeds = (homologatedSeedsData || {}) as Record<string, unknown>;
+        const seed = seeds[lessonId] as Record<string, unknown> | undefined;
+        if (seed && typeof seed.content === "string" && seed.content.trim().length >= 20) {
+          return asLesson(lessonId, seed);
+        }
+        return null;
       } catch (error) {
+        try {
+          const seeds = (homologatedSeedsData || {}) as Record<string, unknown>;
+          const seed = seeds[lessonId] as Record<string, unknown> | undefined;
+          if (seed && typeof seed.content === "string" && seed.content.trim().length >= 20) {
+            return asLesson(lessonId, seed);
+          }
+        } catch {
+          // ignore
+        }
         if (error instanceof LegalReviewError) throw error;
         throw unavailable();
       }
@@ -286,6 +303,49 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             sourceHistory: edited.sourceHistory,
           }, { merge: true });
           return edited;
+        });
+      } catch (error) {
+        if (error instanceof LegalReviewError) throw error;
+        throw unavailable();
+      }
+    },
+    async saveHumanDecisions(reviewId, markdown, humanDecisions, editorialIntegrity, now) {
+      try {
+        const db = await loadDb();
+        return await db.runTransaction(async (tx) => {
+          const ref = db.collection(REVIEWS).doc(reviewId);
+          const snap = await tx.get(ref);
+          const review = asReview(snap.exists ? snap.data() : undefined);
+          if (!review || review.status !== "pending_approval") {
+            throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+          }
+          if (!candidateMarkdownAccepted(review.originalContent, markdown)) {
+            throw new LegalReviewError("O Markdown revisado quebrou a estrutura da aula. A candidata não foi salva.", 400);
+          }
+          const challenge = extractChallengeFromText(markdown).challenge
+            || extractChallengeFromText(review.originalContent).challenge;
+          const nextMarkdown = challenge ? embedChallengeInContent(markdown, challenge) : markdown;
+          const edited = reviewAfterManualEdit(review, nextMarkdown, now);
+          const mergedDecisions = {
+            ...(review.humanDecisions || {}),
+            ...humanDecisions,
+          };
+          const updated: LegalReviewView = {
+            ...edited,
+            humanDecisions: mergedDecisions,
+            editorialIntegrity,
+          };
+          tx.set(ref, {
+            reviewedMarkdown: updated.reviewedMarkdown,
+            manuallyEdited: updated.manuallyEdited,
+            manuallyEditedAt: updated.manuallyEditedAt ?? null,
+            candidateHash: updated.candidateHash,
+            verificationLevel: updated.verificationLevel,
+            sourceHistory: updated.sourceHistory,
+            humanDecisions: updated.humanDecisions,
+            editorialIntegrity: updated.editorialIntegrity,
+          }, { merge: true });
+          return updated;
         });
       } catch (error) {
         if (error instanceof LegalReviewError) throw error;
