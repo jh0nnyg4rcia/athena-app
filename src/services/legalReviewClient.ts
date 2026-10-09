@@ -1,4 +1,4 @@
-import { postAthenaApi } from "./geminiService";
+import { getAthenaApi, postAthenaApi } from "./geminiService";
 import type { LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
 
 const REVIEW_TIMEOUT_MS = 270_000;
@@ -11,7 +11,48 @@ export interface LegalReviewStartResponse {
   review?: LegalReviewView;
 }
 
-export function requestLegalReview(day: number, part: number, blockIndex: number, force = false): Promise<LegalReviewStartResponse> {
+export interface LatestLegalReviewResponse {
+  found: boolean;
+  review?: LegalReviewView;
+  conflict?: boolean;
+  status?: string;
+}
+
+export function fetchLatestLegalReview(
+  day: number,
+  part: number,
+  blockIndex?: number
+): Promise<LatestLegalReviewResponse> {
+  const query = new URLSearchParams({
+    day: String(day),
+    part: String(part),
+  });
+  if (typeof blockIndex === "number") {
+    query.set("blockIndex", String(blockIndex));
+  }
+  return getAthenaApi<LatestLegalReviewResponse>(`/api/legal-review?${query.toString()}`, 30_000);
+}
+
+export function requestAsyncLegalReview(
+  day: number,
+  part: number,
+  blockIndex?: number,
+  force = false
+): Promise<{
+  enqueued?: boolean;
+  alreadyProcessing?: boolean;
+  existingPending?: boolean;
+  alreadyReviewed?: boolean;
+  reviewId?: string;
+  review?: LegalReviewView;
+  status?: string;
+  message?: string;
+  lastReviewDate?: string;
+}> {
+  return postAthenaApi("/api/legal-review/request", { day, part, blockIndex, force }, 15_000);
+}
+
+export function requestLegalReview(day: number, part: number, blockIndex?: number, force = false): Promise<LegalReviewStartResponse> {
   return postAthenaApi<LegalReviewStartResponse>("/api/legal-review", { day, part, blockIndex, force }, REVIEW_TIMEOUT_MS);
 }
 
@@ -64,3 +105,36 @@ export function resolveLegalReviewQuestion(
 ): Promise<{ review: LegalReviewView }> {
   return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/resolve-question`, params, 60_000);
 }
+
+export function requestLegalReviewSupplement(reviewId: string): Promise<{ enqueued?: boolean; review: LegalReviewView }> {
+  return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/supplement`, {}, 15_000);
+}
+
+export function resolveLegalReviewFinding(
+  reviewId: string,
+  params: {
+    findingKey?: string;
+    pendingId?: string;
+    changeId?: string;
+    action: import("../lib/legalReviewTypes").HumanFindingAction;
+    justification: string;
+    evidenceDeclaration?: import("../lib/legalReviewTypes").FindingEvidenceDeclaration;
+    divergenceNature?: string;
+    correctionChangeId?: string;
+    expurgationConfirmed?: boolean;
+  }
+): Promise<{ review: LegalReviewView }> {
+  return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/resolve-finding`, params, 60_000);
+}
+
+export function closeLegalReviewSupplement(
+  reviewId: string,
+  params: {
+    overallJustification: string;
+  }
+): Promise<{ review: LegalReviewView }> {
+  return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/close-supplement`, params, 60_000);
+}
+
+
+

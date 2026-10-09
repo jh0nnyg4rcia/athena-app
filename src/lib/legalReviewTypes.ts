@@ -5,14 +5,67 @@ export const LEGAL_REVIEW_CONFLICT_MESSAGE =
 
 export const LEGAL_REVIEW_ALREADY_MESSAGE = "Esta versão já foi revisada.";
 
+export const LEGAL_REVIEW_STAGE_A_DISABLED_MESSAGE =
+  "O Estágio A (deliberação individual de achados jurídicos) está desabilitado operacionalmente no ambiente (LEGAL_REVIEW_STAGE_A_ENABLED=false).";
+
+export const LEGAL_REVIEW_STAGE_B_DISABLED_MESSAGE =
+  "O Estágio B (encerramento formal da complementação jurídica) está desabilitado operacionalmente no ambiente (LEGAL_REVIEW_STAGE_B_ENABLED=false).";
+
+export const LEGAL_REVIEW_STAGE_C_DISABLED_MESSAGE =
+  "O Estágio C (homologação e publicação final da aula) está desabilitado operacionalmente no ambiente (LEGAL_REVIEW_STAGE_C_ENABLED=false).";
+
+export interface LegalReviewOperationalFlags {
+  stageAEnabled: boolean;
+  stageBEnabled: boolean;
+  stageCEnabled: boolean;
+}
+
+export function getLegalReviewOperationalFlags(
+  env: Record<string, string | undefined> = process.env
+): LegalReviewOperationalFlags {
+  return {
+    stageAEnabled: env.LEGAL_REVIEW_STAGE_A_ENABLED === "true",
+    stageBEnabled: env.LEGAL_REVIEW_STAGE_B_ENABLED === "true",
+    stageCEnabled: env.LEGAL_REVIEW_STAGE_C_ENABLED === "true",
+  };
+}
+
 export const MAX_REVIEWABLE_CHARS = 180_000;
 
 export type LegalReviewRecordStatus =
+  | "queued"
   | "processing"
   | "pending_approval"
   | "approved"
   | "rejected"
-  | "failed";
+  | "failed"
+  | "uncertain_failure";
+
+export interface AsyncLegalReviewJobPayload {
+  jobType?: "AUDIT";
+  reviewId: string;
+  lessonId: string;
+  day: number;
+  part: number;
+  blockIndex?: number;
+  expectedHash: string;
+  requestedByUid: string;
+  requestedAt: number;
+}
+
+export interface AsyncLegalSupplementJobPayload {
+  jobType: "SUPPLEMENT";
+  reviewId: string;
+  lessonId: string;
+  attemptId?: string;
+  requestedByUid: string;
+  requestedByEmail: string;
+  requestedAt: number;
+}
+
+export type AsyncLegalReviewTaskPayload =
+  | AsyncLegalReviewJobPayload
+  | AsyncLegalSupplementJobPayload;
 
 export type LegalReviewOutcome = "ALTERACOES_NECESSARIAS" | "SEM_ALTERACOES_RELEVANTES";
 
@@ -46,6 +99,153 @@ export interface HumanReviewDecision {
   decidedByUid: string;
   decidedByEmail: string;
 }
+
+// =============================================================================
+// ETAPA 5F: DELIBERAÇÃO INDIVIDUAL E AUDITÁVEL DOS ACHADOS JURÍDICOS (CEO)
+// =============================================================================
+
+export type HumanFindingAction =
+  | "CONFIRMAR"
+  | "APONTAR_CORRECAO"
+  | "DECLARAR_DIVERGENCIA"
+  | "DECLARAR_NAO_COMPROVADO"
+  | "MANTER_PENDENTE";
+
+export type HumanFindingResolutionState =
+  | "CONFIRMADO_PELO_CEO"
+  | "CORRECAO_NECESSARIA"
+  | "DIVERGENCIA_LEGITIMA"
+  | "NAO_COMPROVADO"
+  | "PENDENTE";
+
+/**
+ * Distinção probatória expressa exigida na Etapa 5F:
+ * - Evidência declarada pelo CEO (alegação ou apontamento fornecido)
+ * - Evidência documental conferida (fonte oficial validada e confrontada)
+ * - Decisão jurídica humana (juízo deliberativo do CEO sobre a controvérsia)
+ */
+export interface FindingEvidenceDeclaration {
+  declaredSource: string;
+  declaredUrl?: string;
+  declaredExcerpt?: string;
+  bibliographicReference?: string;
+  semanticJustification?: string;
+  documentaryVerified: boolean;
+  verificationNotes?: string;
+}
+
+export interface FindingDecisionHistoryEntry {
+  action: HumanFindingAction;
+  state: HumanFindingResolutionState;
+  justification: string;
+  evidenceDeclaration?: FindingEvidenceDeclaration;
+  divergenceNature?: string;
+  correctionChangeId?: string;
+  expurgationConfirmed?: boolean;
+  candidateHashAtDecision?: string;
+  decidedAt: number;
+  decidedByUid: string;
+  decidedByEmail: string;
+}
+
+export interface HumanFindingDecision {
+  /** Chave estável do achado (calculada via getFindingStableKey) */
+  findingKey: string;
+  findingPendingId: string;
+  findingChangeId?: string;
+  reviewId: string;
+  originalAiStatus: "confirmada" | "refutada" | "nao_verificada";
+  originalStatementAnalyzed: string;
+  action: HumanFindingAction;
+  state: HumanFindingResolutionState;
+  justification: string;
+  evidenceDeclaration?: FindingEvidenceDeclaration;
+  divergenceNature?: string;
+  correctionChangeId?: string;
+  expurgationConfirmed?: boolean;
+  /** Hash SHA-256 do reviewedMarkdown no momento da deliberação */
+  candidateHashAtDecision?: string;
+  decidedAt: number;
+  decidedByUid: string;
+  decidedByEmail: string;
+  history?: FindingDecisionHistoryEntry[];
+}
+
+/**
+ * Encerramento Administrativo e Fundamentado da Complementação Jurídica (Estágio B - Etapa 6C).
+ * Preserva o supplement.status original gerado pela IA (ex: 'inconclusive') e atesta
+ * que 100% dos achados foram sanados pelo CEO com integridade e coerência.
+ */
+export interface SupplementHumanResolution {
+  status: "RESOLVIDO_PELO_CEO";
+  closedAt: number;
+  closedByUid: string;
+  closedByEmail: string;
+  overallJustification: string;
+  /** Hash SHA-256 do reviewedMarkdown no momento exato do encerramento */
+  candidateHashAtClosure: string;
+  totalFindingsResolved: number;
+}
+
+
+/**
+ * Deriva um identificador único, determinístico e estável para um achado da complementação jurídica.
+ *
+ * Regras de Identidade Estável:
+ * 1. Combina pendingId e changeId quando ambos presentes (ex: pendingId 'chg_CHG-001' ou pendingId 'pen_01' + changeId 'CHG-001').
+ * 2. Se apenas pendingId existir e não for vazio, utiliza pendingId (compatibilidade com unverified_claim_1, etc.).
+ * 3. Se pendingId for ausente mas changeId existir, utiliza `change_${changeId}`.
+ * 4. Para achados legados sem identificadores explícitos:
+ *    - Calcula um digest SHA-256 canônico baseado na tupla (statementAnalyzed + officialSourceConsulted + relevantExcerptOrBasis).
+ *    - Retorna `stmt_sha256_${hash}`.
+ * 5. Se o conteúdo for completamente vazio/indeterminado, retorna string vazia para indicar ausência de identidade inequívoca.
+ */
+export function getFindingStableKey(finding: {
+  pendingId?: string;
+  changeId?: string;
+  statementAnalyzed?: string;
+  officialSourceConsulted?: string;
+  relevantExcerptOrBasis?: string;
+}): string {
+  const pendingId = (finding.pendingId || "").trim();
+  const changeId = (finding.changeId || "").trim();
+  const statement = (finding.statementAnalyzed || "").trim();
+  const source = (finding.officialSourceConsulted || "").trim();
+  const excerpt = (finding.relevantExcerptOrBasis || "").trim();
+
+  // 1. Se possuir changeId e pendingId distintos
+  if (changeId && pendingId) {
+    if (pendingId.includes(changeId)) {
+      return pendingId;
+    }
+    return `${pendingId}_${changeId}`;
+  }
+
+  // 2. Se possuir apenas pendingId
+  if (pendingId) {
+    return pendingId;
+  }
+
+  // 3. Se possuir apenas changeId
+  if (changeId) {
+    return `change_${changeId}`;
+  }
+
+  // 4. Sem identificadores formais: calcula digest criptográfico canônico da tupla material
+  if (statement || source || excerpt) {
+    const canonicalMaterial = `${statement}:::${source}:::${excerpt}`;
+    let hash = 0;
+    for (let i = 0; i < canonicalMaterial.length; i++) {
+      hash = ((hash << 5) - hash + canonicalMaterial.charCodeAt(i)) | 0;
+    }
+    const hex = Math.abs(hash).toString(16).padStart(8, "0");
+    return `canonical_${hex}`;
+  }
+
+  return "";
+}
+
+
 
 export type ChangeValidationStatus =
   | "APPLIED"
@@ -150,6 +350,14 @@ export interface ConsultedLegalSource {
   snippet?: string;
 }
 
+import type {
+  LegalClaimNature,
+  LegalVerificationOutcome,
+  ClaimEvidenceMetadata,
+  EvidenceNatureMetadata,
+} from "./legalReviewTaxonomy";
+export * from "./legalReviewTaxonomy";
+
 export interface LegalReviewEvidence {
   institution: string;
   title: string;
@@ -159,6 +367,12 @@ export interface LegalReviewEvidence {
   supportsChange: boolean;
   supportExplanation: string;
   sourceType: LegalSourceType;
+  /** Natureza ontológica da afirmação (Etapa 5B). Opcional para manter compatibilidade retroativa. */
+  nature?: LegalClaimNature;
+  /** Resultado probatório da verificação (Etapa 5B). Opcional para manter compatibilidade retroativa. */
+  outcome?: LegalVerificationOutcome;
+  /** Metadados especializados por categoria de evidência (Etapa 5B). */
+  evidenceMetadata?: ClaimEvidenceMetadata | EvidenceNatureMetadata;
 }
 
 export interface LegalSourceHistoryEntry {
@@ -182,11 +396,23 @@ export interface LegalReviewChange {
   confirmation: LegalConfirmation;
   sources: LegalReviewSource[];
   evidence: LegalReviewEvidence[];
+  /** Natureza ontológica da afirmação (Etapa 5B). Opcional para manter compatibilidade retroativa. */
+  nature?: LegalClaimNature;
+  /** Resultado probatório da verificação (Etapa 5B). Opcional para manter compatibilidade retroativa. */
+  outcome?: LegalVerificationOutcome;
+  /** Metadados especializados por categoria de evidência (Etapa 5B). */
+  evidenceMetadata?: ClaimEvidenceMetadata | EvidenceNatureMetadata;
 }
 
 export interface LegalUnverifiedClaim {
   excerpt: string;
   reason: string;
+  /** Natureza ontológica da afirmação (Etapa 5B). Opcional para manter compatibilidade retroativa. */
+  nature?: LegalClaimNature;
+  /** Resultado probatório da verificação (Etapa 5B). Opcional para manter compatibilidade retroativa. */
+  outcome?: LegalVerificationOutcome;
+  /** Metadados especializados por categoria de evidência (Etapa 5B). */
+  evidenceMetadata?: ClaimEvidenceMetadata | EvidenceNatureMetadata;
 }
 
 export interface LegalReviewSummary {
@@ -249,6 +475,83 @@ export interface LegalReviewView {
   sourceHistory: LegalSourceHistoryEntry[];
   editorialIntegrity?: EditorialIntegrityValidation;
   humanDecisions?: Record<string, HumanReviewDecision>;
+  /** Deliberações individuais do CEO sobre achados jurídicos (Etapa 5F). */
+  findingDecisions?: Record<string, HumanFindingDecision>;
+  supplement?: LegalReviewSupplement;
+}
+
+export type LegalSupplementStatus =
+  | "idle"
+  | "reserved"
+  | "running"
+  | "completed"
+  | "inconclusive"
+  | "pre_call_failure"
+  | "uncertain_interrupted"
+  | "exhausted";
+
+export interface SupplementPendingItem {
+  id: string;
+  sourceType: "CHANGE" | "UNVERIFIED_CLAIM";
+  changeId?: string;
+  excerpt: string;
+  reason: string;
+  targetTopics?: string[];
+}
+
+export interface SupplementFindingItem {
+  pendingId: string;
+  changeId?: string;
+  statementAnalyzed: string;
+  officialSourceConsulted: string;
+  verifiableUrl: string;
+  relevantExcerptOrBasis: string;
+  status: "confirmada" | "refutada" | "nao_verificada";
+  objectiveJustification: string;
+  foundOfficialEvidence: boolean;
+  evidence?: LegalReviewEvidence[];
+  sources?: LegalReviewSource[];
+  /** Natureza ontológica da afirmação (Etapa 5B). Opcional para manter compatibilidade retroativa. */
+  nature?: LegalClaimNature;
+  /** Resultado probatório da verificação (Etapa 5B). Opcional para manter compatibilidade retroativa. */
+  outcome?: LegalVerificationOutcome;
+  /** Metadados especializados por categoria de evidência (Etapa 5B). */
+  evidenceMetadata?: ClaimEvidenceMetadata | EvidenceNatureMetadata;
+}
+
+export interface LegalReviewSupplement {
+  attemptCount: number;
+  status: LegalSupplementStatus;
+  attemptId?: string;
+  startedAt?: number;
+  completedAt?: number;
+  requestedByUid?: string;
+  requestedByEmail?: string;
+  costEstimatedUsd?: number;
+  tokensUsed?: number;
+  durationMs?: number;
+  targetedPendingItems?: SupplementPendingItem[];
+  findings?: SupplementFindingItem[];
+  finalNote?: string;
+  uncertaintyReason?: string;
+  /** Encerramento administrativo formal da complementação pelo CEO (Etapa 6C) */
+  resolution?: SupplementHumanResolution;
+}
+
+export interface LegalSupplementExecutor {
+  supplement: (params: {
+    lessonId: string;
+    pendingItems: SupplementPendingItem[];
+    budget: { maxTokens: number; maxDurationMs: number; maxCostUsd: number };
+    signal?: AbortSignal;
+  }) => Promise<{
+    status: "completed" | "inconclusive";
+    tokensUsed: number;
+    durationMs: number;
+    costUsd: number;
+    findings: SupplementFindingItem[];
+    finalNote: string;
+  }>;
 }
 
 export interface StoredCatalogLesson {

@@ -36,6 +36,7 @@ export const VALIDATION_REASON_CODES = [
   "REASON_EMPTY",
   "REASON_TOO_LONG",
   "EDITORIAL_INTEGRITY_INCOMPLETE",
+  "TAXONOMY_VALIDATION_FAILED",
 ] as const;
 
 export type ValidationReasonCode = (typeof VALIDATION_REASON_CODES)[number];

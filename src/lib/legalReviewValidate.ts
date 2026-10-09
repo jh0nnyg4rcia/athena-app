@@ -37,6 +37,16 @@ import type {
   EditorialIntegrityStatus,
   EditorialIntegrityValidation,
 } from "./legalReviewTypes";
+import { getFindingStableKey } from "./legalReviewTypes";
+import {
+  validateClaimTaxonomy,
+  VALID_CLAIM_NATURES,
+  VALID_VERIFICATION_OUTCOMES,
+  type LegalClaimNature,
+  type LegalVerificationOutcome,
+  type ClaimEvidenceMetadata,
+  type EvidenceNatureMetadata,
+} from "./legalReviewTaxonomy";
 import type {
   DiagnosticHostFamily,
   DiagnosticSourceFamily,
@@ -307,20 +317,44 @@ const evidenceRawSourceType = new WeakMap<LegalReviewEvidence, string>();
 function readEvidence(value: unknown, consulted: Set<string>): LegalReviewEvidence | null {
   const record = asRecord(value);
   if (!record) return null;
-  const url = safeHttpsUrl(clip(record.url, 500));
-  if (!url) return null;
-  const host = matchOfficialHost(url);
-  const canonical = canonicalSourceUrl(url);
+  const rawNature = typeof record.nature === "string" ? record.nature.trim() : "";
   const rawSourceType = typeof record.sourceType === "string" ? record.sourceType.trim().slice(0, 64) : "";
+  const isDoctrinalOrPedagogical =
+    rawNature === "DOUTRINA" ||
+    rawNature === "DIVERGENCIA_DOUTRINARIA" ||
+    rawNature === "RECURSO_PEDAGOGICO" ||
+    rawSourceType === "OUTRO_OFICIAL";
+
+  const rawUrl = clip(record.url, 500);
+  const safeUrl = safeHttpsUrl(rawUrl);
+  if (!safeUrl && !isDoctrinalOrPedagogical) return null;
+  const url = safeUrl || "";
+  const host = url ? matchOfficialHost(url) : null;
+  const canonical = url ? canonicalSourceUrl(url) : "";
   const sourceType = oneOf(record.sourceType, SOURCE_TYPES, "OUTRO_OFICIAL");
   const wasConsulted = Boolean(canonical && consulted.has(canonical));
   const official = Boolean(host);
   const modelSupports = record.supportsChange === true;
   const supportsChange = Boolean(
-    modelSupports && official && wasConsulted && host && sourceTypeFits(sourceType, host.family)
+    modelSupports && (
+      (official && wasConsulted && host && sourceTypeFits(sourceType, host.family)) ||
+      (isDoctrinalOrPedagogical && !url)
+    )
   );
+
+  const nature = rawNature && (VALID_CLAIM_NATURES as readonly string[]).includes(rawNature)
+    ? (rawNature as LegalClaimNature)
+    : undefined;
+  const rawOutcome = typeof record.outcome === "string" ? record.outcome.trim() : undefined;
+  const outcome = rawOutcome && (VALID_VERIFICATION_OUTCOMES as readonly string[]).includes(rawOutcome)
+    ? (rawOutcome as LegalVerificationOutcome)
+    : undefined;
+  const evidenceMetadata = record.evidenceMetadata && typeof record.evidenceMetadata === "object"
+    ? (record.evidenceMetadata as ClaimEvidenceMetadata | EvidenceNatureMetadata)
+    : undefined;
+
   const evidence: LegalReviewEvidence = {
-    institution: host?.label || clip(record.institution, 160) || "Fonte",
+    institution: host?.label || clip(record.institution, 160) || (isDoctrinalOrPedagogical ? "Doutrina/Pedagogia" : "Fonte"),
     title: clip(record.title, 300) || host?.label || "Documento",
     url,
     official,
@@ -328,6 +362,9 @@ function readEvidence(value: unknown, consulted: Set<string>): LegalReviewEviden
     supportsChange,
     supportExplanation: clip(record.supportExplanation, 2000),
     sourceType,
+    ...(nature ? { nature } : {}),
+    ...(outcome ? { outcome } : {}),
+    ...(evidenceMetadata ? { evidenceMetadata } : {}),
   };
   evidenceModelSupport.set(evidence, modelSupports);
   evidenceRawSourceType.set(evidence, rawSourceType);
@@ -348,7 +385,16 @@ function readSource(value: unknown): LegalReviewSource | null {
   };
 }
 
-export function isMaterialLegalChange(change: Pick<LegalReviewChange, "type" | "category">): boolean {
+export function isMaterialLegalChange(
+  change: Pick<LegalReviewChange, "type" | "category"> & { nature?: LegalClaimNature }
+): boolean {
+  if (
+    change.nature === "NORMA_JURIDICA" ||
+    change.nature === "PRECEDENTE_VINCULANTE" ||
+    change.nature === "JURISPRUDENCIA_NAO_VINCULANTE"
+  ) {
+    return MATERIAL_TYPES.has(change.type);
+  }
   return MATERIAL_TYPES.has(change.type) && MATERIAL_CATEGORIES.has(change.category);
 }
 
@@ -656,6 +702,9 @@ function evidenceSupportsFamily(evidence: LegalReviewEvidence, family: string): 
 }
 
 function evidenceConfirmsMaterialClaim(evidence: LegalReviewEvidence): boolean {
+  if (evidence.nature === "DOUTRINA" || evidence.nature === "DIVERGENCIA_DOUTRINARIA") {
+    return evidence.supportsChange === true && (evidence.outcome === "CONFIRMADA" || Boolean(evidence.title && evidence.title.trim().length >= 5));
+  }
   if (!evidence.official || !evidence.consulted || evidence.supportsChange !== true) return false;
   const url = safeHttpsUrl(evidence.url);
   if (!url) return false;
@@ -1472,13 +1521,37 @@ export function requiredFamiliesForChange(change: {
 export const MAX_LEGAL_CHANGE_REASON_CHARS = 500;
 
 function legalRefusalCodes(
-  change: Omit<LegalReviewChange, "verified" | "confirmation">,
+  change: Omit<LegalReviewChange, "verified" | "confirmation"> & {
+    rawNature?: unknown;
+    rawOutcome?: unknown;
+  },
   modelConfirmation: LegalConfirmation,
   lessonContext?: string
 ): ValidationReasonCode[] {
   if (modelConfirmation === "NAO_CONFIRMADO") return ["MODEL_UNCONFIRMED"];
   if (!change.reason || !change.reason.trim()) return ["REASON_EMPTY"];
   if (change.reason.length > MAX_LEGAL_CHANGE_REASON_CHARS) return ["REASON_TOO_LONG"];
+
+  // Validação determinística da Taxonomia Jurídica (Etapa 5D)
+  const taxonomy = validateClaimTaxonomy({
+    nature: change.nature,
+    outcome: change.outcome,
+    rawNature: change.rawNature,
+    rawOutcome: change.rawOutcome,
+    metadata: change.evidenceMetadata,
+    sources: change.sources,
+    evidence: change.evidence,
+    isOfficialSourceChecker: isOfficialLegalUrl,
+    category: change.category,
+    confirmation: modelConfirmation,
+    originalExcerpt: change.originalExcerpt,
+    revisedExcerpt: change.revisedExcerpt,
+    reason: change.reason,
+  });
+  if (!taxonomy.valid) {
+    return ["TAXONOMY_VALIDATION_FAILED"];
+  }
+
   if (changeLacksNormativeSpecificity(change)) return ["SOURCE_SPECIFICITY_FAILED"];
   if (changeContainsUngroundedInvention(change)) return ["NORMATIVE_INVENTION"];
 
@@ -1530,13 +1603,36 @@ function legalRefusalCodes(
 }
 
 function confirmChange(
-  change: Omit<LegalReviewChange, "verified" | "confirmation">,
+  change: Omit<LegalReviewChange, "verified" | "confirmation"> & {
+    rawNature?: unknown;
+    rawOutcome?: unknown;
+  },
   modelConfirmation: LegalConfirmation,
   lessonContext?: string
 ): LegalConfirmation {
   if (modelConfirmation === "NAO_CONFIRMADO") return "NAO_CONFIRMADO";
   if (!change.reason || !change.reason.trim()) return "NAO_CONFIRMADO";
   if (change.reason.length > MAX_LEGAL_CHANGE_REASON_CHARS) return "NAO_CONFIRMADO";
+  // Validação determinística da Taxonomia Jurídica (Etapa 5D)
+  const taxonomy = validateClaimTaxonomy({
+    nature: change.nature,
+    outcome: change.outcome,
+    rawNature: change.rawNature,
+    rawOutcome: change.rawOutcome,
+    metadata: change.evidenceMetadata,
+    sources: change.sources,
+    evidence: change.evidence,
+    isOfficialSourceChecker: isOfficialLegalUrl,
+    category: change.category,
+    confirmation: modelConfirmation,
+    originalExcerpt: change.originalExcerpt,
+    revisedExcerpt: change.revisedExcerpt,
+    reason: change.reason,
+  });
+  if (!taxonomy.valid) {
+    return "NAO_CONFIRMADO";
+  }
+
   if (changeLacksNormativeSpecificity(change)) return "NAO_CONFIRMADO";
   if (changeContainsUngroundedInvention(change)) return "NAO_CONFIRMADO";
 
@@ -1614,6 +1710,21 @@ function readChange(value: unknown, index: number, consulted: Set<string>, lesso
         institution: e.institution,
       }));
   const category = oneOf(record.category, CATEGORIES, "CONCEITO");
+
+  const rawNature = typeof record.nature === "string" ? record.nature.trim() : undefined;
+  const validNature = rawNature && (VALID_CLAIM_NATURES as readonly string[]).includes(rawNature)
+    ? (rawNature as LegalClaimNature)
+    : undefined;
+
+  const rawOutcome = typeof record.outcome === "string" ? record.outcome.trim() : undefined;
+  const validOutcome = rawOutcome && (VALID_VERIFICATION_OUTCOMES as readonly string[]).includes(rawOutcome)
+    ? (rawOutcome as LegalVerificationOutcome)
+    : undefined;
+
+  const rawEvidenceMetadata = record.evidenceMetadata && typeof record.evidenceMetadata === "object"
+    ? (record.evidenceMetadata as ClaimEvidenceMetadata | EvidenceNatureMetadata)
+    : undefined;
+
   const draft = {
     id: clip(record.id, 40) || `change-${index + 1}`,
     type,
@@ -1624,15 +1735,31 @@ function readChange(value: unknown, index: number, consulted: Set<string>, lesso
     reason: clip(record.reason, 4000),
     sources,
     evidence,
+    ...(validNature ? { nature: validNature } : {}),
+    ...(validOutcome ? { outcome: validOutcome } : {}),
+    ...(rawEvidenceMetadata ? { evidenceMetadata: rawEvidenceMetadata } : {}),
   };
   const modelConfirmation: LegalConfirmation = record.confirmation === "NAO_CONFIRMADO" || record.verified === false
     ? "NAO_CONFIRMADO"
     : "CONFIRMADO";
-  const confirmation = confirmChange(draft, modelConfirmation, lessonContext);
+  const confirmation = confirmChange(
+    { ...draft, rawNature: record.nature, rawOutcome: record.outcome },
+    modelConfirmation,
+    lessonContext
+  );
+  const verified = confirmation === "CONFIRMADO";
+
+  // Blindagem fail-closed (Scope 4): incoerência ou não confirmação rebaixa outcome de CONFIRMADA para NAO_VERIFICADA
+  let outcome = draft.outcome;
+  if (!verified && outcome === "CONFIRMADA") {
+    outcome = "NAO_VERIFICADA";
+  }
+
   return {
     ...draft,
     confirmation,
-    verified: confirmation === "CONFIRMADO",
+    verified,
+    ...(outcome ? { outcome } : {}),
   };
 }
 
@@ -3102,7 +3229,11 @@ export function classifyLegalAudit(
       beforeContext: literalContext(source?.beforeContext),
       afterContext: literalContext(source?.afterContext),
       key: `${index}:${change.id}`,
-      refusalCodes: legalRefusalCodes(change, modelConfirmation, original),
+      refusalCodes: legalRefusalCodes(
+        { ...change, rawNature: source?.nature, rawOutcome: source?.outcome },
+        modelConfirmation,
+        original
+      ),
     }];
   });
   const unreadable = declared.flatMap((item, index) => {
@@ -3563,11 +3694,25 @@ function finalizePatchAudit(input: {
 
   const unverifiedClaims: LegalUnverifiedClaim[] = [];
   const seen = new Set<string>();
-  const pushClaim = (excerpt: string, reason: string) => {
+  const pushClaim = (
+    excerpt: string,
+    reason: string,
+    extra?: {
+      nature?: LegalClaimNature;
+      outcome?: LegalVerificationOutcome;
+      evidenceMetadata?: ClaimEvidenceMetadata | EvidenceNatureMetadata;
+    }
+  ) => {
     const key = `${excerpt.slice(0, 180)}|${reason.slice(0, 180)}`;
     if (!excerpt.trim() || seen.has(key)) return;
     seen.add(key);
-    unverifiedClaims.push({ excerpt: excerpt.slice(0, 2000), reason: reason.slice(0, 2000) });
+    unverifiedClaims.push({
+      excerpt: excerpt.slice(0, 2000),
+      reason: reason.slice(0, 2000),
+      ...(extra?.nature ? { nature: extra.nature } : {}),
+      ...(extra?.outcome ? { outcome: extra.outcome } : {}),
+      ...(extra?.evidenceMetadata ? { evidenceMetadata: extra.evidenceMetadata } : {}),
+    });
   };
   const autonomousClaims: LegalUnverifiedClaim[] = [];
   for (const item of input.modelClaims) {
@@ -3578,8 +3723,26 @@ function finalizePatchAudit(input: {
       ? extractConciseHeadline({ originalExcerpt: rawExcerpt, revisedExcerpt: "", reason: clip(claim.reason, 300) })
       : rawExcerpt;
     const rawReason = clip(claim.reason, 2000) || "Não confirmado em fonte oficial.";
-    pushClaim(headline, rawReason);
-    autonomousClaims.push({ excerpt: headline.slice(0, 2000), reason: rawReason.slice(0, 2000) });
+    const rawNature = typeof claim.nature === "string" ? claim.nature.trim() : undefined;
+    const nature = rawNature && (VALID_CLAIM_NATURES as readonly string[]).includes(rawNature)
+      ? (rawNature as LegalClaimNature)
+      : undefined;
+    const rawOutcome = typeof claim.outcome === "string" ? claim.outcome.trim() : undefined;
+    const outcome = rawOutcome && (VALID_VERIFICATION_OUTCOMES as readonly string[]).includes(rawOutcome)
+      ? (rawOutcome as LegalVerificationOutcome)
+      : undefined;
+    const evidenceMetadata = claim.evidenceMetadata && typeof claim.evidenceMetadata === "object"
+      ? (claim.evidenceMetadata as ClaimEvidenceMetadata | EvidenceNatureMetadata)
+      : undefined;
+
+    pushClaim(headline, rawReason, { nature, outcome, evidenceMetadata });
+    autonomousClaims.push({
+      excerpt: headline.slice(0, 2000),
+      reason: rawReason.slice(0, 2000),
+      ...(nature ? { nature } : {}),
+      ...(outcome ? { outcome } : {}),
+      ...(evidenceMetadata ? { evidenceMetadata } : {}),
+    });
   }
   if (input.unreadMaterial) {
     pushClaim("Alteração não aplicada.", "Uma alteração material declarada não pôde ser lida e não foi aplicada.");
@@ -3588,7 +3751,11 @@ function finalizePatchAudit(input: {
     if (change.confirmation !== "NAO_CONFIRMADO") continue;
     const headline = extractConciseHeadline(change);
     const objectiveReason = buildObjectiveUnverifiedReason(change, input.original);
-    pushClaim(headline, objectiveReason);
+    pushClaim(headline, objectiveReason, {
+      nature: change.nature,
+      outcome: change.outcome,
+      evidenceMetadata: change.evidenceMetadata,
+    });
   }
 
   const rejectedMaterial = input.unreadMaterial || changes.some((change) => (
@@ -4177,3 +4344,266 @@ export const LEGAL_REVIEW_JSON_SCHEMA: Record<string, unknown> = {
     reviewNotes: { type: "string" },
   },
 };
+
+export const LEGAL_SUPPLEMENT_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["findings", "finalNote"],
+  properties: {
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "pendingId",
+          "changeId",
+          "statementAnalyzed",
+          "officialSourceConsulted",
+          "verifiableUrl",
+          "relevantExcerptOrBasis",
+          "status",
+          "objectiveJustification",
+          "foundOfficialEvidence",
+        ],
+        properties: {
+          pendingId: { type: "string" },
+          changeId: { type: ["string", "null"] },
+          statementAnalyzed: { type: "string" },
+          officialSourceConsulted: { type: "string" },
+          verifiableUrl: { type: "string" },
+          relevantExcerptOrBasis: { type: "string" },
+          status: { type: "string", enum: ["confirmada", "refutada", "nao_verificada"] },
+          objectiveJustification: { type: "string" },
+          foundOfficialEvidence: { type: "boolean" },
+        },
+      },
+    },
+    finalNote: { type: "string" },
+  },
+};
+
+/**
+ * Validador Determinístico de Homologação dos Achados Jurídicos (Etapa 6C).
+ *
+ * Revalida rigorosamente:
+ * 1. Que 100% dos achados da complementação possuem deliberação individual válida do CEO.
+ * 2. Que nenhum achado permaneceu em 'PENDENTE'.
+ * 3. Para CONFIRMADO_PELO_CEO:
+ *    - Se norma/precedente: fonte oficial primária ou dispositivo + declaredSource.
+ *    - Se doutrina: referência bibliográfica ou autor/obra (não exige URL de tribunal).
+ *    - Se afirmação empírica: exige metodologia ou fonte estatística (não pode ser vazia).
+ *    - Exige documentaryVerified === true e fundamentação >= 10 caracteres.
+ * 4. Para DIVERGENCIA_LEGITIMA:
+ *    - Veda invocação para NORMA_JURIDICA expressa e PRECEDENTE_VINCULANTE sumulado.
+ *    - Exige divergenceNature explícita.
+ * 5. Para CORRECAO_NECESSARIA:
+ *    - Exige vínculo com alteração ou texto corrigido presente no reviewedMarkdown.
+ *    - Invalida se o texto corrigido não constar na versão atual do Markdown.
+ * 6. Para NAO_COMPROVADO:
+ *    - Exige confirmação humana de expurgo (expurgationConfirmed === true).
+ *    - Verificação textual auxiliar: garante que o enunciado analisado não persiste no reviewedMarkdown.
+ * 7. Encerramento da Complementação (Estágio B):
+ *    - Exige supplement.resolution com status 'RESOLVIDO_PELO_CEO'.
+ *    - REGRA DE INVALIDAÇÃO OBRIGATÓRIA: candidateHash da revisão DEVE coincidir exatamente
+ *      com candidateHashAtClosure. Qualquer alteração no texto após o encerramento o invalida.
+ */
+/**
+ * Validação Material dos Achados Jurídicos para Encerramento da Complementação (Estágio A).
+ * Verifica se 100% dos achados possuem deliberações conclusivas e válidas para o hash atual do texto,
+ * sem exigir que o encerramento formal (Estágio B / resolution) já tenha sido emitido.
+ */
+export function validateFindingsForClosure(review: import("./legalReviewTypes").LegalReviewView): {
+  ok: boolean;
+  failureReasons: string[];
+} {
+  const failureReasons: string[] = [];
+  const findings = review.supplement?.findings || [];
+
+  if (findings.length === 0) {
+    return { ok: true, failureReasons: [] };
+  }
+
+  const decisions = review.findingDecisions || {};
+  const currentMarkdown = review.reviewedMarkdown || "";
+
+  for (let i = 0; i < findings.length; i++) {
+    const f = findings[i];
+    const stableKey = getFindingStableKey(f);
+    const dec = decisions[stableKey];
+
+    if (!dec) {
+      failureReasons.push(
+        `Achado '${stableKey}' (${f.statementAnalyzed.slice(0, 40)}...) não possui deliberação registrada pelo CEO.`
+      );
+      continue;
+    }
+
+    if (dec.state === "PENDENTE") {
+      failureReasons.push(
+        `Achado '${stableKey}' permanece no estado 'PENDENTE'. Todos os achados devem ser deliberados conclusivamente antes do encerramento.`
+      );
+      continue;
+    }
+
+    const justification = (dec.justification || "").trim();
+    if (justification.length < 10) {
+      failureReasons.push(
+        `Achado '${stableKey}' possui fundamentação insuficiente (mínimo de 10 caracteres).`
+      );
+    }
+
+    // REGRA DE INVALIDAÇÃO OBRIGATÓRIA: descompasso de hash entre decisão do achado e texto atual
+    if (dec.candidateHashAtDecision && dec.candidateHashAtDecision !== review.candidateHash) {
+      failureReasons.push(
+        `Achado '${stableKey}': a deliberação individual foi invalidada porque o texto da aula foi editado após a decisão do CEO (Hash na decisão: ${dec.candidateHashAtDecision}, Hash atual: ${review.candidateHash}). É necessária nova deliberação individual.`
+      );
+    }
+
+    // Validações Específicas por Estado
+    switch (dec.state) {
+      case "CONFIRMADO_PELO_CEO": {
+        const ev = dec.evidenceDeclaration;
+        if (!ev) {
+          failureReasons.push(`Achado '${stableKey}': confirmação exige declaração formal de evidência.`);
+          break;
+        }
+        if (!ev.declaredSource?.trim() && !ev.bibliographicReference?.trim()) {
+          failureReasons.push(`Achado '${stableKey}': confirmação exige indicação de fonte primária ou referência bibliográfica.`);
+        }
+        if (!ev.documentaryVerified) {
+          failureReasons.push(
+            `Achado '${stableKey}': confirmação exige declaração expressa de conferência documental física ou digital pelo CEO (documentaryVerified).`
+          );
+        }
+
+        // Validação por Natureza Jurídica
+        if (f.nature === "NORMA_JURIDICA" || f.nature === "PRECEDENTE_VINCULANTE") {
+          const url = (ev.declaredUrl || "").toLowerCase();
+          const source = (ev.declaredSource || "").toLowerCase();
+          const hasOfficialSign = isConfiguredOfficialUrl(url) || /lei|constitu|art\.|tema|s[úu]mula|adi|re\s|resp/i.test(source);
+          if (!hasOfficialSign) {
+            failureReasons.push(
+              `Achado '${stableKey}' (${f.nature}): exige indicação de diploma normativo positivo ou precedente judicial oficial.`
+            );
+          }
+        } else if (f.nature === "AFIRMACAO_EMPIRICA") {
+          const notes = `${ev.verificationNotes || ""} ${justification}`;
+          if (!/metodologia|amostragem|estat[íi]stic|pesquisa|censo|cnj|relat[óo]rio/i.test(notes)) {
+            failureReasons.push(
+              `Achado '${stableKey}' (AFIRMACAO_EMPIRICA): confirmação exige fundamentação metodológica e amostragem verificável.`
+            );
+          }
+        }
+        break;
+      }
+
+      case "DIVERGENCIA_LEGITIMA": {
+        if (f.nature === "NORMA_JURIDICA" || f.nature === "PRECEDENTE_VINCULANTE") {
+          failureReasons.push(
+            `Achado '${stableKey}': não é permitido invocar divergência legítima contra norma jurídica cogente expressa ou precedente com efeito vinculante.`
+          );
+        }
+        if (!(dec.divergenceNature || "").trim()) {
+          failureReasons.push(`Achado '${stableKey}': divergência legítima exige explicitação da corrente doutrinária ou jurisprudencial acolhida.`);
+        }
+        break;
+      }
+
+      case "CORRECAO_NECESSARIA": {
+        // Exige vínculo com a alteração
+        const cid = dec.correctionChangeId || f.changeId;
+        if (!cid) {
+          failureReasons.push(`Achado '${stableKey}': correção necessária exige identificador da alteração corretiva vinculada.`);
+        } else {
+          const linkedChange = review.changes.find(c => c.id === cid);
+          if (linkedChange && linkedChange.revisedExcerpt) {
+            // Verifica se o texto corrigido está presente no reviewedMarkdown atual
+            if (!currentMarkdown.includes(linkedChange.revisedExcerpt.trim())) {
+              failureReasons.push(
+                `Achado '${stableKey}': o texto corrigido da alteração vinculada (${cid}) não está presente no texto final da aula.`
+              );
+            }
+          }
+        }
+        break;
+      }
+
+      case "NAO_COMPROVADO": {
+        if (!dec.expurgationConfirmed) {
+          failureReasons.push(
+            `Achado '${stableKey}': para afirmar que um achado não comprovado foi resolvido, o CEO deve atestar expressamente a sua retirada da aula (expurgationConfirmed).`
+          );
+        }
+        // Verificação textual auxiliar: garante que o enunciado analisado não persiste no texto final
+        const stmt = f.statementAnalyzed.trim();
+        if (stmt.length >= 15 && currentMarkdown.includes(stmt)) {
+          failureReasons.push(
+            `Achado '${stableKey}': a afirmação não comprovada continua textualmente presente na aula. A homologação exige a supressão do excerto.`
+          );
+        }
+        break;
+      }
+
+      default:
+        failureReasons.push(`Achado '${stableKey}': estado de deliberação desconhecido '${(dec as any).state}'.`);
+    }
+  }
+
+  return {
+    ok: failureReasons.length === 0,
+    failureReasons,
+  };
+}
+
+/**
+ * Validação Integral de Homologação da Complementação Jurídica (Estágio B + Estágio C).
+ * Executa a validação material de todos os achados (validateFindingsForClosure) e exige
+ * cumulativamente a existência de encerramento formal emitido pelo CEO (resolution)
+ * no mesmo hash do texto da aula atual.
+ */
+export function validateFindingsHomologation(review: import("./legalReviewTypes").LegalReviewView): {
+  ok: boolean;
+  failureReasons: string[];
+} {
+  const closureValidation = validateFindingsForClosure(review);
+  const failureReasons: string[] = [...closureValidation.failureReasons];
+  const findings = review.supplement?.findings || [];
+
+  if (findings.length === 0) {
+    return { ok: true, failureReasons: [] };
+  }
+
+  // Validação do Encerramento Formal da Complementação (Estágio B)
+  const resolution = review.supplement?.resolution;
+  if (!resolution || resolution.status !== "RESOLVIDO_PELO_CEO") {
+    if (review.supplement?.status === "inconclusive") {
+      failureReasons.push(
+        "A complementação jurídica encerrou em estado inconclusivo pela IA e não possui encerramento administrativo formal realizado pelo CEO (Estágio B)."
+      );
+    } else {
+      failureReasons.push(
+        "A complementação jurídica possui achados da IA não verificados em fontes oficiais e não possui encerramento administrativo formal realizado pelo CEO (Estágio B)."
+      );
+    }
+  } else {
+    // REGRA DE INVALIDAÇÃO OBRIGATÓRIA: descompasso de hash entre encerramento e texto atual
+    if (resolution.candidateHashAtClosure !== review.candidateHash) {
+      failureReasons.push(
+        `O encerramento da complementação foi invalidado porque o texto da aula foi editado após o ato do CEO (Hash no encerramento: ${resolution.candidateHashAtClosure}, Hash atual: ${review.candidateHash}). É necessário reavaliar e encerrar novamente a complementação.`
+      );
+    }
+    if ((resolution.overallJustification || "").trim().length < 15) {
+      failureReasons.push(
+        "A justificativa global de encerramento da complementação pelo CEO é insuficiente (mínimo de 15 caracteres)."
+      );
+    }
+  }
+
+  return {
+    ok: failureReasons.length === 0,
+    failureReasons,
+  };
+}
+
+

@@ -10,6 +10,7 @@
     "build": "esbuild src/index.ts --platform=node --format=esm --outfile=lib/index.js && esbuild src/app.ts --bundle --platform=node --format=esm --outfile=lib/app.js --packages=external"
   },
   "dependencies": {
+    "@google-cloud/tasks": "^7.2.1",
     "@google/genai": "^1.29.0",
     "bcryptjs": "^3.0.3",
     "express": "^4.21.2",

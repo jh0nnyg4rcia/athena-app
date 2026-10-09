@@ -8,6 +8,7 @@ import * as path from "node:path";
 import {
   INVALID_AUDIT_MESSAGE,
   LEGAL_REVIEW_JSON_SCHEMA,
+  LEGAL_SUPPLEMENT_JSON_SCHEMA,
   canonicalSourceUrl,
   describeConsultedSources,
   explainLegalAuditFailure,
@@ -47,7 +48,12 @@ import {
   sanitizeDiagnosticText,
 } from "../lib/legalReviewDiagnostics";
 import { searchDomainsForLesson } from "../lib/legalReviewSources";
-import type { LegalReviewChange } from "../lib/legalReviewTypes";
+import type {
+  LegalReviewChange,
+  LegalSupplementExecutor,
+  SupplementFindingItem,
+  SupplementPendingItem,
+} from "../lib/legalReviewTypes";
 import {
   buildLegalReviewInstructions,
   buildUntrustedLessonInput,
@@ -1262,4 +1268,222 @@ export async function auditLessonWithOpenAI(input: AuditLessonInput): Promise<Au
   delete finalResult.validationLog;
   delete finalResult.autonomousClaims;
   return finalResult;
+}
+
+export function buildOfficialSupplementExecutor(customCall?: (params: {
+  lessonId: string;
+  pendingItems: SupplementPendingItem[];
+  budget: { maxTokens: number; maxDurationMs: number; maxCostUsd: number };
+  signal?: AbortSignal;
+}) => Promise<{
+  status: "completed" | "inconclusive";
+  tokensUsed: number;
+  durationMs: number;
+  costUsd: number;
+  findings: SupplementFindingItem[];
+  finalNote: string;
+}>): LegalSupplementExecutor {
+  if (customCall) {
+    return { supplement: customCall };
+  }
+
+  return {
+    async supplement(params: {
+      lessonId: string;
+      pendingItems: SupplementPendingItem[];
+      budget: { maxTokens: number; maxDurationMs: number; maxCostUsd: number };
+      signal?: AbortSignal;
+    }) {
+      const startTime = Date.now();
+      const apiKey = (process.env.OPENAI_API_KEY || "").trim();
+
+      // Ambiente offline / sem chave de API: retorna resultado estruturado seguro sem falhar
+      if (!apiKey) {
+        return {
+          status: "inconclusive" as const,
+          tokensUsed: 0,
+          durationMs: Date.now() - startTime,
+          costUsd: 0,
+          findings: params.pendingItems.map((p) => {
+            const item: SupplementFindingItem = {
+              pendingId: p.id,
+              statementAnalyzed: p.excerpt,
+              officialSourceConsulted: "Nenhuma (ambiente offline sem chave de API)",
+              verifiableUrl: "",
+              relevantExcerptOrBasis: "",
+              status: "nao_verificada" as const,
+              objectiveJustification: "Ambiente de execução sem OPENAI_API_KEY configurada.",
+              foundOfficialEvidence: false,
+            };
+            if (typeof p.changeId === "string" && p.changeId.trim()) {
+              item.changeId = p.changeId.trim();
+            }
+            return item;
+          }),
+          finalNote: "Execução concluída em modo offline sem chave de API configurada.",
+        };
+      }
+
+      const client = new OpenAI({ apiKey, maxRetries: 0 });
+      const requestedModel = reviewModelName();
+
+      const instructions = [
+        "Você é o auditor jurídico do ATHENA encarregado exclusivamente de verificar pendências jurídicas pontuais em fontes oficiais brasileiras.",
+        "DIRETRIZES CRÍTICAS:",
+        "- NÃO realize uma nova auditoria integral.",
+        "- NÃO reescreva o texto da aula.",
+        "- NÃO proponha novas alterações ou edições no Markdown.",
+        "- NÃO invente URLs.",
+        "- Limite-se estritamente às pendências jurídicas fornecidas no input.",
+        "- Para cada pendência, pesquise somente em fontes oficiais brasileiras (legislação federal em planalto.gov.br, atos normativos do CNJ em atos.cnj.jus.br, jurisprudência do STF em stf.jus.br ou STJ em stj.jus.br).",
+        "- Classifique cada pendência em: 'confirmada', 'refutada' ou 'nao_verificada'.",
+        "- Se a afirmação estiver de acordo com o ato normativo ou súmula/tese oficial vigente, marque 'confirmada' e indique a citação normativa exata.",
+        "- Se colidir com ato vigente, revogado ou súmula cancelada, marque 'refutada'.",
+        "- Se não encontrar prova oficial inequívoca, marque 'nao_verificada'.",
+        "- Preencha o JSON estritamente conforme o schema.",
+      ].join("\n");
+
+      const userInput = JSON.stringify({
+        instrucao: "Verifique exclusivamente as seguintes pendências jurídicas em fontes oficiais brasileiras:",
+        pendencias: params.pendingItems.map((p) => ({
+          id: p.id,
+          tipoOrigem: p.sourceType,
+          changeId: p.changeId,
+          afirmacaoOuTrecho: p.excerpt,
+          motivoOuContexto: p.reason,
+        })),
+      }, null, 2);
+
+      const maxOutputTokens = Math.min(params.budget.maxTokens || 4000, 4000);
+      const executionTimeoutMs = params.budget.maxDurationMs || 120_000;
+
+      console.log(`[supplement-executor] Disparando chamada OpenAI com timeout de ${executionTimeoutMs}ms para ${params.pendingItems.length} pendências da aula ${params.lessonId}...`);
+
+      const response = await client.responses.create(
+        {
+          model: requestedModel,
+          instructions,
+          input: [
+            {
+              role: "user",
+              content: userInput,
+            },
+          ],
+          tools: [
+            {
+              type: "web_search" as const,
+              external_web_access: true,
+              search_context_size: "high" as const,
+              user_location: {
+                type: "approximate" as const,
+                country: "BR",
+                timezone: "America/Sao_Paulo",
+              },
+              filters: {
+                allowed_domains: ["planalto.gov.br", "atos.cnj.jus.br", "stf.jus.br", "stj.jus.br", "camara.leg.br", "senado.leg.br"],
+              },
+            },
+          ],
+          tool_choice: "required" as const,
+          reasoning: { effort: "medium" },
+          max_output_tokens: maxOutputTokens,
+          text: {
+            format: {
+              type: "json_schema" as const,
+              name: "complementacao_juridica",
+              strict: true,
+              schema: LEGAL_SUPPLEMENT_JSON_SCHEMA,
+            },
+          },
+        },
+        {
+          timeout: executionTimeoutMs,
+          signal: params.signal,
+          maxRetries: 0,
+        }
+      );
+
+      const durationMs = Date.now() - startTime;
+      const inputTokens = Number(response.usage?.input_tokens || 0);
+      const outputTokens = Number(response.usage?.output_tokens || 0);
+      const totalTokens = Number(response.usage?.total_tokens || inputTokens + outputTokens);
+      const costUsd = Number(((inputTokens * 0.0000025) + (outputTokens * 0.00001)).toFixed(6));
+
+      console.log(`[supplement-executor] OpenAI respondeu com sucesso em ${durationMs}ms: tokens=${totalTokens}, custo=$${costUsd}`);
+
+      const rawText = (response.output_text || "").trim();
+      let parsed: { findings: any[]; finalNote: string };
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (e: any) {
+        return {
+          status: "inconclusive" as const,
+          tokensUsed: totalTokens,
+          durationMs,
+          costUsd,
+          findings: [],
+          finalNote: `Resposta do provedor não pôde ser decodificada como JSON válido: ${e?.message || "erro de parsing"}`,
+        };
+      }
+
+      const validFindings: SupplementFindingItem[] = (parsed.findings || []).map((f) => {
+        const rawUrl = String(f.verifiableUrl || "").trim();
+        const isOfficial = rawUrl ? isOfficialLegalUrl(rawUrl) : false;
+        const normalizedUrl = isOfficial ? canonicalSourceUrl(rawUrl) : rawUrl;
+
+        const evidenceList: import("../lib/legalReviewTypes").LegalReviewEvidence[] = isOfficial && f.foundOfficialEvidence ? [
+          {
+            institution: String(f.officialSourceConsulted || "Planalto/Tribunal"),
+            title: String(f.officialSourceConsulted || "Fonte Oficial"),
+            url: normalizedUrl,
+            official: true,
+            consulted: true,
+            supportsChange: true,
+            supportExplanation: String(f.objectiveJustification || "Evidência oficial obtida na complementação."),
+            sourceType: "LEI",
+          },
+        ] : [];
+
+        const sourcesList: import("../lib/legalReviewTypes").LegalReviewSource[] = isOfficial ? [
+          {
+            title: String(f.officialSourceConsulted || "Fonte Oficial"),
+            url: normalizedUrl,
+            official: true,
+            institution: String(f.officialSourceConsulted || "Planalto/Tribunal"),
+          },
+        ] : [];
+
+        const finding: SupplementFindingItem = {
+          pendingId: String(f.pendingId || ""),
+          statementAnalyzed: String(f.statementAnalyzed || ""),
+          officialSourceConsulted: String(f.officialSourceConsulted || ""),
+          verifiableUrl: normalizedUrl,
+          relevantExcerptOrBasis: String(f.relevantExcerptOrBasis || ""),
+          status: f.status === "confirmada" || f.status === "refutada" ? f.status : "nao_verificada",
+          objectiveJustification: String(f.objectiveJustification || ""),
+          foundOfficialEvidence: Boolean(f.foundOfficialEvidence && isOfficial),
+          evidence: evidenceList,
+          sources: sourcesList,
+        };
+
+        if (typeof f.changeId === "string" && f.changeId.trim()) {
+          finding.changeId = f.changeId.trim();
+        }
+
+        return finding;
+      });
+
+      const hasOfficialFindings = validFindings.some((f) => f.foundOfficialEvidence);
+      const status = hasOfficialFindings ? ("completed" as const) : ("inconclusive" as const);
+
+      return {
+        status,
+        tokensUsed: totalTokens,
+        durationMs,
+        costUsd,
+        findings: validFindings,
+        finalNote: String(parsed.finalNote || "Complementação pontual finalizada."),
+      };
+    },
+  };
 }

@@ -114,7 +114,7 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { LegalReviewPanel } from './components/LegalReviewPanel';
-import { approveLegalReview, reauditLegalReview, rejectLegalReview, requestLegalReview, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { approveLegalReview, closeLegalReviewSupplement, fetchLatestLegalReview, reauditLegalReview, rejectLegalReview, requestAsyncLegalReview, requestLegalReview, requestLegalReviewSupplement, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewFinding, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
 import { LEGAL_REVIEW_TEST_MATERIAL } from './lib/legalReviewTestMaterial';
 import { legalReviewButtonVisible, legalReviewTestButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
@@ -2037,9 +2037,10 @@ export default function App() {
   const [editingLessonContent, setEditingLessonContent] = useState('');
   const [editingLessonIndex, setEditingLessonIndex] = useState<number | undefined>(undefined);
   const [legalReviewOpen, setLegalReviewOpen] = useState(false);
-  const [legalReviewPhase, setLegalReviewPhase] = useState<'confirm' | 'running' | 'notice' | 'result' | 'edit'>('confirm');
+  const [legalReviewPhase, setLegalReviewPhase] = useState<'confirm' | 'running' | 'notice' | 'result' | 'edit' | 'error'>('confirm');
   const [legalReviewStage, setLegalReviewStage] = useState('Analisando aula');
   const [legalReviewError, setLegalReviewError] = useState<string | null>(null);
+  const [legalReviewConflict, setLegalReviewConflict] = useState(false);
   const [legalReviewNotice, setLegalReviewNotice] = useState<{ lastReviewDate: string } | null>(null);
   const [legalReview, setLegalReview] = useState<LegalReviewView | null>(null);
   const [legalReviewBusy, setLegalReviewBusy] = useState(false);
@@ -4682,16 +4683,142 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setHomologatedLessonState(null);
   };
 
-  const openLegalReview = (day: number, part: number, blockIndex?: number) => {
+  const legalReviewPollRef = useRef<(() => void) | null>(null);
+
+  const startLegalReviewPolling = (day: number, part: number, blockIndex: number | null) => {
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+
+    let isPolling = true;
+    let timerId: NodeJS.Timeout | null = null;
+
+    const poll = async () => {
+      if (!isPolling) return;
+      try {
+        const latest = await fetchLatestLegalReview(day, part, blockIndex !== null ? blockIndex : undefined);
+        if (!isPolling) return;
+        if (latest.found && latest.review) {
+          if (latest.review.status === 'pending_approval' || latest.review.status === 'approved' || latest.review.status === 'rejected') {
+            setLegalReview(latest.review);
+            setLegalReviewPhase('result');
+            isPolling = false;
+            return;
+          }
+          if (latest.review.status === 'failed') {
+            setLegalReviewError(latest.review.reviewNotes || 'A auditoria falhou. A aula publicada não foi alterada.');
+            setLegalReviewPhase('confirm');
+            isPolling = false;
+            return;
+          }
+          // Continua em queued ou processing
+          setLegalReviewStage(latest.review.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+        }
+      } catch {
+        // Falhas transitórias no poll não cancelam nem disparam nova auditoria
+      }
+
+      if (isPolling) {
+        timerId = setTimeout(poll, 3000);
+      }
+    };
+
+    timerId = setTimeout(poll, 3000);
+
+    legalReviewPollRef.current = () => {
+      isPolling = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  };
+
+  const startSupplementPolling = (day: number, part: number, blockIndex: number | null) => {
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+
+    let isPolling = true;
+    let timerId: NodeJS.Timeout | null = null;
+
+    const poll = async () => {
+      if (!isPolling) return;
+      try {
+        const latest = await fetchLatestLegalReview(day, part, blockIndex !== null ? blockIndex : undefined);
+        if (!isPolling) return;
+        if (latest.found && latest.review) {
+          setLegalReview(latest.review);
+          const suppStatus = latest.review.supplement?.status;
+          if (suppStatus !== 'reserved' && suppStatus !== 'running') {
+            isPolling = false;
+            return;
+          }
+        }
+      } catch {
+        // Falhas transitórias no poll não afetam o processamento
+      }
+
+      if (isPolling) {
+        timerId = setTimeout(poll, 3000);
+      }
+    };
+
+    timerId = setTimeout(poll, 3000);
+
+    legalReviewPollRef.current = () => {
+      isPolling = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  };
+
+  const openLegalReview = async (day: number, part: number, blockIndex?: number) => {
     setLegalReviewTestMode(false);
     setLegalReviewDay(day);
     setLegalReviewPart(part);
-    setLegalReviewBlock(typeof blockIndex === 'number' ? blockIndex : null);
+    const bIndex = typeof blockIndex === 'number' ? blockIndex : null;
+    setLegalReviewBlock(bIndex);
     setLegalReviewError(null);
     setLegalReviewNotice(null);
     setLegalReview(null);
-    setLegalReviewPhase('confirm');
+    setLegalReviewConflict(false);
+    setLegalReviewBusy(true);
     setLegalReviewOpen(true);
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+    try {
+      const latest = await fetchLatestLegalReview(day, part, typeof blockIndex === 'number' ? blockIndex : undefined);
+      if (latest.found && latest.review) {
+        setLegalReviewConflict(Boolean(latest.conflict));
+        if (latest.review.status === 'pending_approval') {
+          setLegalReview(latest.review);
+          setLegalReviewPhase('result');
+          if (latest.review.supplement?.status === 'reserved' || latest.review.supplement?.status === 'running') {
+            startSupplementPolling(day, part, bIndex);
+          }
+        } else if (latest.review.status === 'processing' || latest.review.status === 'queued') {
+          setLegalReview(latest.review);
+          setLegalReviewPhase('running');
+          setLegalReviewStage(latest.review.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+          startLegalReviewPolling(day, part, bIndex);
+        } else {
+          if (latest.conflict) {
+            setLegalReviewError('A aula foi modificada no catálogo após o início da revisão armazenada.');
+          }
+          setLegalReview(latest.review);
+          setLegalReviewPhase('confirm');
+        }
+      } else {
+        setLegalReviewConflict(false);
+        setLegalReviewPhase('confirm');
+      }
+    } catch (err: any) {
+      setLegalReviewError(err?.message || 'Falha ao consultar histórico de auditorias. A auditoria não foi iniciada.');
+      setLegalReviewPhase('error');
+    } finally {
+      setLegalReviewBusy(false);
+    }
   };
 
   const openLegalReviewTest = () => {
@@ -4702,6 +4829,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setLegalReviewError(null);
     setLegalReviewNotice(null);
     setLegalReview(null);
+    setLegalReviewConflict(false);
     setLegalReviewPhase('confirm');
     setLegalReviewOpen(true);
   };
@@ -4795,11 +4923,23 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const runLegalReview = async (force: boolean) => {
     if (legalReviewDay === null || legalReviewPart === null) return;
+    if (force && legalReview && legalReview.status === 'pending_approval') {
+      setLegalReviewError('A opção force=true está bloqueada para preservar o histórico: o índice do catálogo não mantém array histórico de revisões. Executar uma nova revisão sobrescreveria o ponteiro latestReviewId, tornando inacessível a revisão existente e os achados recuperados da att-2.');
+      return;
+    }
+    if (force && !confirm('ATENÇÃO: Gerar uma nova revisão jurídica enviará uma nova chamada paga à OpenAI e substituirá o ponteiro da última revisão no catálogo. Deseja realmente prosseguir?')) {
+      return;
+    }
+    if (legalReviewConflict && !force) {
+      setLegalReviewError('Já existe uma revisão pendente com divergência de catálogo. Para visualizá-la, use a tela de resultados.');
+      return;
+    }
     setLegalReviewBusy(true);
     setLegalReviewError(null);
     setLegalReviewPhase('running');
+    setLegalReviewStage('Iniciando auditoria jurídica...');
     try {
-      const result = await requestLegalReview(
+      const result = await requestAsyncLegalReview(
         legalReviewDay,
         legalReviewPart,
         legalReviewBlock !== null ? legalReviewBlock : undefined,
@@ -4810,11 +4950,19 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         setLegalReviewPhase('notice');
         return;
       }
-      if (!result.review) throw new Error('A auditoria não devolveu uma versão candidata. A aula publicada não foi alterada.');
-      setLegalReview(result.review);
-      setLegalReviewPhase('result');
+      if (result.existingPending && result.review) {
+        setLegalReview(result.review);
+        setLegalReviewPhase('result');
+        return;
+      }
+      if (result.enqueued || result.alreadyProcessing) {
+        setLegalReviewStage(result.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+        startLegalReviewPolling(legalReviewDay, legalReviewPart, legalReviewBlock);
+        return;
+      }
+      throw new Error(result.message || 'Resposta inesperada ao enfileirar auditoria. Nenhuma chamada foi executada.');
     } catch (error) {
-      setLegalReviewError(error instanceof Error ? error.message : 'A auditoria falhou. A aula publicada não foi alterada.');
+      setLegalReviewError(error instanceof Error ? error.message : 'A solicitação falhou. A aula publicada não foi alterada.');
       setLegalReviewPhase('confirm');
     } finally {
       setLegalReviewBusy(false);
@@ -4823,6 +4971,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const approveOpenLegalReview = async () => {
     if (!legalReview) return;
+    if (legalReviewConflict) {
+      setLegalReviewError('A aprovação está bloqueada: o conteúdo do catálogo oficial difere do snapshot desta revisão histórica.');
+      return;
+    }
     if (legalReview.testMode || legalReviewTestMode) {
       setLegalReviewError('Revisão de teste não pode ser publicada. Nenhuma aula foi alterada.');
       return;
@@ -4833,6 +4985,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
     if (legalReview.verificationLevel === 'FALHA_NA_VERIFICACAO') {
       setLegalReviewError('A aprovação integral está bloqueada: as afirmações jurídicas materiais não foram devidamente verificadas em fontes oficiais.');
+      return;
+    }
+    if (legalReview.supplement?.status === 'inconclusive' || (Array.isArray(legalReview.supplement?.findings) && legalReview.supplement.findings.some((f: any) => f.classification === 'nao_verificada'))) {
+      setLegalReviewError('A aprovação está bloqueada: a complementação jurídica contém achados inconclusivos ou não verificados em fontes oficiais.');
       return;
     }
     if (!confirm('Substituir a aula publicada por esta versão revisada? A versão anterior fica guardada no histórico da revisão.')) return;
@@ -8045,7 +8201,20 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
       notice={legalReviewNotice}
       review={legalReview}
       busy={legalReviewBusy}
-      onClose={() => setLegalReviewOpen(false)}
+      onClose={() => {
+        if (legalReviewPollRef.current) {
+          legalReviewPollRef.current();
+          legalReviewPollRef.current = null;
+        }
+        setLegalReviewOpen(false);
+      }}
+      onRetryFetch={() => {
+        if (legalReviewDay !== null && legalReviewPart !== null) {
+          void openLegalReview(legalReviewDay, legalReviewPart, legalReviewBlock !== null ? legalReviewBlock : undefined);
+        }
+      }}
+      conflict={legalReviewConflict}
+      onViewHistorical={() => setLegalReviewPhase('result')}
       onStart={() => { void (legalReviewTestMode ? runLegalReviewTest() : runLegalReview(false)); }}
       onForce={() => { void runLegalReview(true); }}
       onApprove={() => { void approveOpenLegalReview(); }}
@@ -8078,11 +8247,51 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
           setLegalReviewBusy(false);
         }
       }}
+      onResolveFinding={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await resolveLegalReviewFinding(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar deliberação do achado jurídico.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCloseSupplement={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await closeLegalReviewSupplement(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar encerramento da complementação jurídica.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
       testMode={legalReviewTestMode}
       sectionPreview={legalReviewBlock !== null && !legalReviewTestMode}
       testDraft={legalReviewTestDraft}
       onTestDraftChange={setLegalReviewTestDraft}
       onEndTest={() => { void endLegalReviewTest(); }}
+      onRequestSupplement={async () => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await requestLegalReviewSupplement(legalReview.id);
+          setLegalReview(res.review);
+          if (res.review.supplement?.status === 'reserved' || res.review.supplement?.status === 'running') {
+            startSupplementPolling(legalReview.day, legalReview.part, legalReviewBlock);
+          }
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Falha ao executar complementação jurídica.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
     />
     <AnimatePresence>
       {isEditingLesson && (

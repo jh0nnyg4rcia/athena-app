@@ -43,6 +43,7 @@ export const athenaApi = onRequest(
     if (!process.env.NODE_ENV) {
       process.env.NODE_ENV = "production";
     }
+
     const app = await getApp();
     await app(req, res);
   }

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isSectionReviewKey } from "../lib/catalogBlock";
-import type { EditorialIntegrityValidation, HumanReviewDecision, LegalReviewIndex, LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
+import type { EditorialIntegrityValidation, HumanReviewDecision, LegalReviewIndex, LegalReviewSupplement, LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
 
 export function hashLessonContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -60,14 +60,14 @@ export function processingLockFresh(index: LegalReviewIndex | null, now: number)
   return now - index.processingStartedAt < PROCESSING_LEASE_MS;
 }
 
-/** Bloqueia só uma revisão cujo registro ainda está em processamento e cujo cadeado foi renovado. */
+/** Bloqueia só uma revisão cujo registro ainda está na fila ou em processamento e cujo cadeado foi renovado. */
 export function processingLockBlocks(
   index: LegalReviewIndex | null,
   review: { id: string; status: string } | null,
   now: number
 ): boolean {
   if (!processingLockFresh(index, now) || !review || !index?.processingReviewId) return false;
-  return review.id === index.processingReviewId && review.status === "processing";
+  return review.id === index.processingReviewId && (review.status === "processing" || review.status === "queued");
 }
 
 export class LegalReviewError extends Error {
@@ -84,8 +84,9 @@ export interface LegalReviewRepository {
   getLesson(lessonId: string): Promise<StoredCatalogLesson | null>;
   getIndex(lessonId: string): Promise<LegalReviewIndex | null>;
   begin(review: LegalReviewView): Promise<void>;
+  claimJob?(reviewId: string, lessonId: string, now: number): Promise<boolean>;
   complete(review: LegalReviewView): Promise<void>;
-  fail(reviewId: string, lessonId: string, message: string): Promise<void>;
+  fail(reviewId: string, lessonId: string, message: string, status?: "failed" | "uncertain_failure"): Promise<void>;
   touchProcessing(lessonId: string, reviewId: string, now: number): Promise<boolean>;
   get(reviewId: string): Promise<LegalReviewView | null>;
   saveCandidate(reviewId: string, markdown: string, now: number): Promise<LegalReviewView>;
@@ -96,11 +97,48 @@ export interface LegalReviewRepository {
     editorialIntegrity: EditorialIntegrityValidation,
     now: number
   ): Promise<LegalReviewView>;
+  saveFindingDecision?(
+    reviewId: string,
+    findingDecision: import("../lib/legalReviewTypes").HumanFindingDecision,
+    now: number
+  ): Promise<LegalReviewView>;
+  closeSupplementResolution?(
+    reviewId: string,
+    resolution: import("../lib/legalReviewTypes").SupplementHumanResolution,
+    now: number
+  ): Promise<LegalReviewView>;
   reject(reviewId: string, uid: string, now: number): Promise<LegalReviewView>;
   approve(reviewId: string, uid: string, email: string, now: number): Promise<
     | { ok: true; lesson: StoredCatalogLesson }
     | { ok: false; conflict: true }
   >;
+  reserveSupplement?(
+    reviewId: string,
+    uid: string,
+    email: string,
+    pendingItems: import("../lib/legalReviewTypes").SupplementPendingItem[],
+    now: number,
+    attemptId?: string
+  ): Promise<{ ok: boolean; review?: LegalReviewView; reason?: string }>;
+  markSupplementStarted?(
+    reviewId: string,
+    now: number
+  ): Promise<boolean>;
+  failPreCallSupplement?(
+    reviewId: string,
+    reason: string,
+    now: number
+  ): Promise<LegalReviewView>;
+  recordUncertainEnqueueSupplement?(
+    reviewId: string,
+    reason: string,
+    now: number
+  ): Promise<LegalReviewView>;
+  recordSupplementOutcome?(
+    reviewId: string,
+    supplement: LegalReviewSupplement,
+    now: number
+  ): Promise<LegalReviewView>;
 }
 
 export function readLessonSlot(body: unknown): { day: number; part: number } | null {
@@ -180,5 +218,7 @@ export function publicReview(review: LegalReviewView): LegalReviewView {
     sourceHistory: review.sourceHistory || [],
     editorialIntegrity: review.editorialIntegrity,
     humanDecisions: review.humanDecisions || {},
+    findingDecisions: review.findingDecisions || {},
+    supplement: review.supplement,
   };
 }

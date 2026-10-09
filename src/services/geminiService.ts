@@ -104,6 +104,40 @@ export function postAthenaApi<T>(
   return fetchAthenaApi<T>(endpoint, body, timeoutMs);
 }
 
+export function getAthenaApi<T>(
+  endpoint: string,
+  timeoutMs = 60_000
+): Promise<T> {
+  return fetchAthenaApiGet<T>(endpoint, timeoutMs);
+}
+
+async function fetchAthenaApiGet<T>(
+  endpoint: string,
+  timeoutMs: number
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(getApiUrl(endpoint), {
+      method: "GET",
+      headers: await getAuthHeaders(),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Erro de conexão HTTP: ${response.status}`);
+    }
+    return (await response.json()) as T;
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`Tempo limite excedido (${timeoutMs / 1000}s) no proxy ATHENA.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchAthenaApi<T>(
   endpoint: string,
   body: Record<string, unknown>,
