@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isSectionReviewKey } from "../lib/catalogBlock";
 import type { EditorialIntegrityValidation, HumanReviewDecision, LegalReviewIndex, LegalReviewSupplement, LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
+import { computeDecisionStateHash } from "../lib/legalReviewValidate";
 
 export function hashLessonContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -105,7 +106,11 @@ export interface LegalReviewRepository {
   closeSupplementResolution?(
     reviewId: string,
     resolution: import("../lib/legalReviewTypes").SupplementHumanResolution,
-    now: number
+    now: number,
+    expectedHashes?: {
+      expectedCandidateHash: string;
+      expectedDecisionStateHash: string;
+    }
   ): Promise<LegalReviewView>;
   reject(reviewId: string, uid: string, now: number): Promise<LegalReviewView>;
   approve(reviewId: string, uid: string, email: string, now: number): Promise<
@@ -219,6 +224,7 @@ export function publicReview(review: LegalReviewView): LegalReviewView {
     editorialIntegrity: review.editorialIntegrity,
     humanDecisions: review.humanDecisions || {},
     findingDecisions: review.findingDecisions || {},
+    decisionStateHash: computeDecisionStateHash(review),
     supplement: review.supplement,
   };
 }

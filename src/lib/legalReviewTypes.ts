@@ -179,6 +179,16 @@ export interface HumanFindingDecision {
  * Preserva o supplement.status original gerado pela IA (ex: 'inconclusive') e atesta
  * que 100% dos achados foram sanados pelo CEO com integridade e coerência.
  */
+export interface SupplementHumanResolutionHistoryEntry {
+  status: "RESOLVIDO_PELO_CEO";
+  closedAt: number;
+  closedByUid: string;
+  closedByEmail: string;
+  overallJustification: string;
+  candidateHashAtClosure: string;
+  totalFindingsResolved: number;
+}
+
 export interface SupplementHumanResolution {
   status: "RESOLVIDO_PELO_CEO";
   closedAt: number;
@@ -188,6 +198,8 @@ export interface SupplementHumanResolution {
   /** Hash SHA-256 do reviewedMarkdown no momento exato do encerramento */
   candidateHashAtClosure: string;
   totalFindingsResolved: number;
+  /** Histórico de atos de encerramento anteriores preservado cumulativamente */
+  history?: SupplementHumanResolutionHistoryEntry[];
 }
 
 
@@ -480,6 +492,8 @@ export interface LegalReviewView {
   humanDecisions?: Record<string, HumanReviewDecision>;
   /** Deliberações individuais do CEO sobre achados jurídicos (Etapa 5F). */
   findingDecisions?: Record<string, HumanFindingDecision>;
+  /** Hash SHA-256 canônico do estado de deliberações e achados para encerramento do Estágio B (Etapa 15.1). */
+  decisionStateHash?: string;
   supplement?: LegalReviewSupplement;
 }
 

@@ -30,6 +30,7 @@ import {
   hashLessonContent,
   type LegalReviewRepository,
 } from "../src/services/legalReviewRepository.js";
+import { computeDecisionStateHash } from "../src/lib/legalReviewValidate.js";
 
 const CEO_EMAIL = "jhonny.spider@gmail.com";
 const NON_CEO_EMAIL = "aluno@projetoathena.app.br";
@@ -389,10 +390,15 @@ async function runAdversarialTestSuite() {
     );
 
     // Executa B
+    const r4Current = await repo4.get(r4.id);
     const updatedB = await closeLegalReviewSupplementFlow(
       repo4,
       r4.id,
-      { overallJustification: "Encerramento formal de complementação jurídica com todas as pendências resolvidas." },
+      {
+        overallJustification: "Encerramento formal de complementação jurídica com todas as pendências resolvidas.",
+        expectedCandidateHash: r4Current?.candidateHash || "",
+        expectedDecisionStateHash: r4Current ? computeDecisionStateHash(r4Current) : "",
+      },
       "uid_ceo",
       CEO_EMAIL
     );
@@ -511,10 +517,15 @@ async function runAdversarialTestSuite() {
       "uid_ceo",
       CEO_EMAIL
     );
+    const rConflictCurrent = await repoConflict.get(rConflict.id);
     await closeLegalReviewSupplementFlow(
       repoConflict,
       rConflict.id,
-      { overallJustification: "Encerramento formal de complementação válido." },
+      {
+        overallJustification: "Encerramento formal de complementação válido.",
+        expectedCandidateHash: rConflictCurrent?.candidateHash || "",
+        expectedDecisionStateHash: rConflictCurrent ? computeDecisionStateHash(rConflictCurrent) : "",
+      },
       "uid_ceo",
       CEO_EMAIL
     );
@@ -547,10 +558,15 @@ async function runAdversarialTestSuite() {
       "uid_ceo",
       CEO_EMAIL
     );
+    const r5Current = await repo5.get(r5.id);
     await closeLegalReviewSupplementFlow(
       repo5,
       r5.id,
-      { overallJustification: "Encerramento formal legítimo com todas as pendências resolvidas pelo CEO." },
+      {
+        overallJustification: "Encerramento formal legítimo com todas as pendências resolvidas pelo CEO.",
+        expectedCandidateHash: r5Current?.candidateHash || "",
+        expectedDecisionStateHash: r5Current ? computeDecisionStateHash(r5Current) : "",
+      },
       "uid_ceo",
       CEO_EMAIL
     );

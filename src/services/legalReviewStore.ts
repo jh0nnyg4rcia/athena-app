@@ -14,7 +14,7 @@ import {
 } from "../lib/legalReviewTypes";
 import { candidateMarkdownAccepted, nextPublishedLesson, reviewAfterManualEdit } from "./legalReviewPublish";
 import { isCeoEmail } from "../lib/contentProvider";
-import { validateFindingsForClosure, validateFindingsHomologation, validateEditorialIntegrity } from "../lib/legalReviewValidate";
+import { validateFindingsForClosure, validateFindingsHomologation, validateEditorialIntegrity, computeDecisionStateHash } from "../lib/legalReviewValidate";
 import {
   LegalReviewError,
   LEGAL_REVIEW_TEST_PUBLISH_MESSAGE,
@@ -524,7 +524,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
         throw unavailable();
       }
     },
-    async closeSupplementResolution(reviewId, resolution, now) {
+    async closeSupplementResolution(reviewId, resolution, now, expectedHashes) {
       const flags = getLegalReviewOperationalFlags();
       if (!flags.stageBEnabled) {
         throw new LegalReviewError(LEGAL_REVIEW_STAGE_B_DISABLED_MESSAGE, 503);
@@ -542,6 +542,58 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             throw new LegalReviewError("Esta revisão não possui complementação jurídica para encerrar.", 404);
           }
 
+          // Proteção contra duplicidade de encerramento já realizado
+          if (review.supplement.resolution && review.supplement.resolution.status === "RESOLVIDO_PELO_CEO") {
+            if (review.supplement.resolution.candidateHashAtClosure === review.candidateHash) {
+              throw new LegalReviewError(
+                "A complementação jurídica já foi encerrada anteriormente pelo CEO para esta mesma versão do texto candidato.",
+                409
+              );
+            }
+          }
+
+          // Validação transacional estrita de concorrência e integridade de hashes (Etapa 15.1)
+          if (expectedHashes) {
+            const expCandHash = (expectedHashes.expectedCandidateHash || "").trim().toLowerCase();
+            const expDecHash = (expectedHashes.expectedDecisionStateHash || "").trim().toLowerCase();
+
+            if (!expCandHash) {
+              throw new LegalReviewError("O hash esperado do candidato (expectedCandidateHash) é obrigatório.", 400);
+            }
+            if (!/^[a-f0-9]{64}$/i.test(expCandHash)) {
+              throw new LegalReviewError(
+                "O formato de expectedCandidateHash é inválido (deve ser SHA-256 hexadecimal com 64 caracteres).",
+                400
+              );
+            }
+
+            if (!expDecHash) {
+              throw new LegalReviewError("O hash esperado do estado de deliberações (expectedDecisionStateHash) é obrigatório.", 400);
+            }
+            if (!/^[a-f0-9]{64}$/i.test(expDecHash)) {
+              throw new LegalReviewError(
+                "O formato de expectedDecisionStateHash é inválido (deve ser SHA-256 hexadecimal com 64 caracteres).",
+                400
+              );
+            }
+
+            const currentCandidateHash = (review.candidateHash || "").trim().toLowerCase();
+            if (currentCandidateHash && expCandHash !== currentCandidateHash) {
+              throw new LegalReviewError(
+                "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato atual difere da versão visualizada. Recarregue a página antes de encerrar.",
+                409
+              );
+            }
+
+            const currentDecisionStateHash = computeDecisionStateHash(review).toLowerCase();
+            if (expDecHash !== currentDecisionStateHash) {
+              throw new LegalReviewError(
+                "O estado das deliberações individuais foi modificado desde o carregamento da página. As decisões registradas diferem da versão visualizada. Recarregue a página antes de encerrar.",
+                409
+              );
+            }
+          }
+
           const check = validateFindingsForClosure(review);
           if (!check.ok) {
             throw new LegalReviewError(
@@ -557,12 +609,27 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             );
           }
 
+          const priorResolution = review.supplement.resolution;
+          const priorHistory = [...(priorResolution?.history || [])];
+          if (priorResolution && priorResolution.candidateHashAtClosure !== review.candidateHash) {
+            priorHistory.push({
+              status: priorResolution.status,
+              closedAt: priorResolution.closedAt,
+              closedByUid: priorResolution.closedByUid,
+              closedByEmail: priorResolution.closedByEmail,
+              overallJustification: priorResolution.overallJustification,
+              candidateHashAtClosure: priorResolution.candidateHashAtClosure,
+              totalFindingsResolved: priorResolution.totalFindingsResolved,
+            });
+          }
+
           const updatedSupplement: import("../lib/legalReviewTypes").LegalReviewSupplement = {
             ...review.supplement,
             resolution: {
               ...resolution,
               candidateHashAtClosure: review.candidateHash,
               closedAt: now,
+              history: priorHistory,
             },
           };
 

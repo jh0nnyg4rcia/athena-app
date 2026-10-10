@@ -443,16 +443,41 @@ export function registerLegalReviewRoutes(
       res.status(400).json({ error: "Identificador de revisão inválido." });
       return;
     }
-    const { overallJustification } = req.body || {};
+    const { overallJustification, expectedCandidateHash, expectedDecisionStateHash } = req.body || {};
     if (typeof overallJustification !== "string" || overallJustification.trim().length < 15) {
       res.status(400).json({ error: "A justificativa global do CEO é obrigatória (mínimo de 15 caracteres)." });
       return;
     }
+
+    const cleanExpCandHash = typeof expectedCandidateHash === "string" ? expectedCandidateHash.trim().toLowerCase() : "";
+    if (!cleanExpCandHash) {
+      res.status(400).json({ error: "O parâmetro 'expectedCandidateHash' é obrigatório." });
+      return;
+    }
+    if (!/^[a-f0-9]{64}$/i.test(cleanExpCandHash)) {
+      res.status(400).json({ error: "O formato de 'expectedCandidateHash' é inválido (deve ser SHA-256 hexadecimal com 64 caracteres)." });
+      return;
+    }
+
+    const cleanExpDecHash = typeof expectedDecisionStateHash === "string" ? expectedDecisionStateHash.trim().toLowerCase() : "";
+    if (!cleanExpDecHash) {
+      res.status(400).json({ error: "O parâmetro 'expectedDecisionStateHash' é obrigatório." });
+      return;
+    }
+    if (!/^[a-f0-9]{64}$/i.test(cleanExpDecHash)) {
+      res.status(400).json({ error: "O formato de 'expectedDecisionStateHash' é inválido (deve ser SHA-256 hexadecimal com 64 caracteres)." });
+      return;
+    }
+
     try {
       const review = await closeLegalReviewSupplementFlow(
         repo,
         req.params.reviewId,
-        { overallJustification },
+        {
+          overallJustification,
+          expectedCandidateHash: cleanExpCandHash,
+          expectedDecisionStateHash: cleanExpDecHash,
+        },
         req.athenaUser?.uid || "",
         req.athenaUser?.email || ""
       );

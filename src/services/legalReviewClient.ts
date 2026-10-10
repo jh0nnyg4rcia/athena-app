@@ -132,6 +132,8 @@ export function closeLegalReviewSupplement(
   reviewId: string,
   params: {
     overallJustification: string;
+    expectedCandidateHash: string;
+    expectedDecisionStateHash: string;
   }
 ): Promise<{ review: LegalReviewView }> {
   return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/close-supplement`, params, 60_000);

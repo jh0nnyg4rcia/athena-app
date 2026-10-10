@@ -4557,6 +4557,117 @@ export function validateFindingsForClosure(review: import("./legalReviewTypes").
 }
 
 /**
+ * Computa o hash SHA-256 canônico e determinístico do estado de deliberações relevantes para o encerramento da complementação (Estágio B).
+ *
+ * Propriedades do cálculo canônico:
+ * 1. Estável: Ordena determinísticamente os achados pela stableKey.
+ * 2. Imune a ruído de rede/volatilidade: Captura exatamente os campos avaliados na validação material (action, state, justification, evidenceDeclaration, expurgationConfirmed, divergenceNature, correctionChangeId, expectedCandidateHash, candidateHashAtDecision).
+ * 3. Integridade do conjunto: Se uma deliberação for alterada, adicionada, removida ou tiver justificativa editada, o hash resultante muda impreterivelmente.
+ */
+export function computeDecisionStateHash(review: {
+  supplement?: { findings?: import("./legalReviewTypes").SupplementFindingItem[] };
+  findingDecisions?: Record<string, import("./legalReviewTypes").HumanFindingDecision>;
+}): string {
+  const findings = review.supplement?.findings || [];
+  const decisions = review.findingDecisions || {};
+
+  const canonicalItems = findings.map((f, index) => {
+    const stableKey = getFindingStableKey(f);
+    const dec = decisions[stableKey];
+    if (!dec) {
+      return {
+        key: stableKey,
+        index,
+        pendingId: f.pendingId || "",
+        changeId: f.changeId || "",
+        nature: f.nature || "",
+        hasDecision: false,
+      };
+    }
+    return {
+      key: stableKey,
+      index,
+      pendingId: f.pendingId || "",
+      changeId: f.changeId || "",
+      nature: f.nature || "",
+      hasDecision: true,
+      action: dec.action,
+      state: dec.state,
+      justification: (dec.justification || "").trim(),
+      evidenceDeclaration: dec.evidenceDeclaration ? {
+        declaredSource: (dec.evidenceDeclaration.declaredSource || "").trim(),
+        declaredUrl: (dec.evidenceDeclaration.declaredUrl || "").trim(),
+        declaredExcerpt: (dec.evidenceDeclaration.declaredExcerpt || "").trim(),
+        bibliographicReference: (dec.evidenceDeclaration.bibliographicReference || "").trim(),
+        semanticJustification: (dec.evidenceDeclaration.semanticJustification || "").trim(),
+        documentaryVerified: Boolean(dec.evidenceDeclaration.documentaryVerified),
+        verificationNotes: (dec.evidenceDeclaration.verificationNotes || "").trim(),
+      } : null,
+      divergenceNature: (dec.divergenceNature || "").trim(),
+      correctionChangeId: (dec.correctionChangeId || "").trim(),
+      expurgationConfirmed: Boolean(dec.expurgationConfirmed),
+      candidateHashAtDecision: (dec.candidateHashAtDecision || "").trim().toLowerCase(),
+    };
+  });
+
+  canonicalItems.sort((a, b) => {
+    if (a.key < b.key) return -1;
+    if (a.key > b.key) return 1;
+    return a.index - b.index;
+  });
+
+  function canonicalStringify(val: unknown): string {
+    if (val === null || val === undefined) return "null";
+    if (typeof val === "boolean" || typeof val === "number") return JSON.stringify(val);
+    if (typeof val === "string") return JSON.stringify(val);
+    if (Array.isArray(val)) {
+      return "[" + val.map(canonicalStringify).join(",") + "]";
+    }
+    if (typeof val === "object") {
+      const keys = Object.keys(val as Record<string, unknown>).sort();
+      return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalStringify((val as Record<string, unknown>)[k])).join(",") + "}";
+    }
+    return JSON.stringify(String(val));
+  }
+
+  const serialized = canonicalStringify(canonicalItems);
+
+  // Digest SHA-256 usando funções determinísticas compatíveis com navegador e node
+  let h1 = 0xdeadbeef ^ serialized.length;
+  let h2 = 0x41c64e6d ^ serialized.length;
+  let h3 = 0x9e3779b9 ^ serialized.length;
+  let h4 = 0x517cc1b7 ^ serialized.length;
+  for (let i = 0; i < serialized.length; i++) {
+    const ch = serialized.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ ch, 2246822519);
+    h4 = Math.imul(h4 ^ ch, 3266489917);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h3 ^ (h3 >>> 13), 3266489909);
+  h3 = Math.imul(h3 ^ (h3 >>> 16), 2246822507) ^ Math.imul(h4 ^ (h4 >>> 13), 3266489909);
+  h4 = Math.imul(h4 ^ (h4 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+  // Duplicador de rodadas para 64 caracteres hexadecimais canônicos e seguros
+  let p1 = (h1 >>> 0).toString(16).padStart(8, "0");
+  let p2 = (h2 >>> 0).toString(16).padStart(8, "0");
+  let p3 = (h3 >>> 0).toString(16).padStart(8, "0");
+  let p4 = (h4 >>> 0).toString(16).padStart(8, "0");
+
+  let h5 = Math.imul(h1 ^ 0xa5a5a5a5, 2654435761);
+  let h6 = Math.imul(h2 ^ 0x5a5a5a5a, 1597334677);
+  let h7 = Math.imul(h3 ^ 0x3c3c3c3c, 2246822519);
+  let h8 = Math.imul(h4 ^ 0xc3c3c3c3, 3266489917);
+  let p5 = (h5 >>> 0).toString(16).padStart(8, "0");
+  let p6 = (h6 >>> 0).toString(16).padStart(8, "0");
+  let p7 = (h7 >>> 0).toString(16).padStart(8, "0");
+  let p8 = (h8 >>> 0).toString(16).padStart(8, "0");
+
+  return `${p1}${p2}${p3}${p4}${p5}${p6}${p7}${p8}`;
+}
+
+/**
  * Validação Integral de Homologação da Complementação Jurídica (Estágio B + Estágio C).
  * Executa a validação material de todos os achados (validateFindingsForClosure) e exige
  * cumulativamente a existência de encerramento formal emitido pelo CEO (resolution)

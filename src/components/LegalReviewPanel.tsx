@@ -38,6 +38,7 @@ import {
   safeHttpsUrl,
   validateFindingsForClosure,
   validateFindingsHomologation,
+  computeDecisionStateHash,
 } from "../lib/legalReviewValidate";
 
 type Phase = "confirm" | "running" | "notice" | "result" | "edit" | "error";
@@ -434,6 +435,8 @@ export function LegalReviewPanel({
   }) => Promise<void>;
   onCloseSupplement?: (params: {
     overallJustification: string;
+    expectedCandidateHash: string;
+    expectedDecisionStateHash: string;
   }) => Promise<void>;
   testMode?: boolean;
   sectionPreview?: boolean;
@@ -1579,7 +1582,13 @@ export function LegalReviewPanel({
                                     if (!onCloseSupplement) return;
                                     setIsClosingSupplement(true);
                                     try {
-                                      await onCloseSupplement({ overallJustification: closureJustification.trim() });
+                                      const expectedCandHash = (review?.candidateHash || "").trim().toLowerCase();
+                                      const expectedDecHash = (review?.decisionStateHash || (review ? computeDecisionStateHash(review) : "")).trim().toLowerCase();
+                                      await onCloseSupplement({
+                                        overallJustification: closureJustification.trim(),
+                                        expectedCandidateHash: expectedCandHash,
+                                        expectedDecisionStateHash: expectedDecHash,
+                                      });
                                       setClosureJustification("");
                                     } finally {
                                       setIsClosingSupplement(false);

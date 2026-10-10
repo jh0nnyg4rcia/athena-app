@@ -37,6 +37,7 @@ import {
   validateEditorialIntegrity,
   validateFindingsForClosure,
   validateFindingsHomologation,
+  computeDecisionStateHash,
 } from "../lib/legalReviewValidate";
 import {
   LegalReviewError,
@@ -1208,6 +1209,8 @@ export async function closeLegalReviewSupplementFlow(
   reviewId: string,
   params: {
     overallJustification: string;
+    expectedCandidateHash: string;
+    expectedDecisionStateHash: string;
   },
   uid: string,
   email: string,
@@ -1227,6 +1230,57 @@ export async function closeLegalReviewSupplementFlow(
   if (!current.supplement) {
     throw new LegalReviewError("Esta revisão não possui complementação jurídica para encerrar.", 404);
   }
+
+  // Proteção contra duplicidade de encerramento já realizado
+  if (current.supplement.resolution && current.supplement.resolution.status === "RESOLVIDO_PELO_CEO") {
+    if (current.supplement.resolution.candidateHashAtClosure === current.candidateHash) {
+      throw new LegalReviewError(
+        "A complementação jurídica já foi encerrada anteriormente pelo CEO para esta mesma versão do texto candidato.",
+        409
+      );
+    }
+  }
+
+  // Validação estrita de concorrência e integridade dos hashes (Etapa 15.1)
+  const expCandHash = (params.expectedCandidateHash || "").trim().toLowerCase();
+  const expDecHash = (params.expectedDecisionStateHash || "").trim().toLowerCase();
+
+  if (!expCandHash) {
+    throw new LegalReviewError("O hash esperado do candidato (expectedCandidateHash) é obrigatório.", 400);
+  }
+  if (!/^[a-f0-9]{64}$/i.test(expCandHash)) {
+    throw new LegalReviewError(
+      "O formato de expectedCandidateHash é inválido (deve ser SHA-256 hexadecimal com 64 caracteres).",
+      400
+    );
+  }
+
+  if (!expDecHash) {
+    throw new LegalReviewError("O hash esperado do estado de deliberações (expectedDecisionStateHash) é obrigatório.", 400);
+  }
+  if (!/^[a-f0-9]{64}$/i.test(expDecHash)) {
+    throw new LegalReviewError(
+      "O formato de expectedDecisionStateHash é inválido (deve ser SHA-256 hexadecimal com 64 caracteres).",
+      400
+    );
+  }
+
+  const currentCandidateHash = (current.candidateHash || "").trim().toLowerCase();
+  if (currentCandidateHash && expCandHash !== currentCandidateHash) {
+    throw new LegalReviewError(
+      "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato atual difere da versão visualizada. Recarregue a página antes de encerrar.",
+      409
+    );
+  }
+
+  const currentDecisionStateHash = computeDecisionStateHash(current).toLowerCase();
+  if (expDecHash !== currentDecisionStateHash) {
+    throw new LegalReviewError(
+      "O estado das deliberações individuais foi modificado desde o carregamento da página. As decisões registradas diferem da versão visualizada. Recarregue a página antes de encerrar.",
+      409
+    );
+  }
+
   const justification = (params.overallJustification || "").trim();
   if (justification.length < 15) {
     throw new LegalReviewError(
@@ -1254,13 +1308,38 @@ export async function closeLegalReviewSupplementFlow(
   };
 
   if (typeof repo.closeSupplementResolution === "function") {
-    const updated = await repo.closeSupplementResolution(reviewId, resolutionPayload, now);
+    const updated = await repo.closeSupplementResolution(
+      reviewId,
+      resolutionPayload,
+      now,
+      {
+        expectedCandidateHash: expCandHash,
+        expectedDecisionStateHash: expDecHash,
+      }
+    );
     return publicReview(updated);
+  }
+
+  const priorResolution = current.supplement.resolution;
+  const priorHistory = [...(priorResolution?.history || [])];
+  if (priorResolution && priorResolution.candidateHashAtClosure !== current.candidateHash) {
+    priorHistory.push({
+      status: priorResolution.status,
+      closedAt: priorResolution.closedAt,
+      closedByUid: priorResolution.closedByUid,
+      closedByEmail: priorResolution.closedByEmail,
+      overallJustification: priorResolution.overallJustification,
+      candidateHashAtClosure: priorResolution.candidateHashAtClosure,
+      totalFindingsResolved: priorResolution.totalFindingsResolved,
+    });
   }
 
   const updatedSupplement: import("../lib/legalReviewTypes").LegalReviewSupplement = {
     ...current.supplement,
-    resolution: resolutionPayload,
+    resolution: {
+      ...resolutionPayload,
+      history: priorHistory,
+    },
   };
   const updatedView: LegalReviewView = {
     ...current,
