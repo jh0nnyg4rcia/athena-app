@@ -1213,6 +1213,419 @@ export async function resolveHumanLegalReviewFinding(
   return publicReview(updatedView);
 }
 
+/**
+ * Criação transacional e atômica de alteração humana (CHG-H-xxx) pelo CEO vinculada a um achado autônomo (Etapa 20.2).
+ */
+export async function createHumanLegalReviewChangeFlow(
+  repo: LegalReviewRepository,
+  reviewId: string,
+  params: {
+    originFindingKey: string;
+    originalExcerpt: string;
+    revisedExcerpt: string;
+    justification: string;
+    category?: import("../lib/legalReviewTypes").LegalChangeCategory;
+    nature?: import("../lib/legalReviewTaxonomy").LegalClaimNature;
+    expectedCandidateHash: string;
+  },
+  uid: string,
+  email: string,
+  now = Date.now()
+): Promise<LegalReviewView> {
+  const flags = getLegalReviewOperationalFlags();
+  if (!flags.stageAEnabled) {
+    throw new LegalReviewError(LEGAL_REVIEW_STAGE_A_DISABLED_MESSAGE, 503);
+  }
+  if (!isCeoEmail(email)) {
+    throw new LegalReviewError("A criação de alterações textuais humanas exige a identidade autenticada do CEO.", 403);
+  }
+
+  const current = await repo.get(reviewId);
+  if (!current || current.status !== "pending_approval") {
+    throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+  }
+
+  // 1. Validação do Achado de Origem
+  const requestedKey = (params.originFindingKey || "").trim();
+  if (!requestedKey) {
+    throw new LegalReviewError("O identificador do achado de origem (originFindingKey) é obrigatório.", 400);
+  }
+  const findings = current.supplement?.findings || [];
+  const finding = findings.find((f) => getFindingStableKey(f) === requestedKey || f.pendingId === requestedKey || f.changeId === requestedKey);
+  if (!finding) {
+    throw new LegalReviewError(`O achado jurídico '${requestedKey}' não existe nesta revisão.`, 404);
+  }
+  const stableFindingKey = getFindingStableKey(finding);
+
+  // 2. Validação de Concorrência e Integridade de Hash
+  const expHash = (params.expectedCandidateHash || "").trim().toLowerCase();
+  if (!expHash || !/^[a-f0-9]{64}$/i.test(expHash)) {
+    throw new LegalReviewError("O hash esperado do candidato (expectedCandidateHash) é obrigatório e deve ser SHA-256 de 64 caracteres.", 400);
+  }
+  const currentHash = (current.candidateHash || "").trim().toLowerCase();
+  if (currentHash && expHash !== currentHash) {
+    throw new LegalReviewError(
+      "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato atual difere da versão visualizada. Recarregue a página antes de criar a alteração.",
+      409
+    );
+  }
+
+  // 3. Validação dos Textos
+  const originalExcerpt = (params.originalExcerpt || "").trim();
+  const revisedExcerpt = (params.revisedExcerpt || "").trim();
+  const justification = (params.justification || "").trim();
+
+  if (originalExcerpt.length < 5) {
+    throw new LegalReviewError("O trecho original a ser substituído deve conter pelo menos 5 caracteres.", 400);
+  }
+  if (!revisedExcerpt) {
+    throw new LegalReviewError("O texto substitutivo não pode ser vazio.", 400);
+  }
+  if (originalExcerpt === revisedExcerpt) {
+    throw new LegalReviewError("O texto substitutivo não pode ser idêntico ao trecho original.", 400);
+  }
+  if (justification.length < 10) {
+    throw new LegalReviewError("A justificativa editorial da alteração humana é obrigatória (mínimo de 10 caracteres).", 400);
+  }
+
+  // 4. Verificação de Ocorrência Única no reviewedMarkdown vigente
+  const currentMarkdown = current.reviewedMarkdown || "";
+  const firstIndex = currentMarkdown.indexOf(originalExcerpt);
+  if (firstIndex === -1) {
+    throw new LegalReviewError(
+      "O trecho original informado não foi encontrado no texto atual da aula. Verifique se o texto já foi editado.",
+      400
+    );
+  }
+  const secondIndex = currentMarkdown.indexOf(originalExcerpt, firstIndex + 1);
+  if (secondIndex !== -1) {
+    throw new LegalReviewError(
+      "O trecho original ocorre mais de uma vez no texto da aula. A substituição deve ser unívoca para evitar ambiguidades.",
+      400
+    );
+  }
+
+  // 5. Geração de ID Determinístico / Sequencial Único (CHG-H-001, CHG-H-002, ...)
+  const existingChanges = current.changes || [];
+  const humanIds = existingChanges
+    .map((c) => c.id)
+    .filter((id) => /^CHG-H-\d+$/i.test(id))
+    .map((id) => parseInt(id.replace(/^CHG-H-/i, ""), 10))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  const nextNum = humanIds.length > 0 ? Math.max(...humanIds) + 1 : 1;
+  const newId = `CHG-H-${String(nextNum).padStart(3, "0")}`;
+
+  if (existingChanges.some((c) => c.id === newId)) {
+    throw new LegalReviewError(`Colisão de identificadores: alteração '${newId}' já existe nesta revisão.`, 409);
+  }
+
+  // 6. Substituição Atômica no Markdown
+  const nextMarkdown = currentMarkdown.slice(0, firstIndex) + revisedExcerpt + currentMarkdown.slice(firstIndex + originalExcerpt.length);
+
+  // 7. Montagem do Objeto LegalReviewChange Humano
+  const humanChange: import("../lib/legalReviewTypes").LegalReviewChange = {
+    id: newId,
+    type: "CORRECAO",
+    severity: "ALTA",
+    category: params.category || "LEGISLACAO",
+    originalExcerpt,
+    revisedExcerpt,
+    reason: justification,
+    verified: true,
+    confirmation: "CONFIRMADO",
+    sources: finding.sources || [],
+    evidence: finding.evidence || [],
+    nature: params.nature || finding.nature,
+    outcome: "CONFIRMADA",
+    authorType: "HUMAN_CEO",
+    originFindingKey: stableFindingKey,
+    createdAt: now,
+    createdByEmail: email,
+  };
+
+  // 8. Persistência Transacional no Repositório
+  if (typeof repo.addHumanChange === "function") {
+    const updated = await repo.addHumanChange(reviewId, humanChange, nextMarkdown, now, expHash);
+    return publicReview(updated);
+  }
+
+  // Fallback in-memory para mocks / testes
+  const updatedChanges = [...existingChanges, humanChange];
+  const saved = await repo.saveCandidate(reviewId, nextMarkdown, now);
+  // Preservação append-only: o encerramento do Estágio B permanece preservado para auditoria.
+  // Sua eficácia é invalidada pelo descompasso de candidateHash.
+  const updatedSupplement = current.supplement ? {
+    ...current.supplement,
+  } : undefined;
+
+  saved.changes = updatedChanges;
+  saved.supplement = updatedSupplement;
+  return publicReview(saved);
+}
+
+/**
+ * Emissão transacional de Aditamento Histórico Imutável (ADD-xxx) pelo CEO (Etapa 20.3).
+ * Regulariza atos decisórios anteriores sem apagar, sobrescrever ou falsear registros históricos.
+ */
+export async function createLegalReviewAddendumFlow(
+  repo: LegalReviewRepository,
+  reviewId: string,
+  params: {
+    targetFindingKey: string;
+    reason: import("../lib/legalReviewTypes").LegalAddendumReason;
+    inconsistencyDescription: string;
+    rectifyingAct: {
+      action: import("../lib/legalReviewTypes").HumanFindingAction;
+      state: import("../lib/legalReviewTypes").HumanFindingResolutionState;
+      justification: string;
+      correctionChangeId?: string;
+      evidenceDeclaration?: import("../lib/legalReviewTypes").FindingEvidenceDeclaration;
+      divergenceNature?: string;
+      expurgationConfirmed?: boolean;
+    };
+    expectedCandidateHash: string;
+    expectedDecisionStateHash: string;
+  },
+  uid: string,
+  email: string,
+  now = Date.now()
+): Promise<LegalReviewView> {
+  const flags = getLegalReviewOperationalFlags();
+  if (!flags.stageAEnabled) {
+    throw new LegalReviewError(LEGAL_REVIEW_STAGE_A_DISABLED_MESSAGE, 503);
+  }
+  if (!isCeoEmail(email)) {
+    throw new LegalReviewError("A emissão de aditamentos históricos exige a identidade autenticada do CEO.", 403);
+  }
+
+  const current = await repo.get(reviewId);
+  if (!current || current.status !== "pending_approval") {
+    throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+  }
+
+  // 1. Validação do Achado Alvo
+  const requestedKey = (params.targetFindingKey || "").trim();
+  if (!requestedKey) {
+    throw new LegalReviewError("O identificador do achado alvo (targetFindingKey) é obrigatório.", 400);
+  }
+  const findings = current.supplement?.findings || [];
+  const finding = findings.find(
+    (f) => getFindingStableKey(f) === requestedKey || f.pendingId === requestedKey || f.changeId === requestedKey
+  );
+  if (!finding) {
+    throw new LegalReviewError(`O achado jurídico '${requestedKey}' não existe nesta revisão.`, 404);
+  }
+  const stableFindingKey = getFindingStableKey(finding);
+
+  // 2. Validação do Motivo e Descrição da Inconsistência
+  const validReasons: import("../lib/legalReviewTypes").LegalAddendumReason[] = [
+    "SANEAMENTO_VINCULO",
+    "RETIFICACAO_MATERIAL",
+    "ATUALIZACAO_JURISPRUDENCIAL",
+    "OUTRO",
+  ];
+  if (!validReasons.includes(params.reason)) {
+    throw new LegalReviewError(`O motivo do aditamento é inválido. Valores aceitos: ${validReasons.join(", ")}.`, 400);
+  }
+  const desc = (params.inconsistencyDescription || "").trim();
+  if (desc.length < 15) {
+    throw new LegalReviewError("A descrição da inconsistência sanada pelo aditamento é obrigatória (mínimo de 15 caracteres).", 400);
+  }
+
+  // 3. Validação Concorrencial Estrita dos Hashes (Etapa 15.1)
+  const expCandHash = (params.expectedCandidateHash || "").trim().toLowerCase();
+  const expDecHash = (params.expectedDecisionStateHash || "").trim().toLowerCase();
+  if (!expCandHash || !/^[a-f0-9]{64}$/i.test(expCandHash)) {
+    throw new LegalReviewError("O hash esperado do candidato (expectedCandidateHash) é obrigatório e deve ter 64 caracteres hexadecimais.", 400);
+  }
+  if (!expDecHash || !/^[a-f0-9]{64}$/i.test(expDecHash)) {
+    throw new LegalReviewError("O hash esperado do estado de deliberações (expectedDecisionStateHash) é obrigatório e deve ter 64 caracteres hexadecimais.", 400);
+  }
+
+  const currentCandHash = (current.candidateHash || "").trim().toLowerCase();
+  if (currentCandHash && expCandHash !== currentCandHash) {
+    throw new LegalReviewError(
+      "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato difere da versão visualizada. Recarregue a página antes de emitir o aditamento.",
+      409
+    );
+  }
+
+  const currentDecHash = computeDecisionStateHash(current).toLowerCase();
+  if (expDecHash !== currentDecHash) {
+    throw new LegalReviewError(
+      "O estado das deliberações individuais foi modificado desde o carregamento da página. Recarregue a página antes de emitir o aditamento.",
+      409
+    );
+  }
+
+  // 4. Validação do Ato Retificador
+  const rect = params.rectifyingAct;
+  if (!rect || typeof rect !== "object") {
+    throw new LegalReviewError("Os dados do ato retificador (rectifyingAct) são obrigatórios.", 400);
+  }
+  const just = (rect.justification || "").trim();
+  if (just.length < 10) {
+    throw new LegalReviewError("A fundamentação do ato retificador é obrigatória (mínimo de 10 caracteres).", 400);
+  }
+
+  if (rect.action === "APONTAR_CORRECAO" || rect.state === "CORRECAO_NECESSARIA") {
+    const cid = (rect.correctionChangeId || "").trim();
+    if (!cid) {
+      throw new LegalReviewError("O ato retificador de correção necessária exige a indicação de uma alteração vinculada (correctionChangeId).", 400);
+    }
+    const linkedChange = (current.changes || []).find((c) => c.id === cid);
+    if (!linkedChange) {
+      throw new LegalReviewError(`A alteração corretiva vinculada ('${cid}') não existe em review.changes desta revisão.`, 400);
+    }
+    if (!linkedChange.revisedExcerpt || !linkedChange.revisedExcerpt.trim()) {
+      throw new LegalReviewError(`A alteração vinculada ('${cid}') não possui texto substitutivo/corrigido definido.`, 400);
+    }
+    const currentMarkdown = current.reviewedMarkdown || "";
+    if (!currentMarkdown.includes(linkedChange.revisedExcerpt.trim())) {
+      throw new LegalReviewError(`O texto corrigido da alteração vinculada ('${cid}') não está incorporado ao texto final da aula.`, 400);
+    }
+  }
+
+  // 5. Verificação de Duplicidade e Geração de ID Sequencial
+  const existingAddenda = current.addenda || [];
+  const isDuplicate = existingAddenda.some(
+    (a) =>
+      a.targetFindingKey === stableFindingKey &&
+      a.rectifyingAct.state === rect.state &&
+      (a.rectifyingAct.correctionChangeId || "") === (rect.correctionChangeId || "") &&
+      a.rectifyingAct.justification === just &&
+      a.candidateHashAtAddendum === currentCandHash
+  );
+  if (isDuplicate) {
+    throw new LegalReviewError(`Já existe um aditamento idêntico registrado para o achado '${stableFindingKey}' nesta versão da aula.`, 409);
+  }
+
+  const addendaNums = existingAddenda
+    .map((a) => a.id)
+    .filter((id) => /^ADD-\d+$/i.test(id))
+    .map((id) => parseInt(id.replace(/^ADD-/i, ""), 10))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  const nextNum = addendaNums.length > 0 ? Math.max(...addendaNums) + 1 : 1;
+  const newAddendumId = `ADD-${String(nextNum).padStart(3, "0")}`;
+
+  // 6. Snapshot do Ato Decisório Anterior
+  const existingDec = (current.findingDecisions || {})[stableFindingKey];
+  const priorAct: import("../lib/legalReviewTypes").PriorActSummary = existingDec ? {
+    action: existingDec.action,
+    state: existingDec.state,
+    justification: existingDec.justification,
+    correctionChangeId: existingDec.correctionChangeId,
+    evidenceDeclaration: existingDec.evidenceDeclaration,
+    divergenceNature: existingDec.divergenceNature,
+    expurgationConfirmed: existingDec.expurgationConfirmed,
+    candidateHashAtDecision: existingDec.candidateHashAtDecision,
+    decidedAt: existingDec.decidedAt,
+    decidedByEmail: existingDec.decidedByEmail,
+  } : {
+    state: "PENDENTE",
+    justification: "Nenhuma deliberação anterior registrada.",
+  };
+
+  // 7. Construção do Objeto do Aditamento
+  const newAddendum: import("../lib/legalReviewTypes").LegalReviewAddendum = {
+    id: newAddendumId,
+    reviewId,
+    targetFindingKey: stableFindingKey,
+    linkedChangeId: rect.correctionChangeId,
+    reason: params.reason,
+    inconsistencyDescription: desc,
+    priorAct,
+    rectifyingAct: {
+      action: rect.action,
+      state: rect.state,
+      justification: just,
+      correctionChangeId: rect.correctionChangeId,
+      evidenceDeclaration: rect.evidenceDeclaration,
+      divergenceNature: rect.divergenceNature,
+      expurgationConfirmed: rect.expurgationConfirmed,
+      candidateHashAtDecision: currentCandHash,
+    },
+    candidateHashAtAddendum: currentCandHash,
+    decisionStateHashAtAddendum: currentDecHash,
+    createdAt: now,
+    createdByUid: uid,
+    createdByEmail: email,
+    authorType: "HUMAN_CEO",
+    immutable: true,
+  };
+
+  // 8. Construção da Decisão Retificada com Histórico Preservado
+  const priorHistory = existingDec ? [
+    ...(existingDec.history || []),
+    {
+      action: existingDec.action,
+      state: existingDec.state,
+      justification: existingDec.justification,
+      evidenceDeclaration: existingDec.evidenceDeclaration,
+      divergenceNature: existingDec.divergenceNature,
+      correctionChangeId: existingDec.correctionChangeId,
+      expurgationConfirmed: existingDec.expurgationConfirmed,
+      expectedCandidateHash: existingDec.expectedCandidateHash,
+      candidateHashAtDecision: existingDec.candidateHashAtDecision,
+      decidedAt: existingDec.decidedAt,
+      decidedByUid: existingDec.decidedByUid,
+      decidedByEmail: existingDec.decidedByEmail,
+    }
+  ] : [];
+
+  const rectifiedDecision: import("../lib/legalReviewTypes").HumanFindingDecision = {
+    findingKey: stableFindingKey,
+    findingPendingId: finding.pendingId || "",
+    findingChangeId: finding.changeId,
+    reviewId,
+    originalAiStatus: finding.status as any,
+    originalStatementAnalyzed: finding.statementAnalyzed,
+    action: rect.action,
+    state: rect.state,
+    justification: just,
+    evidenceDeclaration: rect.evidenceDeclaration,
+    divergenceNature: rect.divergenceNature,
+    correctionChangeId: rect.correctionChangeId,
+    expurgationConfirmed: rect.expurgationConfirmed,
+    expectedCandidateHash: expCandHash,
+    candidateHashAtDecision: currentCandHash,
+    decidedAt: now,
+    decidedByUid: uid,
+    decidedByEmail: email,
+    history: priorHistory,
+    addendumId: newAddendumId,
+    rectifiedByAddendum: true,
+  };
+
+  // 9. Persistência Transacional no Repositório
+  if (typeof repo.addAddendum === "function") {
+    const updated = await repo.addAddendum(
+      reviewId,
+      newAddendum,
+      rectifiedDecision,
+      now,
+      {
+        expectedCandidateHash: expCandHash,
+        expectedDecisionStateHash: expDecHash,
+      }
+    );
+    return publicReview(updated);
+  }
+
+  // Fallback in-memory para mocks / testes
+  const updatedAddenda = [...existingAddenda, newAddendum];
+  const updatedFindingDecisions = {
+    ...(current.findingDecisions || {}),
+    [stableFindingKey]: rectifiedDecision,
+  };
+  const updatedView: LegalReviewView = {
+    ...current,
+    addenda: updatedAddenda,
+    findingDecisions: updatedFindingDecisions,
+  };
+  return publicReview(updatedView);
+}
+
 export async function closeLegalReviewSupplementFlow(
   repo: LegalReviewRepository,
   reviewId: string,
@@ -1240,11 +1653,18 @@ export async function closeLegalReviewSupplementFlow(
     throw new LegalReviewError("Esta revisão não possui complementação jurídica para encerrar.", 404);
   }
 
+  const currentCandidateHash = (current.candidateHash || "").trim().toLowerCase();
+  const currentDecisionStateHash = computeDecisionStateHash(current).toLowerCase();
+
   // Proteção contra duplicidade de encerramento já realizado
   if (current.supplement.resolution && current.supplement.resolution.status === "RESOLVIDO_PELO_CEO") {
-    if (current.supplement.resolution.candidateHashAtClosure === current.candidateHash) {
+    const res = current.supplement.resolution;
+    const sameCandidate = res.candidateHashAtClosure === current.candidateHash;
+    const sameDecisions = Boolean(res.decisionStateHashAtClosure && res.decisionStateHashAtClosure === currentDecisionStateHash);
+    const noNewAddenda = !(current.addenda && current.addenda.some((a) => a.createdAt > res.closedAt));
+    if (sameCandidate && sameDecisions && noNewAddenda) {
       throw new LegalReviewError(
-        "A complementação jurídica já foi encerrada anteriormente pelo CEO para esta mesma versão do texto candidato.",
+        "A complementação jurídica já foi encerrada anteriormente pelo CEO para esta mesma versão do texto candidato e deliberações.",
         409
       );
     }
@@ -1274,7 +1694,6 @@ export async function closeLegalReviewSupplementFlow(
     );
   }
 
-  const currentCandidateHash = (current.candidateHash || "").trim().toLowerCase();
   if (currentCandidateHash && expCandHash !== currentCandidateHash) {
     throw new LegalReviewError(
       "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato atual difere da versão visualizada. Recarregue a página antes de encerrar.",
@@ -1282,7 +1701,6 @@ export async function closeLegalReviewSupplementFlow(
     );
   }
 
-  const currentDecisionStateHash = computeDecisionStateHash(current).toLowerCase();
   if (expDecHash !== currentDecisionStateHash) {
     throw new LegalReviewError(
       "O estado das deliberações individuais foi modificado desde o carregamento da página. As decisões registradas diferem da versão visualizada. Recarregue a página antes de encerrar.",
@@ -1313,6 +1731,7 @@ export async function closeLegalReviewSupplementFlow(
     closedByEmail: email,
     overallJustification: justification,
     candidateHashAtClosure: current.candidateHash,
+    decisionStateHashAtClosure: currentDecisionStateHash,
     totalFindingsResolved: (current.supplement.findings || []).length,
   };
 
@@ -1331,7 +1750,11 @@ export async function closeLegalReviewSupplementFlow(
 
   const priorResolution = current.supplement.resolution;
   const priorHistory = [...(priorResolution?.history || [])];
-  if (priorResolution && priorResolution.candidateHashAtClosure !== current.candidateHash) {
+  if (priorResolution && (
+    priorResolution.candidateHashAtClosure !== current.candidateHash ||
+    priorResolution.decisionStateHashAtClosure !== currentDecisionStateHash ||
+    (current.addenda && current.addenda.some((a) => a.createdAt > priorResolution.closedAt))
+  )) {
     priorHistory.push({
       status: priorResolution.status,
       closedAt: priorResolution.closedAt,
@@ -1339,6 +1762,7 @@ export async function closeLegalReviewSupplementFlow(
       closedByEmail: priorResolution.closedByEmail,
       overallJustification: priorResolution.overallJustification,
       candidateHashAtClosure: priorResolution.candidateHashAtClosure,
+      decisionStateHashAtClosure: priorResolution.decisionStateHashAtClosure,
       totalFindingsResolved: priorResolution.totalFindingsResolved,
     });
   }

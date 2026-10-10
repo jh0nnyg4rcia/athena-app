@@ -170,6 +170,7 @@ function createMockRepo(initialReview: LegalReviewView, catalogLessonContent = "
         resolution: {
           ...resolution,
           candidateHashAtClosure: stored.candidateHash,
+          decisionStateHashAtClosure: computeDecisionStateHash(stored),
           closedAt: now,
         },
       };

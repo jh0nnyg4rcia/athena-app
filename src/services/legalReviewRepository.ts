@@ -103,6 +103,23 @@ export interface LegalReviewRepository {
     findingDecision: import("../lib/legalReviewTypes").HumanFindingDecision,
     now: number
   ): Promise<LegalReviewView>;
+  addHumanChange?(
+    reviewId: string,
+    humanChange: import("../lib/legalReviewTypes").LegalReviewChange,
+    nextMarkdown: string,
+    now: number,
+    expectedCandidateHash: string
+  ): Promise<LegalReviewView>;
+  addAddendum?(
+    reviewId: string,
+    addendum: import("../lib/legalReviewTypes").LegalReviewAddendum,
+    rectifiedDecision: import("../lib/legalReviewTypes").HumanFindingDecision,
+    now: number,
+    expectedHashes: {
+      expectedCandidateHash: string;
+      expectedDecisionStateHash: string;
+    }
+  ): Promise<LegalReviewView>;
   closeSupplementResolution?(
     reviewId: string,
     resolution: import("../lib/legalReviewTypes").SupplementHumanResolution,
@@ -226,5 +243,6 @@ export function publicReview(review: LegalReviewView): LegalReviewView {
     findingDecisions: review.findingDecisions || {},
     decisionStateHash: computeDecisionStateHash(review),
     supplement: review.supplement,
+    addenda: review.addenda || [],
   };
 }

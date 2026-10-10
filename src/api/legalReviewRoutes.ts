@@ -11,6 +11,8 @@ import {
   resolveHumanCoordinatedQuestion,
   resolveHumanLegalReviewChange,
   resolveHumanLegalReviewFinding,
+  createHumanLegalReviewChangeFlow,
+  createLegalReviewAddendumFlow,
   closeLegalReviewSupplementFlow,
   saveLegalReviewCandidate,
   startLegalReview,
@@ -423,6 +425,124 @@ export function registerLegalReviewRoutes(
           correctionChangeId,
           expurgationConfirmed: expurgationConfirmed === true,
           expectedCandidateHash: cleanExpectedHash,
+        },
+        req.athenaUser?.uid || "",
+        req.athenaUser?.email || ""
+      );
+      res.json({ review });
+    } catch (error) {
+      sendReviewError(res, error);
+    }
+  });
+
+  app.post("/api/legal-review/:reviewId/human-change", rateLimit(30, 60 * 60_000), requireCeo, async (req, res) => {
+    const flags = getLegalReviewOperationalFlags();
+    if (!flags.stageAEnabled) {
+      res.status(503).json({ error: LEGAL_REVIEW_STAGE_A_DISABLED_MESSAGE });
+      return;
+    }
+    if (!isReviewId(req.params.reviewId)) {
+      res.status(400).json({ error: "Identificador de revisão inválido." });
+      return;
+    }
+    const { originFindingKey, originalExcerpt, revisedExcerpt, justification, category, nature, expectedCandidateHash } = req.body || {};
+    if (!originFindingKey || typeof originFindingKey !== "string") {
+      res.status(400).json({ error: "O parâmetro 'originFindingKey' é obrigatório." });
+      return;
+    }
+    if (!originalExcerpt || typeof originalExcerpt !== "string") {
+      res.status(400).json({ error: "O parâmetro 'originalExcerpt' é obrigatório." });
+      return;
+    }
+    if (!revisedExcerpt || typeof revisedExcerpt !== "string") {
+      res.status(400).json({ error: "O parâmetro 'revisedExcerpt' é obrigatório." });
+      return;
+    }
+    if (!justification || typeof justification !== "string") {
+      res.status(400).json({ error: "O parâmetro 'justification' é obrigatório." });
+      return;
+    }
+    const cleanExpectedHash = typeof expectedCandidateHash === "string" ? expectedCandidateHash.trim().toLowerCase() : "";
+    if (!cleanExpectedHash || !/^[a-f0-9]{64}$/i.test(cleanExpectedHash)) {
+      res.status(400).json({ error: "O parâmetro 'expectedCandidateHash' é obrigatório e deve ter 64 caracteres hexadecimais." });
+      return;
+    }
+    try {
+      const review = await createHumanLegalReviewChangeFlow(
+        repo,
+        req.params.reviewId,
+        {
+          originFindingKey: originFindingKey.trim(),
+          originalExcerpt: originalExcerpt.trim(),
+          revisedExcerpt: revisedExcerpt.trim(),
+          justification: justification.trim(),
+          category,
+          nature,
+          expectedCandidateHash: cleanExpectedHash,
+        },
+        req.athenaUser?.uid || "",
+        req.athenaUser?.email || ""
+      );
+      res.json({ review });
+    } catch (error) {
+      sendReviewError(res, error);
+    }
+  });
+
+  app.post("/api/legal-review/:reviewId/addenda", rateLimit(30, 60 * 60_000), requireCeo, async (req, res) => {
+    const flags = getLegalReviewOperationalFlags();
+    if (!flags.stageAEnabled) {
+      res.status(503).json({ error: LEGAL_REVIEW_STAGE_A_DISABLED_MESSAGE });
+      return;
+    }
+    if (!isReviewId(req.params.reviewId)) {
+      res.status(400).json({ error: "Identificador de revisão inválido." });
+      return;
+    }
+    const { targetFindingKey, reason, inconsistencyDescription, rectifyingAct, expectedCandidateHash, expectedDecisionStateHash } = req.body || {};
+    if (!targetFindingKey || typeof targetFindingKey !== "string") {
+      res.status(400).json({ error: "O parâmetro 'targetFindingKey' é obrigatório." });
+      return;
+    }
+    const VALID_ADDENDUM_REASONS = [
+      "SANEAMENTO_VINCULO",
+      "RETIFICACAO_MATERIAL",
+      "ATUALIZACAO_JURISPRUDENCIAL",
+      "OUTRO",
+    ];
+    if (!reason || typeof reason !== "string" || !VALID_ADDENDUM_REASONS.includes(reason)) {
+      res.status(400).json({ error: "O parâmetro 'reason' é obrigatório e deve ser um motivo válido de aditamento." });
+      return;
+    }
+    if (!inconsistencyDescription || typeof inconsistencyDescription !== "string") {
+      res.status(400).json({ error: "O parâmetro 'inconsistencyDescription' é obrigatório." });
+      return;
+    }
+    if (!rectifyingAct || typeof rectifyingAct !== "object") {
+      res.status(400).json({ error: "O parâmetro 'rectifyingAct' é obrigatório." });
+      return;
+    }
+    const cleanCandHash = typeof expectedCandidateHash === "string" ? expectedCandidateHash.trim().toLowerCase() : "";
+    if (!cleanCandHash || !/^[a-f0-9]{64}$/i.test(cleanCandHash)) {
+      res.status(400).json({ error: "O parâmetro 'expectedCandidateHash' é obrigatório e deve ter 64 caracteres hexadecimais." });
+      return;
+    }
+    const cleanDecHash = typeof expectedDecisionStateHash === "string" ? expectedDecisionStateHash.trim().toLowerCase() : "";
+    if (!cleanDecHash || !/^[a-f0-9]{64}$/i.test(cleanDecHash)) {
+      res.status(400).json({ error: "O parâmetro 'expectedDecisionStateHash' é obrigatório e deve ter 64 caracteres hexadecimais." });
+      return;
+    }
+    try {
+      const review = await createLegalReviewAddendumFlow(
+        repo,
+        req.params.reviewId,
+        {
+          targetFindingKey: targetFindingKey.trim(),
+          reason: reason as import("../lib/legalReviewTypes").LegalAddendumReason,
+          inconsistencyDescription: inconsistencyDescription.trim(),
+          rectifyingAct,
+          expectedCandidateHash: cleanCandHash,
+          expectedDecisionStateHash: cleanDecHash,
         },
         req.athenaUser?.uid || "",
         req.athenaUser?.email || ""

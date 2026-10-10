@@ -4434,7 +4434,7 @@ export function validateFindingsForClosure(review: import("./legalReviewTypes").
 
     if (!dec) {
       failureReasons.push(
-        `Achado '${stableKey}' (${f.statementAnalyzed.slice(0, 40)}...) não possui deliberação registrada pelo CEO.`
+        `Achado '${stableKey}' (${(f.statementAnalyzed || f.pendingId || "").slice(0, 40)}...) não possui deliberação registrada pelo CEO.`
       );
       continue;
     }
@@ -4708,6 +4708,21 @@ export function validateFindingsHomologation(review: import("./legalReviewTypes"
     if (resolution.candidateHashAtClosure !== review.candidateHash) {
       failureReasons.push(
         `O encerramento da complementação foi invalidado porque o texto da aula foi editado após o ato do CEO (Hash no encerramento: ${resolution.candidateHashAtClosure}, Hash atual: ${review.candidateHash}). É necessário reavaliar e encerrar novamente a complementação.`
+      );
+    }
+    // REGRA DE INVALIDAÇÃO POR ADITAMENTO OU MODIFICAÇÃO DE DECISÕES:
+    const currentDecHash = computeDecisionStateHash(review);
+    if (!resolution.decisionStateHashAtClosure) {
+      failureReasons.push(
+        "O encerramento histórico da complementação é legado e não possui hash de integridade das decisões (decisionStateHashAtClosure ausente). Por segurança fail-closed, é necessário reavaliar e lavrar novo encerramento formal pelo CEO."
+      );
+    } else if (resolution.decisionStateHashAtClosure !== currentDecHash) {
+      failureReasons.push(
+        `O encerramento da complementação foi invalidado porque as deliberações individuais foram retificadas por aditamento ou modificadas após o ato do CEO (Hash de deliberações no encerramento: ${resolution.decisionStateHashAtClosure}, Hash atual: ${currentDecHash}). É necessário reavaliar e encerrar novamente a complementação.`
+      );
+    } else if (review.addenda && review.addenda.some((a) => a.createdAt > resolution.closedAt)) {
+      failureReasons.push(
+        "O encerramento da complementação foi invalidado pela emissão superveniente de aditamento histórico (ADD). É necessário reavaliar e encerrar novamente a complementação."
       );
     }
     if ((resolution.overallJustification || "").trim().length < 15) {

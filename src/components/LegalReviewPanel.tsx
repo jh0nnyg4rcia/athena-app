@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronUp, Clock, Database, Edit3, ExternalLink, Layers, Lock, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronUp, Clock, Database, Edit3, ExternalLink, FileText, Layers, Lock, Search, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { diffLines } from "../lib/legalReviewDiff";
 import type {
@@ -10,6 +10,8 @@ import type {
   HumanFindingAction,
   HumanFindingDecision,
   FindingEvidenceDeclaration,
+  LegalAddendumReason,
+  LegalReviewAddendum,
   LegalReviewChange,
   LegalReviewEvidence,
   LegalReviewView,
@@ -378,6 +380,8 @@ export function LegalReviewPanel({
   onResolveQuestion,
   onResolveFinding,
   onCloseSupplement,
+  onCreateHumanChange,
+  onCreateAddendum,
   testMode = false,
   sectionPreview = false,
   testDraft = "",
@@ -438,6 +442,31 @@ export function LegalReviewPanel({
     expectedCandidateHash: string;
     expectedDecisionStateHash: string;
   }) => Promise<void>;
+  onCreateHumanChange?: (params: {
+    originFindingKey: string;
+    originalExcerpt: string;
+    revisedExcerpt: string;
+    justification: string;
+    category?: import("../lib/legalReviewTypes").LegalChangeCategory;
+    nature?: import("../lib/legalReviewTaxonomy").LegalClaimNature;
+    expectedCandidateHash: string;
+  }) => Promise<void>;
+  onCreateAddendum?: (params: {
+    targetFindingKey: string;
+    reason: LegalAddendumReason;
+    inconsistencyDescription: string;
+    rectifyingAct: {
+      action: HumanFindingAction;
+      state: import("../lib/legalReviewTypes").HumanFindingResolutionState;
+      justification: string;
+      correctionChangeId?: string;
+      evidenceDeclaration?: FindingEvidenceDeclaration;
+      divergenceNature?: string;
+      expurgationConfirmed?: boolean;
+    };
+    expectedCandidateHash: string;
+    expectedDecisionStateHash: string;
+  }) => Promise<void>;
   testMode?: boolean;
   sectionPreview?: boolean;
   testDraft?: string;
@@ -486,6 +515,26 @@ export function LegalReviewPanel({
   const [findingFormError, setFindingFormError] = useState<string | null>(null);
   const [findingSuccessMessage, setFindingSuccessMessage] = useState<string | null>(null);
   const [submittingFindingKey, setSubmittingFindingKey] = useState<string | null>(null);
+
+  // Estados locais para Criação de Correção Humana (Etapa 20.2)
+  const [creatingHumanChangeFindingKey, setCreatingHumanChangeFindingKey] = useState<string | null>(null);
+  const [humanChangeOriginalExcerpt, setHumanChangeOriginalExcerpt] = useState("");
+  const [humanChangeRevisedExcerpt, setHumanChangeRevisedExcerpt] = useState("");
+  const [humanChangeJustification, setHumanChangeJustification] = useState("");
+  const [humanChangeError, setHumanChangeError] = useState<string | null>(null);
+  const [isSubmittingHumanChange, setIsSubmittingHumanChange] = useState(false);
+
+  // Estados locais para Aditamentos Históricos (ADD-xxx - Etapa 20.3)
+  const [addendumFindingKey, setAddendumFindingKey] = useState<string | null>(null);
+  const [addendumReason, setAddendumReason] = useState<LegalAddendumReason>("SANEAMENTO_VINCULO");
+  const [addendumInconsistencyDescription, setAddendumInconsistencyDescription] = useState("");
+  const [addendumAction, setAddendumAction] = useState<HumanFindingAction>("APONTAR_CORRECAO");
+  const [addendumJustification, setAddendumJustification] = useState("");
+  const [addendumCorrectionChangeId, setAddendumCorrectionChangeId] = useState("");
+  const [addendumConfirmedExplicit, setAddendumConfirmedExplicit] = useState(false);
+  const [addendumError, setAddendumError] = useState<string | null>(null);
+  const [isSubmittingAddendum, setIsSubmittingAddendum] = useState(false);
+  const [showAddendaList, setShowAddendaList] = useState(true);
 
 
   useEffect(() => {
@@ -1131,6 +1180,64 @@ export function LegalReviewPanel({
                         </p>
                       </div>
                     )}
+
+                    {/* Seção de Aditamentos Históricos Imutáveis (Etapa 20.3) */}
+                    {review.addenda && review.addenda.length > 0 && (
+                      <div className="rounded-xl border border-violet-500/30 bg-violet-950/20 p-3.5 space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-violet-300 flex items-center gap-1.5">
+                              <FileText size={14} />
+                              Aditamentos Históricos Emitidos ({review.addenda.length})
+                            </span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                              Imutáveis (ADD-xxx)
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowAddendaList(!showAddendaList)}
+                            className="text-slate-400 hover:text-slate-200 text-[11px] flex items-center gap-1"
+                          >
+                            {showAddendaList ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            {showAddendaList ? "Ocultar" : "Expandir"}
+                          </button>
+                        </div>
+                        {showAddendaList && (
+                          <div className="space-y-2 pt-1">
+                            {review.addenda.map((add, aIdx) => (
+                              <div key={add.id || aIdx} className="rounded-lg border border-violet-500/20 bg-slate-900/90 p-2.5 space-y-1.5 text-[11px]">
+                                <div className="flex flex-wrap items-center justify-between gap-1 text-slate-300">
+                                  <span className="font-mono font-bold text-violet-300">{add.id}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">Achado: {add.targetFindingKey}</span>
+                                  <span className="text-[10px] text-slate-400">
+                                    {new Date(add.createdAt).toLocaleString("pt-BR")} por {add.createdByEmail}
+                                  </span>
+                                </div>
+                                <div className="text-slate-300">
+                                  <strong className="text-slate-400">Motivo:</strong> {add.reason} — <span className="italic">{add.inconsistencyDescription}</span>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1 border-t border-white/5 text-[10px]">
+                                  <div className="bg-slate-950/60 p-2 rounded border border-white/5 space-y-0.5">
+                                    <span className="font-bold text-slate-400 block">Ato Anterior (Preservado):</span>
+                                    <div>Estado: <span className="text-slate-300">{add.priorAct.state || "PENDENTE"}</span></div>
+                                    {add.priorAct.correctionChangeId && <div>Vínculo: <span className="font-mono text-amber-300">{add.priorAct.correctionChangeId}</span></div>}
+                                    <div className="text-slate-400 italic truncate">"{add.priorAct.justification}"</div>
+                                  </div>
+                                  <div className="bg-violet-950/30 p-2 rounded border border-violet-500/20 space-y-0.5">
+                                    <span className="font-bold text-violet-300 block">Ato Retificador:</span>
+                                    <div>Estado: <span className="text-violet-200">{add.rectifyingAct.state}</span></div>
+                                    {add.rectifyingAct.correctionChangeId && <div>Novo Vínculo: <span className="font-mono text-emerald-300">{add.rectifyingAct.correctionChangeId}</span></div>}
+                                    <div className="text-violet-200 italic truncate">"{add.rectifyingAct.justification}"</div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="space-y-3">
                       {review.supplement.findings.map((f, idx) => {
                         const stableKey = getFindingStableKey(f);
@@ -1183,6 +1290,12 @@ export function LegalReviewPanel({
                                 ) : (
                                   <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800/80 text-slate-400 border border-white/5">
                                     CEO: Aguardando Deliberação
+                                  </span>
+                                )}
+
+                                {humanDecision?.addendumId && (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-500/20 text-violet-300 border border-violet-500/30" title={`Retificado por ${humanDecision.addendumId}`}>
+                                    Aditado ({humanDecision.addendumId})
                                   </span>
                                 )}
                               </div>
@@ -1309,6 +1422,26 @@ export function LegalReviewPanel({
                                   <Edit3 size={12} />
                                   {humanDecision ? "Reavaliar Deliberação" : "Deliberar sobre Achado"}
                                 </button>
+                                {humanDecision && onCreateAddendum && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAddendumFindingKey(stableKey);
+                                      setAddendumReason("SANEAMENTO_VINCULO");
+                                      setAddendumInconsistencyDescription("");
+                                      setAddendumAction(humanDecision.action || "APONTAR_CORRECAO");
+                                      setAddendumJustification("");
+                                      setAddendumCorrectionChangeId(humanDecision.correctionChangeId || "");
+                                      setAddendumConfirmedExplicit(false);
+                                      setAddendumError(null);
+                                    }}
+                                    disabled={busy}
+                                    className="px-3 py-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                                  >
+                                    <FileText size={12} />
+                                    Aditar Decisão (ADD)
+                                  </button>
+                                )}
                               </div>
                             ) : (
                               /* Formulário Inline de Deliberação do CEO */
@@ -1516,7 +1649,7 @@ export function LegalReviewPanel({
                                           )}
                                         </div>
                                       ) : (
-                                        <div className="p-2 rounded-lg bg-slate-900/60 border border-white/10 text-slate-300 text-[11px] space-y-1">
+                                        <div className="p-2.5 rounded-lg bg-slate-900/60 border border-white/10 text-slate-300 text-[11px] space-y-2">
                                           <p className="text-amber-300 font-medium flex items-center gap-1">
                                             <span>ℹ️</span>
                                             <span>
@@ -1526,8 +1659,26 @@ export function LegalReviewPanel({
                                             </span>
                                           </p>
                                           <p className="text-slate-400 leading-relaxed">
-                                            Não presuma que qualquer alteração disponível corrija este achado. Se nenhuma das alterações existentes sanar o problema, não selecione uma alteração não relacionada: utilize a aba <strong>"Editar Aula"</strong> para redigir o ajuste textual necessário.
+                                            Não presuma que qualquer alteração disponível corrija este achado autônomo. Se nenhuma das alterações existentes sanar o problema, não selecione uma alteração alheia: crie uma alteração humana vinculada diretamente a este achado.
                                           </p>
+                                          {onCreateHumanChange && (
+                                            <div className="pt-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setCreatingHumanChangeFindingKey(stableKey);
+                                                  setHumanChangeOriginalExcerpt("");
+                                                  setHumanChangeRevisedExcerpt("");
+                                                  setHumanChangeJustification("");
+                                                  setHumanChangeError(null);
+                                                }}
+                                                className="px-3 py-1.5 rounded-lg bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/50 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                                              >
+                                                <Edit3 size={12} />
+                                                Criar Correção Textual Humana (CHG-H-xxx)
+                                              </button>
+                                            </div>
+                                          )}
                                         </div>
                                       )}
                                     </div>
@@ -1672,6 +1823,221 @@ export function LegalReviewPanel({
                                 </div>
                               </div>
                             )}
+
+                            {/* Formulário Inline de Aditamento Histórico do CEO (Etapa 20.3) */}
+                            {addendumFindingKey === stableKey && humanDecision && (
+                              <div className="rounded-xl border border-purple-500/50 bg-slate-950 p-4 space-y-3 mt-3 shadow-lg">
+                                <div className="flex items-center justify-between border-b border-purple-500/30 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <FileText size={14} className="text-purple-400" />
+                                    <h6 className="font-bold text-purple-200 text-xs uppercase tracking-wide">
+                                      Aditamento Histórico Imutável (ADD) — {stableKey}
+                                    </h6>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setAddendumFindingKey(null)}
+                                    className="text-slate-400 hover:text-slate-200"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+
+                                <div className="p-2.5 rounded bg-purple-950/30 border border-purple-500/20 text-purple-200 text-xs">
+                                  <p className="font-semibold text-purple-100 mb-1">
+                                    Ato Histórico Anterior Preservado:
+                                  </p>
+                                  <div className="grid grid-cols-2 gap-2 text-[11px] text-purple-300">
+                                    <div><strong>Ação anterior:</strong> {humanDecision.action}</div>
+                                    <div><strong>Data:</strong> {humanDecision.decidedAt || "N/A"}</div>
+                                    <div><strong>Vínculo anterior:</strong> {humanDecision.correctionChangeId || "Nenhum"}</div>
+                                    <div><strong>Hash:</strong> <span className="font-mono">{humanDecision.candidateHashAtDecision?.slice(0, 8) || "N/A"}...</span></div>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <label className="text-[11px] font-bold text-slate-300">Motivo Formal do Aditamento:</label>
+                                  <select
+                                    value={addendumReason}
+                                    onChange={(e) => setAddendumReason(e.target.value as LegalAddendumReason)}
+                                    className="w-full bg-slate-900 border border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                                  >
+                                    <option value="SANEAMENTO_VINCULO">SANEAMENTO_VINCULO (Correção de vínculo inexistente ou impreciso)</option>
+                                    <option value="RETIFICACAO_MATERIAL">RETIFICACAO_MATERIAL (Retificação de erro material na fundamentação ou qualificação)</option>
+                                    <option value="ATUALIZACAO_JURISPRUDENCIAL">ATUALIZACAO_JURISPRUDENCIAL (Atualização superveniente ou alteração de contexto)</option>
+                                    <option value="OUTRO">OUTRO (Hipótese justificada pelo CEO)</option>
+                                  </select>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <label className="text-[11px] font-bold text-slate-300">
+                                    Descrição da Inconsistência do Ato Anterior (mínimo 15 caracteres):
+                                  </label>
+                                  <textarea
+                                    value={addendumInconsistencyDescription}
+                                    onChange={(e) => setAddendumInconsistencyDescription(e.target.value)}
+                                    placeholder="Descreva minuciosamente a divergência ou vício material do ato original que motiva este aditamento..."
+                                    rows={2}
+                                    className="w-full bg-slate-900 border border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                                  />
+                                </div>
+
+                                <div className="border-t border-purple-500/20 pt-2 space-y-2">
+                                  <h6 className="text-[11px] font-bold text-purple-300 uppercase tracking-wider">
+                                    Conteúdo do Ato Retificador (Vigente a partir deste Aditamento)
+                                  </h6>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[11px] font-bold text-slate-300">Nova Ação Retificadora:</label>
+                                    <select
+                                      value={addendumAction}
+                                      onChange={(e) => setAddendumAction(e.target.value as HumanFindingAction)}
+                                      className="w-full bg-slate-900 border border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                                    >
+                                      <option value="APONTAR_CORRECAO">APONTAR_CORRECAO — Vincular a alteração textual real e incorporada</option>
+                                      <option value="CONFIRMAR">CONFIRMAR — Considerar achado formalmente verificado e regular</option>
+                                      <option value="DECLARAR_NAO_COMPROVADO">DECLARAR_NAO_COMPROVADO — Afirmação expurgada do texto</option>
+                                      <option value="REGISTRAR_DIVERGENCIA">REGISTRAR_DIVERGENCIA — Resguardar corrente doutrinária</option>
+                                      <option value="MANTER_PENDENTE">MANTER_PENDENTE — Deixar pendente de resolução</option>
+                                    </select>
+                                  </div>
+
+                                  {addendumAction === "APONTAR_CORRECAO" && (
+                                    <div className="space-y-1">
+                                      <label className="text-[11px] font-bold text-amber-300">
+                                        Alteração Textual Real Vinculada:
+                                      </label>
+                                      <select
+                                        value={addendumCorrectionChangeId}
+                                        onChange={(e) => setAddendumCorrectionChangeId(e.target.value)}
+                                        className="w-full bg-slate-900 border border-amber-500/40 rounded-lg px-2.5 py-1.5 text-xs text-amber-200"
+                                      >
+                                        <option value="">-- Selecione uma alteração real existente --</option>
+                                        {review?.changes?.map((ch) => (
+                                          <option key={ch.id} value={ch.id}>
+                                            {ch.id} — [{ch.type}] ({ch.originalExcerpt?.slice(0, 30)}... ➔ {ch.revisedExcerpt?.slice(0, 30)}...)
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+
+                                  <div className="space-y-1">
+                                    <label className="text-[11px] font-bold text-slate-300">
+                                      Justificativa do Ato Retificador (mínimo 10 caracteres):
+                                    </label>
+                                    <textarea
+                                      value={addendumJustification}
+                                      onChange={(e) => setAddendumJustification(e.target.value)}
+                                      placeholder="Explicite as razões jurídicas do ato retificador..."
+                                      rows={2}
+                                      className="w-full bg-slate-900 border border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="p-2.5 rounded bg-slate-900/80 border border-purple-500/30 space-y-2">
+                                  <label className="flex items-start gap-2 text-xs text-slate-300 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={addendumConfirmedExplicit}
+                                      onChange={(e) => setAddendumConfirmedExplicit(e.target.checked)}
+                                      className="rounded border-white/20 bg-slate-900 mt-0.5"
+                                    />
+                                    <span>
+                                      Declaro sob minha autoridade de <strong>CEO/Fundador</strong> que este aditamento constitui ato oficial append-only, mantendo preservado o histórico anterior e retificando o registro para os efeitos vigentes.
+                                    </span>
+                                  </label>
+                                </div>
+
+                                {addendumError && (
+                                  <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs flex items-start gap-2">
+                                    <AlertTriangle size={14} className="text-rose-400 shrink-0 mt-0.5" />
+                                    <span>{addendumError}</span>
+                                  </div>
+                                )}
+
+                                <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
+                                  <button
+                                    type="button"
+                                    disabled={busy || isSubmittingAddendum}
+                                    onClick={() => {
+                                      setAddendumFindingKey(null);
+                                      setAddendumError(null);
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 disabled:opacity-50"
+                                  >
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy || isSubmittingAddendum || !addendumConfirmedExplicit}
+                                    onClick={async () => {
+                                      if (!onCreateAddendum || !review) return;
+                                      setAddendumError(null);
+
+                                      if (addendumInconsistencyDescription.trim().length < 15) {
+                                        setAddendumError("A descrição da inconsistência histórica deve ter ao menos 15 caracteres.");
+                                        return;
+                                      }
+                                      if (addendumJustification.trim().length < 10) {
+                                        setAddendumError("A justificativa do ato retificador deve ter ao menos 10 caracteres.");
+                                        return;
+                                      }
+                                      if (addendumAction === "APONTAR_CORRECAO" && !addendumCorrectionChangeId) {
+                                        setAddendumError("Para APONTAR_CORRECAO, selecione a alteração de correção incorporada.");
+                                        return;
+                                      }
+                                      if (!addendumConfirmedExplicit) {
+                                        setAddendumError("É obrigatório confirmar expressamente o aditamento.");
+                                        return;
+                                      }
+
+                                      setIsSubmittingAddendum(true);
+                                      try {
+                                        const decisionStateHash = computeDecisionStateHash(review);
+                                        await onCreateAddendum({
+                                          targetFindingKey: stableKey,
+                                          reason: addendumReason,
+                                          inconsistencyDescription: addendumInconsistencyDescription.trim(),
+                                          rectifyingAct: {
+                                            action: addendumAction,
+                                            state: ((): import("../lib/legalReviewTypes").HumanFindingResolutionState => {
+                                              switch (addendumAction) {
+                                                case "CONFIRMAR": return "CONFIRMADO_PELO_CEO";
+                                                case "APONTAR_CORRECAO": return "CORRECAO_NECESSARIA";
+                                                case "DECLARAR_DIVERGENCIA": return "DIVERGENCIA_LEGITIMA";
+                                                case "DECLARAR_NAO_COMPROVADO": return "NAO_COMPROVADO";
+                                                default: return "PENDENTE";
+                                              }
+                                            })(),
+                                            justification: addendumJustification.trim(),
+                                            correctionChangeId: addendumAction === "APONTAR_CORRECAO" ? addendumCorrectionChangeId : undefined,
+                                          },
+                                          expectedCandidateHash: review.candidateHash,
+                                          expectedDecisionStateHash: decisionStateHash,
+                                        });
+                                        setAddendumFindingKey(null);
+                                      } catch (err: any) {
+                                        setAddendumError(err?.message || "Erro ao emitir aditamento histórico.");
+                                      } finally {
+                                        setIsSubmittingAddendum(false);
+                                      }
+                                    }}
+                                    className="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                                  >
+                                    {isSubmittingAddendum ? (
+                                      <>
+                                        <Clock size={12} className="animate-spin" />
+                                        Emitindo Aditamento...
+                                      </>
+                                    ) : (
+                                      "Emitir Aditamento Formal"
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -1690,15 +2056,32 @@ export function LegalReviewPanel({
                         </h5>
                       </div>
                       {review.supplement.resolution ? (
-                        review.supplement.resolution.candidateHashAtClosure === review.candidateHash ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                            ✓ Encerrado pelo CEO
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                            ⚠️ Invalidado por Edição Posterior
-                          </span>
-                        )
+                        (() => {
+                          const res = review.supplement.resolution;
+                          const isCandMatch = res.candidateHashAtClosure === review.candidateHash;
+                          const isDecMatch = Boolean(res.decisionStateHashAtClosure && res.decisionStateHashAtClosure === review.decisionStateHash);
+                          const hasNewAddenda = Boolean(review.addenda && review.addenda.some((a) => a.createdAt > res.closedAt));
+                          const isValid = isCandMatch && isDecMatch && !hasNewAddenda;
+
+                          if (isValid) {
+                            return (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                ✓ Encerrado pelo CEO
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                              {!isCandMatch
+                                ? "⚠️ Invalidado por Edição Posterior"
+                                : hasNewAddenda
+                                ? "⚠️ Invalidado por Aditamento Superveniente"
+                                : !res.decisionStateHashAtClosure
+                                ? "⚠️ Encerramento Legado (Exige Novo Ato)"
+                                : "⚠️ Invalidado por Decisão Posterior"}
+                            </span>
+                          );
+                        })()
                       ) : (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">
                           Pendente de Encerramento
@@ -1706,37 +2089,85 @@ export function LegalReviewPanel({
                       )}
                     </div>
 
-                    {review.supplement.resolution && review.supplement.resolution.candidateHashAtClosure === review.candidateHash ? (
-                      <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3 space-y-2 text-xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
-                          <span>
-                            Encerrado em: <strong>{new Date(review.supplement.resolution.closedAt).toLocaleString("pt-BR")}</strong>
-                          </span>
-                          <span>
-                            Por: <strong>{review.supplement.resolution.closedByEmail}</strong>
-                          </span>
-                          <span className="font-mono text-[10px] text-slate-400">
-                            Hash: {review.supplement.resolution.candidateHashAtClosure.slice(0, 12)}...
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-200 italic">
-                          "{review.supplement.resolution.overallJustification}"
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {review.supplement.resolution && review.supplement.resolution.candidateHashAtClosure !== review.candidateHash && (
-                          <div className="rounded-xl border border-rose-500/40 bg-rose-950/20 p-3 text-xs text-rose-200">
-                            <p className="font-bold text-rose-300">
-                              ⚠️ O encerramento anterior foi invalidado porque o texto da aula foi editado após o ato do CEO!
+                    {(() => {
+                      const res = review.supplement.resolution;
+                      const isCandMatch = res?.candidateHashAtClosure === review.candidateHash;
+                      const isDecMatch = Boolean(res?.decisionStateHashAtClosure && res?.decisionStateHashAtClosure === review.decisionStateHash);
+                      const hasNewAddenda = Boolean(review.addenda && review.addenda.some((a) => a.createdAt > res!.closedAt));
+                      const isClosureValid = Boolean(res && isCandMatch && isDecMatch && !hasNewAddenda);
+
+                      if (res && isClosureValid) {
+                        return (
+                          <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3 space-y-2 text-xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
+                              <span>
+                                Encerrado em: <strong>{new Date(res.closedAt).toLocaleString("pt-BR")}</strong>
+                              </span>
+                              <span>
+                                Por: <strong>{res.closedByEmail}</strong>
+                              </span>
+                              <span className="font-mono text-[10px] text-slate-400">
+                                Hash: {res.candidateHashAtClosure.slice(0, 12)}...
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-200 italic">
+                              "{res.overallJustification}"
                             </p>
-                            <p className="text-[11px] text-slate-300 mt-1">
-                              Hash no encerramento: <span className="font-mono">{review.supplement.resolution.candidateHashAtClosure}</span> | Hash atual: <span className="font-mono">{review.candidateHash}</span>
-                              <br />
-                              Conforme a blindagem estrita do Athena, é necessário realizar um novo ato expresso de encerramento.
-                            </p>
+                            {res.history && res.history.length > 0 && (
+                              <div className="pt-2 border-t border-emerald-500/20 space-y-1">
+                                <p className="text-[10px] font-semibold text-slate-400">Histórico de encerramentos anteriores:</p>
+                                {res.history.map((hist, i) => (
+                                  <div key={i} className="text-[10px] text-slate-400 pl-2 border-l border-emerald-500/30">
+                                    <span>{new Date(hist.closedAt).toLocaleString("pt-BR")} ({hist.candidateHashAtClosure.slice(0, 8)}...): </span>
+                                    <span className="italic text-slate-300">"{hist.overallJustification}"</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                        )}
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-3">
+                          {res && !isClosureValid && (
+                            <div className="rounded-xl border border-rose-500/40 bg-rose-950/20 p-3 text-xs text-rose-200 space-y-2">
+                              <p className="font-bold text-rose-300">
+                                {!isCandMatch
+                                  ? "⚠️ O encerramento anterior foi invalidado porque o texto da aula foi editado após o ato do CEO!"
+                                  : hasNewAddenda
+                                  ? "⚠️ O encerramento anterior foi invalidado pela emissão superveniente de um aditamento formal (ADD)!"
+                                  : "⚠️ O encerramento anterior foi invalidado porque as deliberações de achados foram modificadas após o ato do CEO!"}
+                              </p>
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
+                                <span>
+                                  Encerrado em: <strong>{new Date(res.closedAt).toLocaleString("pt-BR")}</strong>
+                                </span>
+                                <span>
+                                  Por: <strong>{res.closedByEmail}</strong>
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 italic">
+                                "{res.overallJustification}"
+                              </p>
+                              <p className="text-[11px] text-slate-300">
+                                Hash no encerramento: <span className="font-mono">{res.candidateHashAtClosure.slice(0, 16)}...</span> | Hash atual: <span className="font-mono">{review.candidateHash.slice(0, 16)}...</span>
+                                <br />
+                                Conforme a blindagem estrita do Athena, é necessário realizar um novo ato expresso de encerramento.
+                              </p>
+                              {res.history && res.history.length > 0 && (
+                                <div className="pt-2 border-t border-rose-500/20 space-y-1">
+                                  <p className="text-[10px] font-semibold text-slate-400">Atos de encerramento anteriores:</p>
+                                  {res.history.map((hist, i) => (
+                                    <div key={i} className="text-[10px] text-slate-400 pl-2 border-l border-rose-500/30">
+                                      <span>{new Date(hist.closedAt).toLocaleString("pt-BR")} ({hist.candidateHashAtClosure.slice(0, 8)}...): </span>
+                                      <span className="italic text-slate-300">"{hist.overallJustification}"</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
 
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-bold text-slate-300">
@@ -1805,7 +2236,8 @@ export function LegalReviewPanel({
                           );
                         })()}
                       </div>
-                    )}
+                    );
+                  })()}
                   </div>
                 )}
               </div>
@@ -2669,6 +3101,188 @@ export function LegalReviewPanel({
           )}
         </div>
       </div>
+
+      {/* Modal de Criação de Correção Textual Humana (Etapa 20.2) */}
+      {creatingHumanChangeFindingKey && review && (() => {
+        const targetFinding = (review.supplement?.findings || []).find(
+          (f) => getFindingStableKey(f) === creatingHumanChangeFindingKey || f.pendingId === creatingHumanChangeFindingKey || f.changeId === creatingHumanChangeFindingKey
+        );
+        const occurrenceCount = (() => {
+          if (!humanChangeOriginalExcerpt.trim() || !review.reviewedMarkdown) return 0;
+          const orig = humanChangeOriginalExcerpt.trim();
+          let count = 0;
+          let pos = 0;
+          while ((pos = review.reviewedMarkdown.indexOf(orig, pos)) !== -1) {
+            count++;
+            pos += orig.length;
+          }
+          return count;
+        })();
+
+        return (
+          <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-emerald-500/30 rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                    <Edit3 size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-100">Criar Correção Textual Humana (CHG-H-xxx)</h4>
+                    <p className="text-xs text-slate-400">Vinculada ao achado: <span className="font-mono text-emerald-300">{creatingHumanChangeFindingKey}</span></p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreatingHumanChangeFindingKey(null);
+                    setHumanChangeError(null);
+                  }}
+                  className="p-1 rounded-lg hover:bg-white/10 text-slate-400"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {targetFinding && (
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-white/5 space-y-1 text-xs">
+                  <span className="font-bold text-slate-400 uppercase text-[10px]">Enunciado Analisado pelo Revisor:</span>
+                  <p className="text-slate-200 italic">"{targetFinding.statementAnalyzed}"</p>
+                  {targetFinding.officialSourceConsulted && (
+                    <p className="text-[11px] text-slate-400 pt-1">
+                      <span className="font-semibold text-slate-300">Fonte Consultada: </span>{targetFinding.officialSourceConsulted}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-300">Trecho Original a Substituir no Texto da Aula:</label>
+                    {humanChangeOriginalExcerpt.trim().length > 0 && (
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                        occurrenceCount === 1 ? "bg-emerald-500/20 text-emerald-300" : occurrenceCount === 0 ? "bg-rose-500/20 text-rose-300" : "bg-amber-500/20 text-amber-300"
+                      }`}>
+                        {occurrenceCount === 1 ? "✓ 1 ocorrência única no texto" : occurrenceCount === 0 ? "✗ Trecho não localizado no texto" : `⚠️ ${occurrenceCount} ocorrências (deve ser único)`}
+                      </span>
+                    )}
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={humanChangeOriginalExcerpt}
+                    onChange={(e) => setHumanChangeOriginalExcerpt(e.target.value)}
+                    placeholder="Cole o trecho literal exato que está presente na versão revisada..."
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-slate-200 font-mono text-[11px]"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-300 block mb-1">Novo Texto Substitutivo (Correção Jurídica Aprovada pelo CEO):</label>
+                  <textarea
+                    rows={3}
+                    value={humanChangeRevisedExcerpt}
+                    onChange={(e) => setHumanChangeRevisedExcerpt(e.target.value)}
+                    placeholder="Redija o texto juridicamente correto que substituirá o trecho..."
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-emerald-200 font-mono text-[11px]"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-300 block mb-1">Justificativa Editorial do CEO (mínimo 10 caracteres):</label>
+                  <textarea
+                    rows={2}
+                    value={humanChangeJustification}
+                    onChange={(e) => setHumanChangeJustification(e.target.value)}
+                    placeholder="Fundamente o motivo da correção textual..."
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-slate-200 text-xs"
+                  />
+                </div>
+
+                {/* Prévia Comparativa Diff */}
+                {humanChangeOriginalExcerpt.trim() && humanChangeRevisedExcerpt.trim() && (
+                  <div className="p-3 rounded-xl bg-slate-950 border border-white/10 space-y-2">
+                    <span className="font-bold text-slate-300 uppercase text-[10px] block">Comparação Visual (Antes vs Depois):</span>
+                    <div className="p-2 rounded bg-rose-950/30 border border-rose-500/20 text-rose-300 font-mono text-[11px]">
+                      - {humanChangeOriginalExcerpt}
+                    </div>
+                    <div className="p-2 rounded bg-emerald-950/30 border border-emerald-500/20 text-emerald-300 font-mono text-[11px]">
+                      + {humanChangeRevisedExcerpt}
+                    </div>
+                  </div>
+                )}
+
+                {/* Alerta de Impacto em Hashes e Decisões Anteriores */}
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-[11px] space-y-1">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle size={14} className="text-amber-400" />
+                    Aviso de Integridade Transacional:
+                  </p>
+                  <p className="text-slate-300">
+                    A criação desta alteração substitui o trecho diretamente no texto revisado e gera um novo <code>candidateHash</code>. Conforme a regra de segurança, qualquer deliberação ou encerramento anterior tomado com base no hash antigo será considerado desatualizado para novos atos, sendo necessário deliberar sobre a nova versão do texto antes do encerramento final do Estágio B.
+                  </p>
+                </div>
+
+                {humanChangeError && (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs flex items-center gap-2">
+                    <AlertTriangle size={14} className="text-rose-400 shrink-0" />
+                    <span>{humanChangeError}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  disabled={isSubmittingHumanChange}
+                  onClick={() => {
+                    setCreatingHumanChangeFindingKey(null);
+                    setHumanChangeError(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    isSubmittingHumanChange ||
+                    occurrenceCount !== 1 ||
+                    !humanChangeRevisedExcerpt.trim() ||
+                    humanChangeOriginalExcerpt.trim() === humanChangeRevisedExcerpt.trim() ||
+                    humanChangeJustification.trim().length < 10
+                  }
+                  onClick={async () => {
+                    if (!onCreateHumanChange) return;
+                    setHumanChangeError(null);
+                    setIsSubmittingHumanChange(true);
+                    try {
+                      await onCreateHumanChange({
+                        originFindingKey: creatingHumanChangeFindingKey,
+                        originalExcerpt: humanChangeOriginalExcerpt.trim(),
+                        revisedExcerpt: humanChangeRevisedExcerpt.trim(),
+                        justification: humanChangeJustification.trim(),
+                        category: "LEGISLACAO",
+                        nature: targetFinding?.nature,
+                        expectedCandidateHash: review.candidateHash || "",
+                      });
+                      setCreatingHumanChangeFindingKey(null);
+                      setFindingSuccessMessage("Alteração textual humana gravada e incorporada com sucesso.");
+                    } catch (err: any) {
+                      setHumanChangeError(err?.message || "Erro ao salvar alteração textual humana.");
+                    } finally {
+                      setIsSubmittingHumanChange(false);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 text-slate-950 font-black text-xs uppercase hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {isSubmittingHumanChange ? "Incorporando..." : "Confirmar e Incorporar Alteração"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

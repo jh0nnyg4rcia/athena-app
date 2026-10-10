@@ -114,7 +114,7 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { LegalReviewPanel } from './components/LegalReviewPanel';
-import { approveLegalReview, closeLegalReviewSupplement, fetchLatestLegalReview, reauditLegalReview, rejectLegalReview, requestAsyncLegalReview, requestLegalReview, requestLegalReviewSupplement, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewFinding, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { approveLegalReview, closeLegalReviewSupplement, createHumanLegalReviewChange, createLegalReviewAddendum, fetchLatestLegalReview, reauditLegalReview, rejectLegalReview, requestAsyncLegalReview, requestLegalReview, requestLegalReviewSupplement, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewFinding, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
 import { LEGAL_REVIEW_TEST_MATERIAL } from './lib/legalReviewTestMaterial';
 import { legalReviewButtonVisible, legalReviewTestButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
@@ -8316,6 +8316,79 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
           setLegalReview(res.review);
         } catch (err: any) {
           setLegalReviewError(err?.message || "Erro ao processar encerramento da complementação jurídica.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCreateHumanChange={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await createHumanLegalReviewChange(legalReview.id, params);
+          if (!res.review) {
+            throw new Error("A API respondeu mas o estado atualizado da revisão não foi retornado.");
+          }
+
+          // Confirmação read-after-write por releitura fresca do backend
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+            const freshRev = recheck.review;
+            // Valida que a nova alteração humana consta em freshRev.changes
+            const matchingHumanChange = (freshRev.changes || []).find(
+              (c) => c.authorType === "HUMAN_CEO" && c.originFindingKey === params.originFindingKey
+            );
+            if (!matchingHumanChange) {
+              throw new Error("A alteração humana criada não foi confirmada na releitura fresca do banco de dados.");
+            }
+            setLegalReview(freshRev);
+            return;
+          }
+
+          setLegalReview(res.review);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao salvar alteração textual humana.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCreateAddendum={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await createLegalReviewAddendum(legalReview.id, params);
+          if (!res.review) {
+            throw new Error("A API respondeu mas o estado atualizado da revisão não foi retornado.");
+          }
+
+          // Confirmação read-after-write por releitura fresca do backend
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+            const freshRev = recheck.review;
+            const matchingAddendum = (freshRev.addenda || []).find(
+              (a) => a.targetFindingKey === params.targetFindingKey
+            );
+            if (!matchingAddendum) {
+              throw new Error("O aditamento criado não foi confirmado na releitura fresca do banco de dados.");
+            }
+            setLegalReview(freshRev);
+            return;
+          }
+
+          setLegalReview(res.review);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao emitir aditamento histórico.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
         } finally {
           setLegalReviewBusy(false);
         }

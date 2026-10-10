@@ -366,9 +366,10 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             || extractChallengeFromText(review.originalContent).challenge;
           const nextMarkdown = challenge ? embedChallengeInContent(markdown, challenge) : markdown;
           const edited = reviewAfterManualEdit(review, nextMarkdown, now);
+          // Preservação append-only: o encerramento do Estágio B permanece preservado para auditoria.
+          // Sua eficácia é automaticamente invalidada caso o candidateHash mude.
           const updatedSupplement = edited.supplement ? {
             ...edited.supplement,
-            resolution: undefined,
           } : undefined;
           tx.set(ref, {
             reviewedMarkdown: edited.reviewedMarkdown,
@@ -410,10 +411,9 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             ...(review.humanDecisions || {}),
             ...humanDecisions,
           };
-          // Invalidação obrigatória: qualquer edição no reviewedMarkdown invalida o encerramento da complementação
+          // Preservação append-only: histórico de encerramento preservado para auditoria
           const updatedSupplement = review.supplement ? {
             ...review.supplement,
-            resolution: undefined,
           } : undefined;
 
           const updated: LegalReviewView = {
@@ -524,6 +524,168 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
         throw unavailable();
       }
     },
+    async addHumanChange(reviewId, humanChange, nextMarkdown, now, expectedCandidateHash) {
+      try {
+        const db = await loadDb();
+        return await db.runTransaction(async (tx) => {
+          const ref = db.collection(REVIEWS).doc(reviewId);
+          const snap = await tx.get(ref);
+          const review = asReview(snap.exists ? snap.data() : undefined);
+          if (!review || review.status !== "pending_approval") {
+            throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+          }
+
+          // Validação de concorrência estrita pelo hash do candidato
+          const expHash = (expectedCandidateHash || "").trim().toLowerCase();
+          const currentHash = (review.candidateHash || "").trim().toLowerCase();
+          if (!expHash || !/^[a-f0-9]{64}$/i.test(expHash)) {
+            throw new LegalReviewError("O hash esperado do candidato (expectedCandidateHash) é obrigatório e deve ter 64 caracteres hexadecimais.", 400);
+          }
+          if (currentHash && expHash !== currentHash) {
+            throw new LegalReviewError(
+              "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato atual difere da versão visualizada. Recarregue a página antes de criar a alteração.",
+              409
+            );
+          }
+
+          // Unicidade de ID da alteração
+          const existingChanges = review.changes || [];
+          if (existingChanges.some((c) => c.id === humanChange.id)) {
+            throw new LegalReviewError(
+              `Já existe uma alteração com o identificador '${humanChange.id}' nesta revisão.`,
+              409
+            );
+          }
+
+          // Aceitação da estrutura do markdown
+          if (!candidateMarkdownAccepted(review.originalContent, nextMarkdown)) {
+            throw new LegalReviewError(
+              "O Markdown resultante quebrou a estrutura da aula. A alteração não foi salva.",
+              400
+            );
+          }
+
+          // Atualiza lista de alterações
+          const updatedChanges = [...existingChanges, humanChange];
+
+          // Preserva e reanota edição manual
+          const edited = reviewAfterManualEdit(review, nextMarkdown, now);
+
+          // PRESERVAÇÃO APPEND-ONLY DO HISTÓRICO: o encerramento anterior do Estágio B (supplement.resolution)
+          // permanece preservado no registro para auditoria e rastreabilidade forense.
+          // Sua eficácia é automaticamente invalidada pelo descompasso matemático de candidateHash
+          // (resolution.candidateHashAtClosure !== review.candidateHash), exigindo re-deliberação e re-encerramento.
+          const updatedSupplement = review.supplement ? {
+            ...review.supplement,
+          } : undefined;
+
+          const updated: LegalReviewView = {
+            ...edited,
+            changes: updatedChanges,
+            supplement: updatedSupplement,
+          };
+
+          tx.set(ref, {
+            changes: updatedChanges,
+            reviewedMarkdown: updated.reviewedMarkdown,
+            manuallyEdited: updated.manuallyEdited,
+            manuallyEditedAt: updated.manuallyEditedAt ?? null,
+            candidateHash: updated.candidateHash,
+            verificationLevel: updated.verificationLevel,
+            sourceHistory: updated.sourceHistory,
+            ...(updatedSupplement ? { supplement: updatedSupplement } : {}),
+          }, { merge: true });
+
+          return updated;
+        });
+      } catch (error) {
+        if (error instanceof LegalReviewError) throw error;
+        throw unavailable();
+      }
+    },
+    async addAddendum(reviewId, addendum, rectifiedDecision, now, expectedHashes) {
+      const flags = getLegalReviewOperationalFlags();
+      if (!flags.stageAEnabled) {
+        throw new LegalReviewError(LEGAL_REVIEW_STAGE_A_DISABLED_MESSAGE, 503);
+      }
+      try {
+        const db = await loadDb();
+        return await db.runTransaction(async (tx) => {
+          const ref = db.collection(REVIEWS).doc(reviewId);
+          const snap = await tx.get(ref);
+          const review = asReview(snap.exists ? snap.data() : undefined);
+          if (!review || review.status !== "pending_approval") {
+            throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+          }
+
+          const expCandHash = (expectedHashes.expectedCandidateHash || "").trim().toLowerCase();
+          const expDecHash = (expectedHashes.expectedDecisionStateHash || "").trim().toLowerCase();
+
+          if (!expCandHash || !/^[a-f0-9]{64}$/i.test(expCandHash)) {
+            throw new LegalReviewError("O hash esperado do candidato é obrigatório e deve ter 64 caracteres hexadecimais.", 400);
+          }
+          if (!expDecHash || !/^[a-f0-9]{64}$/i.test(expDecHash)) {
+            throw new LegalReviewError("O hash esperado do estado de deliberações é obrigatório e deve ter 64 caracteres hexadecimais.", 400);
+          }
+
+          const currentCandHash = (review.candidateHash || "").trim().toLowerCase();
+          if (currentCandHash && expCandHash !== currentCandHash) {
+            throw new LegalReviewError(
+              "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato difere da versão visualizada. Recarregue a página antes de emitir o aditamento.",
+              409
+            );
+          }
+
+          const currentDecHash = computeDecisionStateHash(review).toLowerCase();
+          if (expDecHash !== currentDecHash) {
+            throw new LegalReviewError(
+              "O estado das deliberações individuais foi modificado desde o carregamento da página. Recarregue a página antes de emitir o aditamento.",
+              409
+            );
+          }
+
+          const existingAddenda = review.addenda || [];
+          if (existingAddenda.some((a) => a.id === addendum.id)) {
+            throw new LegalReviewError(`Já existe um aditamento com o identificador '${addendum.id}' nesta revisão.`, 409);
+          }
+
+          // Bloqueio de duplicidade para o mesmo achado e mesmo conteúdo retificador
+          const isDuplicate = existingAddenda.some(
+            (a) =>
+              a.targetFindingKey === addendum.targetFindingKey &&
+              a.rectifyingAct.state === addendum.rectifyingAct.state &&
+              (a.rectifyingAct.correctionChangeId || "") === (addendum.rectifyingAct.correctionChangeId || "") &&
+              a.rectifyingAct.justification === addendum.rectifyingAct.justification &&
+              a.candidateHashAtAddendum === currentCandHash
+          );
+          if (isDuplicate) {
+            throw new LegalReviewError(`Já existe um aditamento idêntico registrado para o achado '${addendum.targetFindingKey}'.`, 409);
+          }
+
+          const updatedAddenda = [...existingAddenda, addendum];
+          const updatedFindingDecisions = {
+            ...(review.findingDecisions || {}),
+            [addendum.targetFindingKey]: rectifiedDecision,
+          };
+
+          const updated: LegalReviewView = {
+            ...review,
+            addenda: updatedAddenda,
+            findingDecisions: updatedFindingDecisions,
+          };
+
+          tx.set(ref, {
+            addenda: updatedAddenda,
+            findingDecisions: updatedFindingDecisions,
+          }, { merge: true });
+
+          return updated;
+        });
+      } catch (error) {
+        if (error instanceof LegalReviewError) throw error;
+        throw unavailable();
+      }
+    },
     async closeSupplementResolution(reviewId, resolution, now, expectedHashes) {
       const flags = getLegalReviewOperationalFlags();
       if (!flags.stageBEnabled) {
@@ -542,11 +704,18 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             throw new LegalReviewError("Esta revisão não possui complementação jurídica para encerrar.", 404);
           }
 
+          const currentCandidateHash = (review.candidateHash || "").trim().toLowerCase();
+          const currentDecisionStateHash = computeDecisionStateHash(review).toLowerCase();
+
           // Proteção contra duplicidade de encerramento já realizado
           if (review.supplement.resolution && review.supplement.resolution.status === "RESOLVIDO_PELO_CEO") {
-            if (review.supplement.resolution.candidateHashAtClosure === review.candidateHash) {
+            const res = review.supplement.resolution;
+            const sameCandidate = res.candidateHashAtClosure === review.candidateHash;
+            const sameDecisions = Boolean(res.decisionStateHashAtClosure && res.decisionStateHashAtClosure === currentDecisionStateHash);
+            const noNewAddenda = !(review.addenda && review.addenda.some((a) => a.createdAt > res.closedAt));
+            if (sameCandidate && sameDecisions && noNewAddenda) {
               throw new LegalReviewError(
-                "A complementação jurídica já foi encerrada anteriormente pelo CEO para esta mesma versão do texto candidato.",
+                "A complementação jurídica já foi encerrada anteriormente pelo CEO para esta mesma versão do texto candidato e deliberações.",
                 409
               );
             }
@@ -577,7 +746,6 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
               );
             }
 
-            const currentCandidateHash = (review.candidateHash || "").trim().toLowerCase();
             if (currentCandidateHash && expCandHash !== currentCandidateHash) {
               throw new LegalReviewError(
                 "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato atual difere da versão visualizada. Recarregue a página antes de encerrar.",
@@ -585,7 +753,6 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
               );
             }
 
-            const currentDecisionStateHash = computeDecisionStateHash(review).toLowerCase();
             if (expDecHash !== currentDecisionStateHash) {
               throw new LegalReviewError(
                 "O estado das deliberações individuais foi modificado desde o carregamento da página. As decisões registradas diferem da versão visualizada. Recarregue a página antes de encerrar.",
@@ -611,7 +778,11 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
 
           const priorResolution = review.supplement.resolution;
           const priorHistory = [...(priorResolution?.history || [])];
-          if (priorResolution && priorResolution.candidateHashAtClosure !== review.candidateHash) {
+          if (priorResolution && (
+            priorResolution.candidateHashAtClosure !== review.candidateHash ||
+            priorResolution.decisionStateHashAtClosure !== currentDecisionStateHash ||
+            (review.addenda && review.addenda.some((a) => a.createdAt > priorResolution.closedAt))
+          )) {
             priorHistory.push({
               status: priorResolution.status,
               closedAt: priorResolution.closedAt,
@@ -619,6 +790,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
               closedByEmail: priorResolution.closedByEmail,
               overallJustification: priorResolution.overallJustification,
               candidateHashAtClosure: priorResolution.candidateHashAtClosure,
+              decisionStateHashAtClosure: priorResolution.decisionStateHashAtClosure,
               totalFindingsResolved: priorResolution.totalFindingsResolved,
             });
           }
@@ -628,6 +800,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             resolution: {
               ...resolution,
               candidateHashAtClosure: review.candidateHash,
+              decisionStateHashAtClosure: currentDecisionStateHash,
               closedAt: now,
               history: priorHistory,
             },

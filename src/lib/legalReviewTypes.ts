@@ -172,6 +172,67 @@ export interface HumanFindingDecision {
   decidedByUid: string;
   decidedByEmail: string;
   history?: FindingDecisionHistoryEntry[];
+  /** Identificador do aditamento que retificou esta deliberação (ex: 'ADD-001') */
+  addendumId?: string;
+  /** Indica se a deliberação ativa é fruto de um ato retificador formal */
+  rectifiedByAddendum?: boolean;
+}
+
+/**
+ * Motivos formais permitidos para emissão de aditamento histórico (Etapa 20.3)
+ */
+export type LegalAddendumReason =
+  | "SANEAMENTO_VINCULO"          // Correção de vínculo inexistente ou impreciso com alteração textual
+  | "RETIFICACAO_MATERIAL"        // Retificação de erro material na fundamentação ou qualificação
+  | "ATUALIZACAO_JURISPRUDENCIAL" // Atualização em virtude de julgamento superveniente ou alteração de contexto
+  | "OUTRO";
+
+/** Resumo auditável do ato decisório anterior que está sendo aditado */
+export interface PriorActSummary {
+  action?: HumanFindingAction;
+  state?: HumanFindingResolutionState;
+  justification?: string;
+  correctionChangeId?: string;
+  evidenceDeclaration?: FindingEvidenceDeclaration;
+  divergenceNature?: string;
+  expurgationConfirmed?: boolean;
+  candidateHashAtDecision?: string;
+  decidedAt?: number;
+  decidedByEmail?: string;
+}
+
+/** Conteúdo do ato retificador formalizado pelo aditamento */
+export interface RectifyingActSummary {
+  action: HumanFindingAction;
+  state: HumanFindingResolutionState;
+  justification: string;
+  correctionChangeId?: string;
+  evidenceDeclaration?: FindingEvidenceDeclaration;
+  divergenceNature?: string;
+  expurgationConfirmed?: boolean;
+  candidateHashAtDecision: string;
+}
+
+/**
+ * Aditamento Histórico Imutável (ADD-xxx - Etapa 20.3).
+ * Permite ao CEO regularizar atos decisórios anteriores sem apagar, sobrescrever ou falsear registros históricos.
+ */
+export interface LegalReviewAddendum {
+  id: string; // Ex: "ADD-001"
+  reviewId: string;
+  targetFindingKey: string;
+  linkedChangeId?: string;
+  reason: LegalAddendumReason;
+  inconsistencyDescription: string;
+  priorAct: PriorActSummary;
+  rectifyingAct: RectifyingActSummary;
+  candidateHashAtAddendum: string;
+  decisionStateHashAtAddendum: string;
+  createdAt: number;
+  createdByUid: string;
+  createdByEmail: string;
+  authorType?: "HUMAN_CEO";
+  immutable: true;
 }
 
 /**
@@ -186,6 +247,7 @@ export interface SupplementHumanResolutionHistoryEntry {
   closedByEmail: string;
   overallJustification: string;
   candidateHashAtClosure: string;
+  decisionStateHashAtClosure?: string;
   totalFindingsResolved: number;
 }
 
@@ -197,6 +259,8 @@ export interface SupplementHumanResolution {
   overallJustification: string;
   /** Hash SHA-256 do reviewedMarkdown no momento exato do encerramento */
   candidateHashAtClosure: string;
+  /** Hash SHA-256 do estado de deliberações individuais no momento exato do encerramento */
+  decisionStateHashAtClosure?: string;
   totalFindingsResolved: number;
   /** Histórico de atos de encerramento anteriores preservado cumulativamente */
   history?: SupplementHumanResolutionHistoryEntry[];
@@ -417,6 +481,14 @@ export interface LegalReviewChange {
   outcome?: LegalVerificationOutcome;
   /** Metadados especializados por categoria de evidência (Etapa 5B). */
   evidenceMetadata?: ClaimEvidenceMetadata | EvidenceNatureMetadata;
+  /** Autoria da alteração: IA (padrão) ou 'HUMAN_CEO' (Etapa 20.2) */
+  authorType?: "AI" | "HUMAN_CEO";
+  /** Identificador do achado autônomo de origem da alteração humana */
+  originFindingKey?: string;
+  /** Timestamp de criação da alteração humana */
+  createdAt?: number;
+  /** Email do CEO criador da alteração humana */
+  createdByEmail?: string;
 }
 
 export interface LegalUnverifiedClaim {
@@ -495,6 +567,8 @@ export interface LegalReviewView {
   /** Hash SHA-256 canônico do estado de deliberações e achados para encerramento do Estágio B (Etapa 15.1). */
   decisionStateHash?: string;
   supplement?: LegalReviewSupplement;
+  /** Aditamentos históricos imutáveis emitidos pelo CEO (Etapa 20.3) */
+  addenda?: LegalReviewAddendum[];
 }
 
 export type LegalSupplementStatus =

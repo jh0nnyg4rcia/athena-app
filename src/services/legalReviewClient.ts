@@ -139,5 +139,42 @@ export function closeLegalReviewSupplement(
   return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/close-supplement`, params, 60_000);
 }
 
+export function createHumanLegalReviewChange(
+  reviewId: string,
+  params: {
+    originFindingKey: string;
+    originalExcerpt: string;
+    revisedExcerpt: string;
+    justification: string;
+    category?: import("../lib/legalReviewTypes").LegalChangeCategory;
+    nature?: import("../lib/legalReviewTaxonomy").LegalClaimNature;
+    expectedCandidateHash: string;
+  }
+): Promise<{ review: LegalReviewView }> {
+  return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/human-change`, params, 60_000);
+}
+
+export function createLegalReviewAddendum(
+  reviewId: string,
+  params: {
+    targetFindingKey: string;
+    reason: import("../lib/legalReviewTypes").LegalAddendumReason;
+    inconsistencyDescription: string;
+    rectifyingAct: {
+      action: import("../lib/legalReviewTypes").HumanFindingAction;
+      state: import("../lib/legalReviewTypes").HumanFindingResolutionState;
+      justification: string;
+      correctionChangeId?: string;
+      evidenceDeclaration?: import("../lib/legalReviewTypes").FindingEvidenceDeclaration;
+      divergenceNature?: string;
+      expurgationConfirmed?: boolean;
+    };
+    expectedCandidateHash: string;
+    expectedDecisionStateHash: string;
+  }
+): Promise<{ review: LegalReviewView }> {
+  return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/addenda`, params, 60_000);
+}
+
 
 
