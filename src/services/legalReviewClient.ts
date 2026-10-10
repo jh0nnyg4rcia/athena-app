@@ -122,6 +122,7 @@ export function resolveLegalReviewFinding(
     divergenceNature?: string;
     correctionChangeId?: string;
     expurgationConfirmed?: boolean;
+    expectedCandidateHash: string;
   }
 ): Promise<{ review: LegalReviewView }> {
   return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/resolve-finding`, params, 60_000);

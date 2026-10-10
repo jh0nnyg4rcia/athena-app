@@ -430,6 +430,7 @@ export function LegalReviewPanel({
     divergenceNature?: string;
     correctionChangeId?: string;
     expurgationConfirmed?: boolean;
+    expectedCandidateHash: string;
   }) => Promise<void>;
   onCloseSupplement?: (params: {
     overallJustification: string;
@@ -1445,6 +1446,7 @@ export function LegalReviewPanel({
                                         changeId: f.changeId,
                                         action: findingAction,
                                         justification: findingJustification,
+                                        expectedCandidateHash: review?.candidateHash || "",
                                         evidenceDeclaration: findingAction === "CONFIRMAR" ? {
                                           declaredSource: findingDeclaredSource,
                                           declaredUrl: findingDeclaredUrl || undefined,

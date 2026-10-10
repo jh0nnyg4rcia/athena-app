@@ -142,6 +142,7 @@ export interface FindingDecisionHistoryEntry {
   divergenceNature?: string;
   correctionChangeId?: string;
   expurgationConfirmed?: boolean;
+  expectedCandidateHash?: string;
   candidateHashAtDecision?: string;
   decidedAt: number;
   decidedByUid: string;
@@ -163,6 +164,8 @@ export interface HumanFindingDecision {
   divergenceNature?: string;
   correctionChangeId?: string;
   expurgationConfirmed?: boolean;
+  /** Hash SHA-256 esperado pelo operador no momento do envio da deliberação */
+  expectedCandidateHash?: string;
   /** Hash SHA-256 do reviewedMarkdown no momento da deliberação */
   candidateHashAtDecision?: string;
   decidedAt: number;

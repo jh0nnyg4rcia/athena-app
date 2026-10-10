@@ -964,6 +964,7 @@ export async function resolveHumanLegalReviewFinding(
     divergenceNature?: string;
     correctionChangeId?: string;
     expurgationConfirmed?: boolean;
+    expectedCandidateHash: string;
   },
   uid: string,
   email: string,
@@ -979,6 +980,22 @@ export async function resolveHumanLegalReviewFinding(
   const current = await repo.get(reviewId);
   if (!current || current.status !== "pending_approval") {
     throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+  }
+
+  // Validação estrita de concorrência e integridade do hash do candidato (Etapa 8.2)
+  const expectedHash = (params.expectedCandidateHash || "").trim().toLowerCase();
+  if (!expectedHash) {
+    throw new LegalReviewError("O hash esperado do candidato (expectedCandidateHash) é obrigatório.", 400);
+  }
+  if (!/^[a-f0-9]{64}$/i.test(expectedHash)) {
+    throw new LegalReviewError("O formato de expectedCandidateHash é inválido (deve ser SHA-256 hexadecimal com 64 caracteres).", 400);
+  }
+  const currentHash = (current.candidateHash || "").trim().toLowerCase();
+  if (currentHash && expectedHash !== currentHash) {
+    throw new LegalReviewError(
+      "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato atual difere da versão visualizada. Recarregue a página antes de deliberar.",
+      409
+    );
   }
 
   const findings = current.supplement?.findings || [];
@@ -1140,6 +1157,7 @@ export async function resolveHumanLegalReviewFinding(
     divergenceNature,
     correctionChangeId,
     expurgationConfirmed: Boolean(params.expurgationConfirmed),
+    expectedCandidateHash: expectedHash,
     candidateHashAtDecision: current.candidateHash,
     decidedAt: now,
     decidedByUid: uid,
@@ -1164,6 +1182,7 @@ export async function resolveHumanLegalReviewFinding(
       divergenceNature: prior.divergenceNature,
       correctionChangeId: prior.correctionChangeId,
       expurgationConfirmed: prior.expurgationConfirmed,
+      expectedCandidateHash: prior.expectedCandidateHash,
       candidateHashAtDecision: prior.candidateHashAtDecision,
       decidedAt: prior.decidedAt,
       decidedByUid: prior.decidedByUid,

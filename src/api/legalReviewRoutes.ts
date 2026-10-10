@@ -390,13 +390,22 @@ export function registerLegalReviewRoutes(
       res.status(400).json({ error: "Identificador de revisão inválido." });
       return;
     }
-    const { findingKey, pendingId, changeId, action, justification, evidenceDeclaration, divergenceNature, correctionChangeId, expurgationConfirmed } = req.body || {};
+    const { findingKey, pendingId, changeId, action, justification, evidenceDeclaration, divergenceNature, correctionChangeId, expurgationConfirmed, expectedCandidateHash } = req.body || {};
     if (!action) {
       res.status(400).json({ error: "O parâmetro 'action' é obrigatório." });
       return;
     }
     if (!findingKey && !pendingId && !changeId) {
       res.status(400).json({ error: "É obrigatório fornecer 'findingKey', 'pendingId' ou 'changeId' para identificar o achado." });
+      return;
+    }
+    const cleanExpectedHash = typeof expectedCandidateHash === "string" ? expectedCandidateHash.trim() : "";
+    if (!cleanExpectedHash) {
+      res.status(400).json({ error: "O parâmetro 'expectedCandidateHash' é obrigatório." });
+      return;
+    }
+    if (!/^[a-f0-9]{64}$/i.test(cleanExpectedHash)) {
+      res.status(400).json({ error: "O formato de 'expectedCandidateHash' é inválido (deve ser SHA-256 hexadecimal com 64 caracteres)." });
       return;
     }
     try {
@@ -413,6 +422,7 @@ export function registerLegalReviewRoutes(
           divergenceNature,
           correctionChangeId,
           expurgationConfirmed: expurgationConfirmed === true,
+          expectedCandidateHash: cleanExpectedHash,
         },
         req.athenaUser?.uid || "",
         req.athenaUser?.email || ""

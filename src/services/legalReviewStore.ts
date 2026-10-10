@@ -455,6 +455,22 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
           }
 
+          // Validação transacional estrita de concorrência e integridade do hash do candidato (Etapa 8.2)
+          const expectedHash = (findingDecision.expectedCandidateHash || "").trim().toLowerCase();
+          const currentHash = (review.candidateHash || "").trim().toLowerCase();
+          if (!expectedHash) {
+            throw new LegalReviewError("O hash esperado do candidato (expectedCandidateHash) é obrigatório.", 400);
+          }
+          if (!/^[a-f0-9]{64}$/i.test(expectedHash)) {
+            throw new LegalReviewError("O formato de expectedCandidateHash é inválido (deve ser SHA-256 hexadecimal com 64 caracteres).", 400);
+          }
+          if (currentHash && expectedHash !== currentHash) {
+            throw new LegalReviewError(
+              "A revisão jurídica foi modificada desde o carregamento da página. O texto candidato atual difere da versão visualizada. Recarregue a página antes de deliberar.",
+              409
+            );
+          }
+
           const existingDecisions = review.findingDecisions || {};
           const prior = existingDecisions[findingDecision.findingKey];
 
@@ -470,6 +486,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
               divergenceNature: prior.divergenceNature,
               correctionChangeId: prior.correctionChangeId,
               expurgationConfirmed: prior.expurgationConfirmed,
+              expectedCandidateHash: prior.expectedCandidateHash,
               candidateHashAtDecision: prior.candidateHashAtDecision,
               decidedAt: prior.decidedAt,
               decidedByUid: prior.decidedByUid,
@@ -479,6 +496,7 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
 
           const consolidatedDecision: import("../lib/legalReviewTypes").HumanFindingDecision = {
             ...findingDecision,
+            expectedCandidateHash: expectedHash,
             decidedAt: now,
             candidateHashAtDecision: review.candidateHash,
             history: newHistory,
