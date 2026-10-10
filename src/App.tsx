@@ -8250,11 +8250,60 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
       onResolveFinding={async (params) => {
         if (!legalReview?.id) return;
         setLegalReviewBusy(true);
+        setLegalReviewError(null);
         try {
           const res = await resolveLegalReviewFinding(legalReview.id, params);
+          // Critério Obrigatório de Sucesso (Etapa 19.2):
+          // 1. Validar resposta positiva do endpoint
+          const resolvedKey = params.findingKey;
+          if (resolvedKey && res.review?.findingDecisions && !res.review.findingDecisions[resolvedKey]) {
+            throw new Error("A API respondeu mas a deliberação não consta no estado retornado pelo servidor.");
+          }
+
+          // 2. Confirmação obrigatória por releitura independente (read-after-write) do backend (Etapa 19.3)
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+
+            const freshRev = recheck.review;
+            // 2.1 Mesmo reviewId
+            if (freshRev.id !== legalReview.id) {
+              throw new Error(`Inconsistência de versão: a consulta independente retornou outra revisão (${freshRev.id} vs ${legalReview.id}). Persistência não confirmada.`);
+            }
+
+            // 2.2 Integridade do candidateHash
+            if (freshRev.candidateHash !== legalReview.candidateHash) {
+              throw new Error("O hash do candidato foi modificado durante a operação. Recarregue a página antes de prosseguir.");
+            }
+
+            // 2.3 Confirmação da decisão persistida
+            if (resolvedKey) {
+              const freshDec = freshRev.findingDecisions?.[resolvedKey];
+              if (!freshDec) {
+                throw new Error(`A persistência do achado '${resolvedKey}' não pôde ser confirmada na nova leitura do banco de dados.`);
+              }
+              if (freshDec.action !== params.action) {
+                throw new Error(`Divergência de ação gravada para o achado '${resolvedKey}': esperava '${params.action}', obteve '${freshDec.action}'.`);
+              }
+              if (freshDec.justification?.trim() !== params.justification?.trim()) {
+                throw new Error(`Divergência de fundamentação gravada para o achado '${resolvedKey}'. Persistência rejeitada.`);
+              }
+              if (params.expectedCandidateHash && freshDec.expectedCandidateHash !== params.expectedCandidateHash) {
+                throw new Error(`Divergência de hash esperado gravado para o achado '${resolvedKey}'.`);
+              }
+            }
+
+            setLegalReview(freshRev);
+            return;
+          }
+
           setLegalReview(res.review);
         } catch (err: any) {
-          setLegalReviewError(err?.message || "Erro ao processar deliberação do achado jurídico.");
+          const msg = err?.message || "Erro ao processar deliberação do achado jurídico.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
         } finally {
           setLegalReviewBusy(false);
         }

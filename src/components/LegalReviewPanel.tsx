@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Clock, Database, Edit3, ExternalLink, Layers, Lock, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronUp, Clock, Database, Edit3, ExternalLink, Layers, Lock, Search, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { diffLines } from "../lib/legalReviewDiff";
 import type {
@@ -467,7 +467,7 @@ export function LegalReviewPanel({
     explanation: string;
   } | null>(null);
 
-  // Estados locais para Deliberação de Achados (Etapa 5F)
+  // Estados locais para Deliberação de Achados (Etapa 5F / Etapa 19.2)
   const [deliberatingFindingKey, setDeliberatingFindingKey] = useState<string | null>(null);
   const [findingAction, setFindingAction] = useState<HumanFindingAction>("CONFIRMAR");
   const [findingJustification, setFindingJustification] = useState("");
@@ -483,6 +483,9 @@ export function LegalReviewPanel({
   const [expandedFindingHistoryKey, setExpandedFindingHistoryKey] = useState<string | null>(null);
   const [closureJustification, setClosureJustification] = useState("");
   const [isClosingSupplement, setIsClosingSupplement] = useState(false);
+  const [findingFormError, setFindingFormError] = useState<string | null>(null);
+  const [findingSuccessMessage, setFindingSuccessMessage] = useState<string | null>(null);
+  const [submittingFindingKey, setSubmittingFindingKey] = useState<string | null>(null);
 
 
   useEffect(() => {
@@ -1101,6 +1104,23 @@ export function LegalReviewPanel({
                         ✓ Deliberação individual do CEO ativa (Etapa 5F)
                       </span>
                     </div>
+                    {/* Feedback de Sucesso Global de Deliberação */}
+                    {findingSuccessMessage && (
+                      <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                          <span>{findingSuccessMessage}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFindingSuccessMessage(null)}
+                          className="text-emerald-400 hover:text-emerald-200 text-[10px] uppercase font-bold"
+                        >
+                          Fechar
+                        </button>
+                      </div>
+                    )}
+
                     {review.supplement.findings.some(f => f.status === "nao_verificada") && (
                       <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200 space-y-1">
                         <p className="font-bold text-amber-300">
@@ -1430,43 +1450,106 @@ export function LegalReviewPanel({
                                   />
                                 </div>
 
+                                {/* Mensagem de Erro Específica da Deliberação */}
+                                {findingFormError && (
+                                  <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs flex items-start gap-2">
+                                    <AlertTriangle size={14} className="text-rose-400 shrink-0 mt-0.5" />
+                                    <div>
+                                      <span className="font-bold">Deliberação rejeitada: </span>
+                                      <span>{findingFormError}</span>
+                                    </div>
+                                  </div>
+                                )}
+
                                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
                                   <button
                                     type="button"
-                                    onClick={() => setDeliberatingFindingKey(null)}
-                                    className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700"
+                                    disabled={busy || submittingFindingKey === stableKey}
+                                    onClick={() => {
+                                      setDeliberatingFindingKey(null);
+                                      setFindingFormError(null);
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 disabled:opacity-50"
                                   >
                                     Cancelar
                                   </button>
                                   <button
                                     type="button"
-                                    disabled={busy || (findingAction !== "MANTER_PENDENTE" && findingJustification.trim().length < 10)}
+                                    disabled={busy || submittingFindingKey === stableKey}
                                     onClick={async () => {
                                       if (!onResolveFinding) return;
-                                      await onResolveFinding({
-                                        findingKey: stableKey,
-                                        pendingId: f.pendingId,
-                                        changeId: f.changeId,
-                                        action: findingAction,
-                                        justification: findingJustification,
-                                        expectedCandidateHash: review?.candidateHash || "",
-                                        evidenceDeclaration: findingAction === "CONFIRMAR" ? {
-                                          declaredSource: findingDeclaredSource,
-                                          declaredUrl: findingDeclaredUrl || undefined,
-                                          declaredExcerpt: findingDeclaredExcerpt || undefined,
-                                          bibliographicReference: findingBibliographicRef || undefined,
-                                          semanticJustification: findingSemanticJustification || undefined,
-                                          documentaryVerified: findingDocumentaryVerified,
-                                        } : undefined,
-                                        expurgationConfirmed: findingAction === "DECLARAR_NAO_COMPROVADO" ? findingExpurgationConfirmed : undefined,
-                                        divergenceNature: findingAction === "DECLARAR_DIVERGENCIA" ? findingDivergenceNature : undefined,
-                                        correctionChangeId: findingAction === "APONTAR_CORRECAO" ? findingCorrectionChangeId : undefined,
-                                      });
-                                      setDeliberatingFindingKey(null);
+                                      setFindingFormError(null);
+                                      setFindingSuccessMessage(null);
+
+                                      // 1. Validação Prévia no Cliente (Etapa 19.2)
+                                      if (findingAction !== "MANTER_PENDENTE" && findingJustification.trim().length < 10) {
+                                        setFindingFormError("A fundamentação detalhada do CEO é obrigatória (mínimo de 10 caracteres).");
+                                        return;
+                                      }
+                                      if (findingAction === "CONFIRMAR") {
+                                        const hasSrc = Boolean(findingDeclaredSource.trim());
+                                        const hasBiblio = Boolean(findingBibliographicRef.trim());
+                                        if (!hasSrc && !hasBiblio) {
+                                          setFindingFormError("Para confirmar um achado, é obrigatório declarar a fonte oficial primária ou referência bibliográfica.");
+                                          return;
+                                        }
+                                      }
+                                      if (findingAction === "DECLARAR_DIVERGENCIA" && findingDivergenceNature.trim().length < 5) {
+                                        setFindingFormError("Para declarar divergência legítima, é obrigatório explicitar a corrente doutrinária ou jurisprudencial (mínimo 5 caracteres).");
+                                        return;
+                                      }
+                                      if (findingAction === "APONTAR_CORRECAO") {
+                                        const corrId = findingCorrectionChangeId.trim() || f.changeId;
+                                        if (!corrId) {
+                                          setFindingFormError("Para apontar necessidade de correção, informe o identificador da alteração a corrigir.");
+                                          return;
+                                        }
+                                      }
+
+                                      // 2. Submissão com Estado Visual de Processamento
+                                      setSubmittingFindingKey(stableKey);
+                                      try {
+                                        await onResolveFinding({
+                                          findingKey: stableKey,
+                                          pendingId: f.pendingId,
+                                          changeId: f.changeId,
+                                          action: findingAction,
+                                          justification: findingJustification.trim(),
+                                          expectedCandidateHash: review?.candidateHash || "",
+                                          evidenceDeclaration: findingAction === "CONFIRMAR" ? {
+                                            declaredSource: findingDeclaredSource.trim() || undefined,
+                                            declaredUrl: findingDeclaredUrl.trim() || undefined,
+                                            declaredExcerpt: findingDeclaredExcerpt.trim() || undefined,
+                                            bibliographicReference: findingBibliographicRef.trim() || undefined,
+                                            semanticJustification: findingSemanticJustification.trim() || undefined,
+                                            documentaryVerified: findingDocumentaryVerified,
+                                          } : undefined,
+                                          expurgationConfirmed: findingAction === "DECLARAR_NAO_COMPROVADO" ? findingExpurgationConfirmed : undefined,
+                                          divergenceNature: findingAction === "DECLARAR_DIVERGENCIA" ? findingDivergenceNature.trim() : undefined,
+                                          correctionChangeId: findingAction === "APONTAR_CORRECAO" ? (findingCorrectionChangeId.trim() || f.changeId) : undefined,
+                                        });
+
+                                        // Sucesso comprovado: fecha formulário e notifica
+                                        setDeliberatingFindingKey(null);
+                                        setFindingFormError(null);
+                                        setFindingSuccessMessage("Deliberação do achado '" + stableKey + "' gravada e persistida com sucesso.");
+                                      } catch (err) {
+                                        // Falha: NÃO fecha o formulário, preserva todos os campos e exibe erro claro
+                                        setFindingFormError(err?.message || "Erro ao salvar a deliberação no servidor.");
+                                      } finally {
+                                        setSubmittingFindingKey(null);
+                                      }
                                     }}
-                                    className="px-3.5 py-1.5 rounded-lg bg-brand-gold text-slate-950 text-xs font-bold hover:bg-amber-400 disabled:opacity-50"
+                                    className="px-3.5 py-1.5 rounded-lg bg-brand-gold text-slate-950 text-xs font-bold hover:bg-amber-400 disabled:opacity-50 flex items-center gap-1.5"
                                   >
-                                    Salvar Deliberação
+                                    {submittingFindingKey === stableKey ? (
+                                      <>
+                                        <Clock size={12} className="animate-spin" />
+                                        Processando Deliberação...
+                                      </>
+                                    ) : (
+                                      "Salvar Deliberação"
+                                    )}
                                   </button>
                                 </div>
                               </div>
