@@ -56,17 +56,19 @@ import {
   RefreshCw,
   Mail,
   User as UserIcon,
-  Home
+  Home,
+  Search
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { emphasizeStudyMarkdown } from './lib/emphasizeStudyMarkdown';
-import { softenIncidenceMarkdown } from './lib/softenIncidenceMarkdown';
+import { presentSavedLesson } from './lib/presentSavedLesson';
 import { cacheHoldsText } from './lib/officialCacheRestore';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
+import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, setAllowChatGptChoice, type GeminiConnectionTestResult } from './services/geminiService';
+import { contentEngineLabel, getContentProvider, regenerateEngineName, regenerateLessonConfirm, setContentProvider, type ContentProvider } from './lib/contentProvider';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
-import { calcularIncidenciaParaMaterias, FAIXA_LARGURA, FAIXA_ROTULO, instrucaoEnfase } from './utils/incidenciaUtils';
+import { calcularIncidenciaParaMaterias, instrucaoEnfase } from './utils/incidenciaUtils';
 import { type UserProfile, type HomologatedLesson } from './types';
 import { clearLocalAccountData, deleteCurrentAccount, loginWithEmail, loginWithGoogle, publicClientAuthError, registerAccount, requestNewPassword } from './services/authClient';
 import { getCachedTrilhaPart, setCachedTrilhaPart, sanitizeTrilhaCacheForObjectivePhase } from './services/trilhaCacheService';
@@ -78,7 +80,8 @@ import {
   getLessonDocId,
   syncOfficialCatalog,
   ensureObjectiveChallenge,
-  restoreOfficialLessonsFromCloud
+  restoreOfficialLessonsFromCloud,
+  setLocalHomologatedLesson
 } from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -110,7 +113,10 @@ import {
 } from './lib/firebase';
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
-import { IncidenceChart } from './components/IncidenceChart';
+import { LegalReviewPanel } from './components/LegalReviewPanel';
+import { approveLegalReview, closeLegalReviewSupplement, createHumanLegalReviewChange, createLegalReviewAddendum, fetchLatestLegalReview, reauditLegalReview, rejectLegalReview, requestAsyncLegalReview, requestLegalReview, requestLegalReviewSupplement, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewFinding, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { LEGAL_REVIEW_TEST_MATERIAL } from './lib/legalReviewTestMaterial';
+import { legalReviewButtonVisible, legalReviewTestButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
@@ -144,6 +150,21 @@ type AthenaTab = 'chat' | 'stats' | 'reviews' | 'mentees' | 'schedules' | 'trilh
 
 function isCeoAccount(account: { email?: string | null } | null | undefined): boolean {
   return (account?.email || '').toLowerCase().trim() === ATHENA_CEO_EMAIL;
+}
+
+function homologatedReviewReady(
+  lesson: HomologatedLesson | null | undefined,
+  day: number | undefined,
+  part: number
+): boolean {
+  return Boolean(
+    day !== undefined &&
+    lesson &&
+    lesson.day === day &&
+    lesson.part === part &&
+    lesson.status === 'approved' &&
+    !lesson.pendingCloud
+  );
 }
 
 type ResumeState = { tab: AthenaTab; sessionId: string | null };
@@ -299,7 +320,7 @@ interface FailedQuestion extends Question {
 }
 
 const MemoizedMarkdown = memo(({ content }: { content: string }) => (
-  <ReactMarkdown>{emphasizeStudyMarkdown(softenIncidenceMarkdown(content))}</ReactMarkdown>
+  <ReactMarkdown>{emphasizeStudyMarkdown(presentSavedLesson(content))}</ReactMarkdown>
 ));
 
 MemoizedMarkdown.displayName = 'MemoizedMarkdown';
@@ -1161,6 +1182,7 @@ const ChatMessage = memo(({
   onApproveLesson,
   onApproveAndAdvance,
   onEditLesson,
+  onReviewLesson,
   isSavingHomologation,
   homologatedLessonState,
   onGoHome,
@@ -1192,6 +1214,7 @@ const ChatMessage = memo(({
   onApproveLesson?: (idx: number) => Promise<any>,
   onApproveAndAdvance?: (idx: number) => Promise<void>,
   onEditLesson?: (idx: number) => void,
+  onReviewLesson?: (day: number, part: number, blockIndex: number) => void,
   isSavingHomologation?: boolean,
   homologatedLessonState?: HomologatedLesson | null,
   onGoHome?: () => void,
@@ -1288,7 +1311,7 @@ const ChatMessage = memo(({
               ) : (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-mono text-emerald-400 shadow-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Gerado via IA Gemini ({msg.modelName || 'gemini-3.5-flash-lite'})</span>
+                  <span>Gerado via {contentEngineLabel(msg.modelName)} ({msg.modelName || 'gemini-3.8-flash'})</span>
                 </div>
               )}
             </div>
@@ -1402,7 +1425,7 @@ const ChatMessage = memo(({
                   )}
                   {blockIdx === challengeBlockIdx && isCEO && !displayedChallenge && (
                     <p className="mt-4 text-xs text-amber-200/90">
-                      Esta parte está no catálogo sem questões objetivas. Use “Regerar questões” para refazer só este bloco.
+                      Este bloco está no catálogo sem questões objetivas. Use “Regerar questões” para refazer só esta parte.
                     </p>
                   )}
                 </motion.div>
@@ -1463,16 +1486,6 @@ const ChatMessage = memo(({
 
               <div className="space-y-4">
                 <h4 className="text-[10px] font-serif font-bold text-brand-gold uppercase tracking-[0.2em] flex items-center gap-2">
-                  <BarChart2 size={16} />
-                  Incidência por Disciplina/Tema
-                </h4>
-                <Suspense fallback={<div className="h-44 bg-slate-950/40 rounded-3xl border border-white/5 animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Processando mapa estocástico de incidência...</div>}>
-                  <IncidenceChart data={msg.editalData.raioX} />
-                </Suspense>
-              </div>
-
-              <div className="space-y-4">
-                <h4 className="text-[10px] font-serif font-bold text-brand-gold uppercase tracking-[0.2em] flex items-center gap-2">
                   <Target size={16} />
                   Cronograma Ciclo-Evolutivo
                 </h4>
@@ -1512,6 +1525,28 @@ const ChatMessage = memo(({
               animate={{ opacity: 1 }}
               className="pt-4 flex flex-wrap gap-3"
             >
+              {(() => {
+                const lessonCtx = inferTrilhaContext(
+                  { trilhaDay, trilhaMaterialIndex, title: '' },
+                  messages,
+                  msg
+                );
+                const effectiveDay = lessonCtx.day;
+                const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? lessonCtx.part);
+                const reviewReady = homologatedReviewReady(homologatedLessonState, effectiveDay, msgPartIdx);
+                if (!legalReviewButtonVisible(Boolean(isCEO), reviewReady) || effectiveDay === undefined) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onReviewLesson?.(effectiveDay, msgPartIdx, msg.currentBlockIndex ?? 0)}
+                    className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                    title="Audita somente a parte aberta. A aula publicada não é alterada."
+                  >
+                    <Search size={13} />
+                    <span>Revisar esta parte</span>
+                  </button>
+                );
+              })()}
               {(msg.currentBlockIndex ?? 0) < msg.blocks.length - 1 ? (
                 <div className="flex flex-wrap gap-3 items-center w-full pt-2">
                   {isError && retryMessage && (
@@ -1589,7 +1624,7 @@ const ChatMessage = memo(({
                                   <div>
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-brand-gold">
-                                        Curadoria • Parte {msgPartIdx + 1} de {totalParts}
+                                        Curadoria • Bloco {msgPartIdx + 1} de {totalParts}
                                       </span>
                                       {isThisPartApproved ? (
                                         <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -1603,8 +1638,8 @@ const ChatMessage = memo(({
                                     </div>
                                     <p className="text-[11px] text-slate-300 font-medium mt-0.5">
                                       {isThisPartApproved 
-                                        ? `Esta parte já foi homologada e está garantida no cache compartilhado.`
-                                        : `Salve esta parte no cache central para garantir seu acesso caso ocorra instabilidade.`}
+                                        ? `Este bloco já foi homologado e está garantido no cache compartilhado.`
+                                        : `Salve este bloco no cache central para garantir seu acesso caso ocorra instabilidade.`}
                                     </p>
                                   </div>
                                 </div>
@@ -1614,7 +1649,7 @@ const ChatMessage = memo(({
                                     type="button"
                                     onClick={() => onEditLesson?.(msgIdx)}
                                     className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                    title="Editar ou refinar o texto desta parte antes de homologar"
+                                    title="Editar ou refinar o texto deste bloco antes de homologar"
                                   >
                                     <Edit3 size={13} />
                                     <span>Editar</span>
@@ -1626,7 +1661,7 @@ const ChatMessage = memo(({
                                       onClick={() => onApproveLesson?.(msgIdx)}
                                       disabled={isSavingHomologation}
                                       className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-brand-gold via-amber-400 to-yellow-500 hover:brightness-110 text-slate-950 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-[0_4px_15px_rgba(212,175,55,0.3)] active:scale-95 cursor-pointer"
-                                      title="Salvar esta parte imediatamente no cache oficial e Firestore"
+                                      title="Salvar este bloco imediatamente no cache oficial e Firestore"
                                     >
                                       <Trophy size={14} />
                                       <span>{isSavingHomologation ? 'Salvando...' : 'Aprovar e Salvar'}</span>
@@ -1663,7 +1698,7 @@ const ChatMessage = memo(({
                                     }}
                                     className="text-[11px] font-bold text-slate-400 hover:text-slate-200 underline underline-offset-4 transition-colors py-1 cursor-pointer"
                                   >
-                                    Avançar para Parte {msgPartIdx + 2} sem salvar no cache
+                                    Avançar para Bloco {msgPartIdx + 2} sem salvar no cache
                                   </button>
                                 </div>
                               ) : (
@@ -1687,7 +1722,8 @@ const ChatMessage = memo(({
                               const isDayFinished = Boolean(
                                 isDayCompleted || 
                                 msg.content?.includes("Parabéns de Elite") || 
-                                msg.content?.includes("completou todos os blocos") || 
+                                msg.content?.includes("completou todos os blocos") ||
+                                msg.content?.includes("completou todas as partes") || 
                                 msg.content?.includes("Lição Pulada")
                               );
 
@@ -2000,9 +2036,39 @@ export default function App() {
   const [isEditingLesson, setIsEditingLesson] = useState(false);
   const [editingLessonContent, setEditingLessonContent] = useState('');
   const [editingLessonIndex, setEditingLessonIndex] = useState<number | undefined>(undefined);
+  const [legalReviewOpen, setLegalReviewOpen] = useState(false);
+  const [legalReviewPhase, setLegalReviewPhase] = useState<'confirm' | 'running' | 'notice' | 'result' | 'edit' | 'error'>('confirm');
+  const [legalReviewStage, setLegalReviewStage] = useState('Analisando aula');
+  const [legalReviewError, setLegalReviewError] = useState<string | null>(null);
+  const [legalReviewConflict, setLegalReviewConflict] = useState(false);
+  const [legalReviewNotice, setLegalReviewNotice] = useState<{ lastReviewDate: string } | null>(null);
+  const [legalReview, setLegalReview] = useState<LegalReviewView | null>(null);
+  const [legalReviewBusy, setLegalReviewBusy] = useState(false);
+  const [legalReviewDay, setLegalReviewDay] = useState<number | null>(null);
+  const [legalReviewPart, setLegalReviewPart] = useState<number | null>(null);
+  const [legalReviewBlock, setLegalReviewBlock] = useState<number | null>(null);
+  const [legalReviewTestMode, setLegalReviewTestMode] = useState(false);
+  const [legalReviewTestDraft, setLegalReviewTestDraft] = useState(LEGAL_REVIEW_TEST_MATERIAL);
   const [homologationSuccessBanner, setHomologationSuccessBanner] = useState<string | null>(null);
   const [homologationBannerTone, setHomologationBannerTone] = useState<'ok' | 'warn'>('ok');
   const homologationBannerTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!legalReviewOpen || legalReviewPhase !== 'running') return;
+    const labels = [
+      'Analisando aula',
+      'Verificando legislação e jurisprudência',
+      'Consolidando correções',
+      'Preparando comparação'
+    ];
+    let index = 0;
+    setLegalReviewStage(labels[0]);
+    const timer = window.setInterval(() => {
+      index = (index + 1) % labels.length;
+      setLegalReviewStage(labels[index]);
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [legalReviewOpen, legalReviewPhase]);
 
   const showHomologationBanner = (text: string, tone: 'ok' | 'warn') => {
     if (homologationBannerTimer.current) {
@@ -2091,6 +2157,11 @@ export default function App() {
   const [testAiLoading, setTestAiLoading] = useState(false);
   const [testAiResult, setTestAiResult] = useState<GeminiConnectionTestResult | null>(null);
   const [selectedAiModel, setSelectedAiModel] = useState<string>(() => getSelectedModel());
+  const [contentProvider, setContentProviderState] = useState<ContentProvider>(() => getContentProvider());
+
+  useEffect(() => {
+    setAllowChatGptChoice(isCEO);
+  }, [isCEO]);
 
   const handleTestGeminiConnection = async () => {
     setTestAiLoading(true);
@@ -3594,7 +3665,7 @@ ${matList}
       prep = instrucaoEnfase(`o Dia ${dayNum}`, incidencia);
     }
     
-    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e em questões objetivas de ${ATHENA_CAREERS_LABEL}. Siga o fluxo de estudos em blocos!`;
+    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e em questões objetivas de ${ATHENA_CAREERS_LABEL}. Siga o fluxo de estudos em partes! Não atribua percentual nem nível de incidência.`;
   };
 
   const getTrilhaDayDiscursiveMessage = (dayNum: number, materias: { nome: string; conteudo: string }[], semana: number) => {
@@ -3636,11 +3707,11 @@ Sua conduta como Presidente da Mesa Examinadora:
     let extraSource = `\n\n[DIRETRIZES DA BASE DE CONHECIMENTO E PERTINÊNCIA TEMÁTICA ABSOLUTA ATHENA]:
 1. BASE SOBERANA E CONFINAMENTO TEMÁTICO RESTRITO:
    - A sua base soberana de verdade é EXCLUSIVAMENTE o seguinte recorte: ${currentMat.nome} (${currentMat.conteudo}).
-   - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo dos 6 blocos deve nascer e se esgotar no exame deste recorte!
+   - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo das 6 partes deve nascer e se esgotar no exame deste recorte!
    - DIPLOMA NOMEADO É INSUBSTITUÍVEL: se o recorte nomear uma lei, um decreto ou uma resolução pelo número, a aula inteira trata só desse diploma. É proibido trocá-lo por outro, em especial pelos arts. 337-E a 337-P do Código Penal ou pela Lei nº 14.133/2021, salvo quando o próprio recorte programado for expressamente esses dispositivos. A palavra "crimes" no título não autoriza a troca.
 
-2. DIRETRIZES BLOCO A BLOCO (RIGOR ESTRITO):
-   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE a saudação institucional "Olá, ${ATHENA_AUDIENCE_TITLE}!". NUNCA diga Futuro Magistrado, Futuro Juiz ou nome pessoal, pois o conteúdo é homologado para todas as carreiras. Apresente o Raio-X deste recorte (${currentMat.conteudo}) para ${ATHENA_CAREERS_LABEL}. Proibido citar certame nominado (TJSP, MPRS, TRF4, DPU 2024 etc.). Proibido gerar tabelas Markdown.
+2. DIRETRIZES PARTE A PARTE (RIGOR ESTRITO). Os marcadores [BLOCK_1] a [BLOCK_6] continuam internos. Para o aluno, cada um é uma Parte (Parte 1 a Parte 6). O recorte do dia é um Bloco, nunca uma Parte.
+   - [BLOCK_1] (👋 Saudação e foco de leitura): Use SEMPRE a saudação institucional "Olá, ${ATHENA_AUDIENCE_TITLE}!". NUNCA diga Futuro Magistrado, Futuro Juiz ou nome pessoal. O público é só ${ATHENA_CAREERS_LABEL}. Proibido citar Procuradoria, Advocacia Pública, OAB, Delegado de Polícia ou certame nominado (TJSP, MPRS, TRF4, DPU 2024 etc.). Proibido percentual de banca e proibido nível de incidência (alta, média, baixa, menor). Apresente o recorte (${currentMat.conteudo}) e o foco de leitura em três linhas, sem números: Lei Seca, Jurisprudência e Doutrina. Proibido gerar tabelas Markdown.
    
    - [BLOCK_2] (⚖️ Letra da Lei Decodificada): Decodifique, esquematize e disseque com suas próprias palavras e rigor analítico CADA UM dos artigos e princípios compreendidos no intervalo ${currentMat.conteudo}. Destaque núcleos dogmáticos, prazos, exceções legais, postulados normativos e pegadinhas clássicas de banca examinadora, evitando transcrição mecânica literal de apostilas comerciais.
    
@@ -3665,7 +3736,7 @@ Sua conduta como Presidente da Mesa Examinadora:
      * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou o entendimento consolidado deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais, sem inventar números de processos fictícios.
    
    - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}). Cada tópico começa com o rótulo em **negrito** seguido de dois-pontos.
-   - FORMATAÇÃO OBRIGATÓRIA EM TODOS OS BLOCOS: cada tópico, instituto, prazo, competência, exceção e ponto principal fica em **negrito**. Não entregue a lista de pontos principais em texto puro.`;
+   - FORMATAÇÃO OBRIGATÓRIA EM TODAS AS PARTES: cada tópico, instituto, prazo, competência, exceção e ponto principal fica em **negrito**. Não entregue a lista de pontos principais em texto puro.`;
 
     const grounding = getGroundingForTrilhaPart(dayNum, currentMat.nome, currentMat.conteudo);
     if (grounding.hasGrounding) {
@@ -3674,10 +3745,10 @@ Sua conduta como Presidente da Mesa Examinadora:
 
     return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos estudar de forma PARTICIONADA o tema do DIA ${dayNum} (Semana ${semana}) para garantir profundidade monumental sem sobrecarga de processamento.
 
-Dentre os temas programados para hoje, este comando refere-se especificamente à seguinte parte:
-**Parte ${materialIndex + 1} de ${totalMaterials}**: **${currentMat.nome}**: ${currentMat.conteudo}${extraSource}
+Dentre os temas programados para hoje, este comando refere-se especificamente ao seguinte bloco:
+**Bloco ${materialIndex + 1} de ${totalMaterials}**: **${currentMat.nome}**: ${currentMat.conteudo}${extraSource}
 
-Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo específico, com base na melhor doutrina, jurisprudência e na sua complementação por inteligência artificial sob o Princípio de Pareto aplicável a provas anteriores. Siga rigorosamente o fluxo de estudos em 6 blocos!`;
+Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo específico, com base na melhor doutrina, jurisprudência e na sua complementação por inteligência artificial. Siga rigorosamente o fluxo de estudos em 6 partes! Não atribua percentual nem nível de incidência.`;
   };
 
   const prefetchNextTrilhaPart = async (dayNum: number, nextMatIdx: number, resolvedPhase: string, mStyle: any) => {
@@ -3938,7 +4009,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             
             const updatedMessages: Message[] = [
               ...messages,
-              { role: 'user', content: `Entendido. Vamos avançar para a Parte ${nextMatIdx + 1} de ${dayItem.materias.length} (${nextMat.nome})!` }
+              { role: 'user', content: `Entendido. Vamos avançar para o Bloco ${nextMatIdx + 1} de ${dayItem.materias.length} (${nextMat.nome})!` }
             ];
             setMessages(updatedMessages);
             setIsLoading(true);
@@ -4192,8 +4263,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 }
                 const botErrorMessage: Message = {
                   role: 'model',
-                  content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
-                  blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
+                  content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para o Bloco ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
+                  blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para o Bloco ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
                   article: dayNum,
@@ -4217,7 +4288,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 await toggleTrilhaDayComplete(dayNum);
               }
               
-              const congratMsg = `🎉 **Parabéns de Elite!** Você completou todos os blocos de estudo do **Dia ${dayNum} da Trilha Jurídica de 100 Dias!**\n\nTodos os temas programados foram vencidos de forma fracionada e aprofundada. Você faturou **+150 XP**!\n\nContinue obstinado rumo à posse! Deseja programar os estudos de amanhã ou revisar o conteúdo de hoje?`;
+              const congratMsg = `🎉 **Parabéns de Elite!** Você completou todas as partes de estudo do **Dia ${dayNum} da Trilha Jurídica de 100 Dias!**\n\nTodos os temas programados foram vencidos de forma fracionada e aprofundada. Você faturou **+150 XP**!\n\nContinue obstinado rumo à posse! Deseja programar os estudos de amanhã ou revisar o conteúdo de hoje?`;
               
               const finalMessages: Message[] = [
                 ...messages,
@@ -4397,17 +4468,17 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       if (saved.cloud) {
         showHomologationBanner(
           quizCount
-            ? `Dia ${day} · Parte ${part + 1} publicado no catálogo oficial com ${quizCount} questões objetivas. Essa parte vale para todos os alunos.`
-            : `Dia ${day} · Parte ${part + 1} publicado sem questões objetivas. Use Regerar questões para refazer só esse bloco.`,
+            ? `Dia ${day} · Bloco ${part + 1} publicado no catálogo oficial com ${quizCount} questões objetivas. Esse bloco vale para todos os alunos.`
+            : `Dia ${day} · Bloco ${part + 1} publicado sem questões objetivas. Use Regerar questões para refazer só essa parte.`,
           'ok'
         );
       } else {
-        showHomologationBanner(`Dia ${day} · Parte ${part + 1}: ${saved.error || 'não entrou no catálogo oficial.'}`, 'warn');
+        showHomologationBanner(`Dia ${day} · Bloco ${part + 1}: ${saved.error || 'não entrou no catálogo oficial.'}`, 'warn');
       }
       return saved.cloud ? lesson : null;
     } catch (err: any) {
       console.warn("Aviso ao homologar lição:", err);
-      showHomologationBanner(`Dia ${day} · Parte ${part + 1} não entrou no catálogo oficial. ${err?.message || 'Tente Aprovar e Salvar de novo.'}`, 'warn');
+      showHomologationBanner(`Dia ${day} · Bloco ${part + 1} não entrou no catálogo oficial. ${err?.message || 'Tente Aprovar e Salvar de novo.'}`, 'warn');
       return null;
     } finally {
       setIsSavingHomologation(false);
@@ -4427,7 +4498,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
     if (!dayItem || !dayItem.materias) return;
 
-    if (!confirm(`Deseja regerar o conteúdo da Parte ${part + 1} do Dia ${day} (${dayItem.materias[part].nome}) com a IA Gemini?`)) return;
+    if (!confirm(regenerateLessonConfirm({
+      provider: contentProvider,
+      day,
+      block: part + 1,
+      subject: dayItem.materias[part].nome,
+    }))) return;
 
     setIsLoading(true);
     const msg = getTrilhaDayPartitionMessage(day, dayItem.materias, part, dayItem.semana, mentorshipStyle);
@@ -4476,7 +4552,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
     const trilha = inferTrilhaContext(activeSess, messages, targetMsg);
     if (!targetMsg || trilha.day === undefined) {
-      alert('Abra a parte da trilha antes de regerar as questões.');
+      alert('Abra o bloco da trilha antes de regerar as questões.');
       return;
     }
     const day = trilha.day;
@@ -4492,12 +4568,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       })
       .filter(Boolean)
       .join('\n');
-    if (!confirm(`Regerar somente as questões objetivas da Parte ${part + 1} do Dia ${day}? O texto dos outros blocos permanece.`)) return;
+    if (!confirm(`Regerar somente as questões objetivas do Bloco ${part + 1} do Dia ${day}? O texto das outras partes permanece.`)) return;
 
     setIsRegeneratingQuestions(true);
     try {
       const { text, model } = await regenerateObjectiveChallenge(
-        `Dia ${day}, parte ${part + 1}. Matéria: ${subject}.\nGere 10 questões objetivas inéditas somente sobre este recorte. Não reescreva a aula.\n\n${outline}`
+        `Dia ${day}, bloco ${part + 1}. Matéria: ${subject}.\nGere 10 questões objetivas inéditas somente sobre este recorte. Não reescreva a aula.\n\n${outline}`
       );
       const quiz = parseChallengeModelOutput(text);
       if (!quiz || quiz.questions.length < 8) {
@@ -4548,8 +4624,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       }, currentSessionId);
       showHomologationBanner(
         saved.cloud
-          ? `Questões da Parte ${part + 1} do Dia ${day} atualizadas (${lesson.challenge?.questions.length || quiz.questions.length}). O restante da aula foi mantido.`
-          : `Dia ${day} · Parte ${part + 1}: ${saved.error || 'as questões não entraram no catálogo oficial.'}`,
+          ? `Questões do Bloco ${part + 1} do Dia ${day} atualizadas (${lesson.challenge?.questions.length || quiz.questions.length}). O restante da aula foi mantido.`
+          : `Dia ${day} · Bloco ${part + 1}: ${saved.error || 'as questões não entraram no catálogo oficial.'}`,
         saved.cloud ? 'ok' : 'warn'
       );
     } catch (err: any) {
@@ -4602,9 +4678,381 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     if (!activeSess || activeSess.trilhaDay === undefined) return;
     const day = activeSess.trilhaDay;
     const part = activeSess.trilhaMaterialIndex ?? 0;
-    if (!confirm(`Deseja revogar a homologação e despublicar a Parte ${part + 1} do Dia ${day}?`)) return;
+    if (!confirm(`Deseja revogar a homologação e despublicar o Bloco ${part + 1} do Dia ${day}?`)) return;
     await revokeHomologatedLesson(day, part);
     setHomologatedLessonState(null);
+  };
+
+  const legalReviewPollRef = useRef<(() => void) | null>(null);
+
+  const startLegalReviewPolling = (day: number, part: number, blockIndex: number | null) => {
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+
+    let isPolling = true;
+    let timerId: NodeJS.Timeout | null = null;
+
+    const poll = async () => {
+      if (!isPolling) return;
+      try {
+        const latest = await fetchLatestLegalReview(day, part, blockIndex !== null ? blockIndex : undefined);
+        if (!isPolling) return;
+        if (latest.found && latest.review) {
+          if (latest.review.status === 'pending_approval' || latest.review.status === 'approved' || latest.review.status === 'rejected') {
+            setLegalReview(latest.review);
+            setLegalReviewPhase('result');
+            isPolling = false;
+            return;
+          }
+          if (latest.review.status === 'failed') {
+            setLegalReviewError(latest.review.reviewNotes || 'A auditoria falhou. A aula publicada não foi alterada.');
+            setLegalReviewPhase('confirm');
+            isPolling = false;
+            return;
+          }
+          // Continua em queued ou processing
+          setLegalReviewStage(latest.review.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+        }
+      } catch {
+        // Falhas transitórias no poll não cancelam nem disparam nova auditoria
+      }
+
+      if (isPolling) {
+        timerId = setTimeout(poll, 3000);
+      }
+    };
+
+    timerId = setTimeout(poll, 3000);
+
+    legalReviewPollRef.current = () => {
+      isPolling = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  };
+
+  const startSupplementPolling = (day: number, part: number, blockIndex: number | null) => {
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+
+    let isPolling = true;
+    let timerId: NodeJS.Timeout | null = null;
+
+    const poll = async () => {
+      if (!isPolling) return;
+      try {
+        const latest = await fetchLatestLegalReview(day, part, blockIndex !== null ? blockIndex : undefined);
+        if (!isPolling) return;
+        if (latest.found && latest.review) {
+          setLegalReview(latest.review);
+          const suppStatus = latest.review.supplement?.status;
+          if (suppStatus !== 'reserved' && suppStatus !== 'running') {
+            isPolling = false;
+            return;
+          }
+        }
+      } catch {
+        // Falhas transitórias no poll não afetam o processamento
+      }
+
+      if (isPolling) {
+        timerId = setTimeout(poll, 3000);
+      }
+    };
+
+    timerId = setTimeout(poll, 3000);
+
+    legalReviewPollRef.current = () => {
+      isPolling = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  };
+
+  const openLegalReview = async (day: number, part: number, blockIndex?: number) => {
+    setLegalReviewTestMode(false);
+    setLegalReviewDay(day);
+    setLegalReviewPart(part);
+    const bIndex = typeof blockIndex === 'number' ? blockIndex : null;
+    setLegalReviewBlock(bIndex);
+    setLegalReviewError(null);
+    setLegalReviewNotice(null);
+    setLegalReview(null);
+    setLegalReviewConflict(false);
+    setLegalReviewBusy(true);
+    setLegalReviewOpen(true);
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+    try {
+      const latest = await fetchLatestLegalReview(day, part, typeof blockIndex === 'number' ? blockIndex : undefined);
+      if (latest.found && latest.review) {
+        setLegalReviewConflict(Boolean(latest.conflict));
+        if (latest.review.status === 'pending_approval') {
+          setLegalReview(latest.review);
+          setLegalReviewPhase('result');
+          if (latest.review.supplement?.status === 'reserved' || latest.review.supplement?.status === 'running') {
+            startSupplementPolling(day, part, bIndex);
+          }
+        } else if (latest.review.status === 'processing' || latest.review.status === 'queued') {
+          setLegalReview(latest.review);
+          setLegalReviewPhase('running');
+          setLegalReviewStage(latest.review.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+          startLegalReviewPolling(day, part, bIndex);
+        } else {
+          if (latest.conflict) {
+            setLegalReviewError('A aula foi modificada no catálogo após o início da revisão armazenada.');
+          }
+          setLegalReview(latest.review);
+          setLegalReviewPhase('confirm');
+        }
+      } else {
+        setLegalReviewConflict(false);
+        setLegalReviewPhase('confirm');
+      }
+    } catch (err: any) {
+      setLegalReviewError(err?.message || 'Falha ao consultar histórico de auditorias. A auditoria não foi iniciada.');
+      setLegalReviewPhase('error');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const openLegalReviewTest = () => {
+    setLegalReviewTestMode(true);
+    setLegalReviewDay(null);
+    setLegalReviewPart(null);
+    setLegalReviewBlock(null);
+    setLegalReviewError(null);
+    setLegalReviewNotice(null);
+    setLegalReview(null);
+    setLegalReviewConflict(false);
+    setLegalReviewPhase('confirm');
+    setLegalReviewOpen(true);
+  };
+
+  const applyApprovedReviewLesson = async (lesson: {
+    id: string;
+    day: number;
+    part: number;
+    subject: string;
+    topic?: string;
+    content: string;
+    challenge?: unknown;
+    approvedBy?: string;
+    approvedAt?: number;
+    modelUsed?: string;
+    version?: number;
+    review?: string;
+  }) => {
+    const published = ensureObjectiveChallenge({
+      id: lesson.id,
+      day: lesson.day,
+      part: lesson.part,
+      subject: lesson.subject,
+      topic: lesson.topic,
+      content: lesson.content,
+      challenge: normalizeObjectiveChallenge(lesson.challenge) || null,
+      status: 'approved',
+      approvedBy: lesson.approvedBy || ATHENA_CEO_EMAIL,
+      approvedAt: lesson.approvedAt || Date.now(),
+      modelUsed: lesson.modelUsed,
+      version: lesson.version,
+      review: lesson.review
+    });
+    await setLocalHomologatedLesson(published);
+    setHomologatedLessonState(published);
+    const parsed = parseATHENAResponse(published.content);
+    const updatedMessages = (messages || []).map((message) => {
+      if (message.role !== 'model') return message;
+      if (message.trilhaDay !== published.day) return message;
+      const part = message.trilhaMaterialIndex ?? 0;
+      if (part !== published.part) return message;
+      return {
+        ...message,
+        content: parsed.content,
+        blocks: parsed.blocks,
+        challenge: published.challenge || parsed.challenge || message.challenge
+      };
+    });
+    setMessages(updatedMessages);
+    saveSession({
+      messages: updatedMessages,
+      trilhaDay: published.day,
+      trilhaMaterialIndex: published.part
+    }, currentSessionId);
+  };
+
+  const runLegalReviewTest = async () => {
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewPhase('running');
+    try {
+      const result = await requestLegalReviewTest(legalReviewTestDraft);
+      if (!result.review?.testMode) {
+        throw new Error('A auditoria de teste não foi isolada. Nenhuma aula foi alterada.');
+      }
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A auditoria falhou. Nenhuma aula foi alterada.');
+      setLegalReviewPhase('confirm');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const endLegalReviewTest = async () => {
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      if (legalReview) await rejectLegalReview(legalReview.id);
+      setLegalReview(null);
+      setLegalReviewTestMode(false);
+      setLegalReviewOpen(false);
+      showHomologationBanner('Teste encerrado. Nenhuma aula foi alterada.', 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'Não foi possível encerrar o teste. Nenhuma aula foi alterada.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const runLegalReview = async (force: boolean) => {
+    if (legalReviewDay === null || legalReviewPart === null) return;
+    if (force && legalReview && legalReview.status === 'pending_approval') {
+      setLegalReviewError('A opção force=true está bloqueada para preservar o histórico: o índice do catálogo não mantém array histórico de revisões. Executar uma nova revisão sobrescreveria o ponteiro latestReviewId, tornando inacessível a revisão existente e os achados recuperados da att-2.');
+      return;
+    }
+    if (force && !confirm('ATENÇÃO: Gerar uma nova revisão jurídica enviará uma nova chamada paga à OpenAI e substituirá o ponteiro da última revisão no catálogo. Deseja realmente prosseguir?')) {
+      return;
+    }
+    if (legalReviewConflict && !force) {
+      setLegalReviewError('Já existe uma revisão pendente com divergência de catálogo. Para visualizá-la, use a tela de resultados.');
+      return;
+    }
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewPhase('running');
+    setLegalReviewStage('Iniciando auditoria jurídica...');
+    try {
+      const result = await requestAsyncLegalReview(
+        legalReviewDay,
+        legalReviewPart,
+        legalReviewBlock !== null ? legalReviewBlock : undefined,
+        force
+      );
+      if (result.alreadyReviewed) {
+        setLegalReviewNotice({ lastReviewDate: result.lastReviewDate || '' });
+        setLegalReviewPhase('notice');
+        return;
+      }
+      if (result.existingPending && result.review) {
+        setLegalReview(result.review);
+        setLegalReviewPhase('result');
+        return;
+      }
+      if (result.enqueued || result.alreadyProcessing) {
+        setLegalReviewStage(result.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+        startLegalReviewPolling(legalReviewDay, legalReviewPart, legalReviewBlock);
+        return;
+      }
+      throw new Error(result.message || 'Resposta inesperada ao enfileirar auditoria. Nenhuma chamada foi executada.');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A solicitação falhou. A aula publicada não foi alterada.');
+      setLegalReviewPhase('confirm');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const approveOpenLegalReview = async () => {
+    if (!legalReview) return;
+    if (legalReviewConflict) {
+      setLegalReviewError('A aprovação está bloqueada: o conteúdo do catálogo oficial difere do snapshot desta revisão histórica.');
+      return;
+    }
+    if (legalReview.testMode || legalReviewTestMode) {
+      setLegalReviewError('Revisão de teste não pode ser publicada. Nenhuma aula foi alterada.');
+      return;
+    }
+    if (legalReview.previewOnly || typeof legalReview.blockIndex === 'number') {
+      setLegalReviewError('A prévia desta parte não substitui a aula publicada. Nenhuma aula foi alterada.');
+      return;
+    }
+    if (legalReview.verificationLevel === 'FALHA_NA_VERIFICACAO') {
+      setLegalReviewError('A aprovação integral está bloqueada: as afirmações jurídicas materiais não foram devidamente verificadas em fontes oficiais.');
+      return;
+    }
+    if (legalReview.supplement?.status === 'inconclusive' || (Array.isArray(legalReview.supplement?.findings) && legalReview.supplement.findings.some((f: any) => f.classification === 'nao_verificada'))) {
+      setLegalReviewError('A aprovação está bloqueada: a complementação jurídica contém achados inconclusivos ou não verificados em fontes oficiais.');
+      return;
+    }
+    if (!confirm('Substituir a aula publicada por esta versão revisada? A versão anterior fica guardada no histórico da revisão.')) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      const result = await approveLegalReview(legalReview.id);
+      await applyApprovedReviewLesson(result.lesson);
+      setLegalReviewOpen(false);
+      showHomologationBanner(`Dia ${result.lesson.day} · Bloco ${result.lesson.part + 1} substituído pela revisão aprovada.`, 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A aprovação falhou. A aula publicada não foi alterada.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const rejectOpenLegalReview = async () => {
+    if (!legalReview) return;
+    if (!confirm('Rejeitar esta revisão? A aula publicada permanece como está.')) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      await rejectLegalReview(legalReview.id);
+      setLegalReviewOpen(false);
+      showHomologationBanner('Revisão rejeitada. A aula publicada permanece como está.', 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'Não foi possível rejeitar a revisão.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const reauditOpenLegalReview = async () => {
+    if (!legalReview) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewStage('Revisando novamente a versão editada');
+    setLegalReviewPhase('running');
+    try {
+      const result = await reauditLegalReview(legalReview.id);
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A auditoria falhou. A aula publicada não foi alterada.');
+      setLegalReviewPhase('result');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const saveOpenLegalReviewCandidate = async (markdown: string) => {
+    if (!legalReview) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      const result = await saveLegalReviewCandidate(legalReview.id, markdown);
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A candidata não foi salva. A aula publicada permanece como está.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
   };
 
   const skipTrilhaLesson = async (msgIdx: number) => {
@@ -4761,8 +5209,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             const errorMessage = err?.message || err?.toString() || "Erro na conexão com ATHENA";
             const botErrorMessage: Message = {
               role: 'model',
-              content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
-              blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
+              content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para o Bloco ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
+              blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para o Bloco ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
               currentBlockIndex: 0,
               subject: nextMat.nome,
               article: dayNum,
@@ -4963,10 +5411,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               <button
                 onClick={() => setIsAiSettingsOpen(true)}
                 className="px-2.5 py-1.5 text-brand-gold hover:text-white transition-all rounded-xl bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/25 flex items-center gap-1.5 active:scale-95 text-[10px] font-bold cursor-pointer shadow-sm"
-                title="Status e Diagnóstico da IA Gemini"
+                title="Escolher Gemini ou ChatGPT"
               >
                 <Cpu size={14} className="animate-pulse text-brand-gold shrink-0" />
-                <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">IA Status</span>
+                <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">
+                  {contentProvider === 'chatgpt' ? 'ChatGPT' : 'Gemini'}
+                </span>
               </button>
             )}
 
@@ -5200,7 +5650,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                       Perfil Automático (Ativo)
                     </span>
                     <span className="text-[9px] text-slate-500 leading-none mt-0.5 block">
-                      A Athena inteligente alternará dinamicamente entre Lei Seca, Doutrina e Jurisprudência conforme a incidência do tema.
+                      A Athena alterna o foco de leitura entre Lei Seca, Doutrina e Jurisprudência, sem percentual e sem nível de incidência.
                     </span>
                   </div>
                 </div>
@@ -5570,7 +6020,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 <div className="text-center space-y-3">
                   <h2 className="text-3xl font-serif font-bold text-slate-100">Bem-vindo à <span className="text-brand-gold">ATHENA</span></h2>
                   <p className="text-slate-400 text-xs leading-relaxed max-w-sm mx-auto">
-                    Mentoria jurídica de elite com análise de edital, 6 blocos estruturados e simulação de prova oral por inteligência artificial.
+                    Mentoria jurídica de elite com análise de edital, 6 partes estruturadas e simulação de prova oral por inteligência artificial.
                   </p>
                 </div>
 
@@ -6143,16 +6593,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                         <div className="space-y-4">
                            <h4 className="text-sm font-serif font-bold text-brand-gold flex items-center gap-2">
-                             <BarChart2 size={16} />
-                             Resumo do Raio-X
-                           </h4>
-                           <Suspense fallback={<div className="h-44 bg-slate-950/40 rounded-3xl border border-white/5 animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium whitespace-normal">Processando mapa estocástico de incidência...</div>}>
-                             <IncidenceChart data={schedule.raioX} />
-                           </Suspense>
-                        </div>
-
-                        <div className="space-y-4">
-                           <h4 className="text-sm font-serif font-bold text-brand-gold flex items-center gap-2">
                              <Target size={16} />
                              Cronograma Semanal
                            </h4>
@@ -6272,7 +6712,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                              onClick={() => {
                                                setActiveTab('chat');
                                                setActiveStudyItem({ scheduleId: schedule.id, itemIndex: idx });
-                                               handleSendMessageRequest(`ATHENA, conforme nosso cronograma do edital "${schedule.title}", vamos iniciar o estudo EXAUSTIVO do tema: "${item.topico}" da disciplina "${item.disciplina}". Siga rigorosamente o fluxo de 6 blocos, fornecendo profundidade máxima para nível de MP/Magistratura e gerando exatamente ${Math.max(10, item.questoes)} questões desafiadoras no final.`, false);
+                                               handleSendMessageRequest(`ATHENA, conforme nosso cronograma do edital "${schedule.title}", vamos iniciar o estudo EXAUSTIVO do tema: "${item.topico}" da disciplina "${item.disciplina}". Siga rigorosamente o fluxo de 6 partes, fornecendo profundidade máxima para Magistratura, Ministério Público e Defensoria Pública, sem percentual de incidência, e gerando exatamente ${Math.max(10, item.questoes)} questões desafiadoras no final.`, false);
                                              }}
                                              className={cn(
                                                "text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ml-auto justify-end transition-all",
@@ -6393,8 +6833,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   <div className="grid grid-cols-1 gap-6 text-slate-100">
                     {TRILHA_JURIDICA_DATA.filter(d => d.semana === selectedTrilhaWeek).map((dayItem) => {
                       const isCompleted = trilhaCompletedDays.includes(dayItem.dia);
-                      const incidencia = calcularIncidenciaParaMaterias(dayItem.dia, dayItem.materias);
-                      
+
                       return (
                         <div
                           key={dayItem.dia}
@@ -6482,60 +6921,6 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 <Scale size={13} />
                                 Estudar Agora
                               </button>
-                            </div>
-                          </div>
-
-                          {/* Estatística de Incidência do Dia */}
-                          <div className="bg-slate-950/20 rounded-2xl p-4 border border-white/5 flex flex-col md:flex-row gap-4 items-stretch justify-between">
-                            <div className="space-y-1.5 flex-1 min-w-[200px]">
-                              <div className="flex items-center gap-2">
-                                <span className={cn(
-                                  "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded font-mono",
-                                  incidencia.prioridade === 'lei_seca' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                                  incidencia.prioridade === 'doutrina' ? "bg-brand-gold/10 text-brand-gold border border-brand-gold/20" :
-                                  "bg-sky-500/10 text-sky-400 border border-sky-500/20"
-                                )}>
-                                  Foco Inteligente: {incidencia.label}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-slate-450 leading-relaxed font-sans">
-                                💡 <strong className="text-slate-350">Análise das Bancas:</strong> {incidencia.justificativa}
-                              </p>
-                              <p className="text-[10px] text-slate-500 font-mono">
-                                🎯 <strong className="text-slate-400">Referência Histórica:</strong> {incidencia.concursoHistorico}
-                              </p>
-                            </div>
-                            
-                            <div className="flex flex-row md:flex-col justify-around gap-4 items-center md:items-stretch min-w-[200px] border-t md:border-t-0 md:border-l border-white/5 pt-2 md:pt-0 md:pl-4">
-                              <div className="space-y-1 w-full text-left">
-                                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                                  <span>Lei Seca</span>
-                                  <span className="text-emerald-400 font-bold">{FAIXA_ROTULO[incidencia.faixas.leiSeca]}</span>
-                                </div>
-                                <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-emerald-450 h-full rounded-full" style={{ width: `${FAIXA_LARGURA[incidencia.faixas.leiSeca]}%` }} />
-                                </div>
-                              </div>
-                              
-                              <div className="space-y-1 w-full text-left">
-                                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                                  <span>Doutrina</span>
-                                  <span className="text-brand-gold font-bold">{FAIXA_ROTULO[incidencia.faixas.doutrina]}</span>
-                                </div>
-                                <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-brand-gold h-full rounded-full" style={{ width: `${FAIXA_LARGURA[incidencia.faixas.doutrina]}%` }} />
-                                </div>
-                              </div>
-                              
-                              <div className="space-y-1 w-full text-left">
-                                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                                  <span>Jurisprudência</span>
-                                  <span className="text-sky-400 font-bold">{FAIXA_ROTULO[incidencia.faixas.jurisprudencia]}</span>
-                                </div>
-                                <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-sky-400 h-full rounded-full" style={{ width: `${FAIXA_LARGURA[incidencia.faixas.jurisprudencia]}%` }} />
-                                </div>
-                              </div>
                             </div>
                           </div>
 
@@ -6680,7 +7065,6 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   const totalPercent = Math.round((completedDaysInTrilha / TRILHA_JURIDICA_DATA.length) * 100);
 
                   const isInspectedCompleted = trilhaCompletedDays.includes(activeInspectedDayNum);
-                  const activeIncidencia = calcularIncidenciaParaMaterias(activeInspectedDayNum, activeTrilhaDayItem.materias);
 
                   return (
                     <motion.div
@@ -6754,57 +7138,6 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 </div>
                               ))}
                             </div>
-
-                            {/* Bloco de Priorização de Incidência na Home */}
-                            <div className="bg-slate-950/40 border border-white/5 rounded-2xl p-3.5 space-y-2 mt-3">
-                              <div className="flex items-center justify-between">
-                                <span className={cn(
-                                  "text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded font-mono",
-                                  activeIncidencia.prioridade === 'lei_seca' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                                  activeIncidencia.prioridade === 'doutrina' ? "bg-brand-gold/10 text-brand-gold border border-brand-gold/20" :
-                                  "bg-sky-500/10 text-sky-400 border border-sky-500/20"
-                                )}>
-                                  Foco de Banca: {activeIncidencia.label}
-                                </span>
-                                <span className="text-[9px] font-bold font-mono text-slate-500">Mapeamento de incidência</span>
-                              </div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                💡 <strong className="text-slate-300">Análise de Incidência:</strong> {activeIncidencia.justificativa}
-                              </p>
-                              <p className="text-[9px] text-slate-500 font-mono">
-                                🏛️ <strong className="text-slate-450">Referência Prova:</strong> {activeIncidencia.concursoHistorico}
-                              </p>
-                              
-                              <div className="grid grid-cols-3 gap-3 pt-2.5 border-t border-white/5">
-                                <div>
-                                  <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
-                                    <span>Lei Seca</span>
-                                    <span className="text-emerald-400 font-bold">{FAIXA_ROTULO[activeIncidencia.faixas.leiSeca]}</span>
-                                  </div>
-                                  <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-emerald-400 h-full" style={{ width: `${FAIXA_LARGURA[activeIncidencia.faixas.leiSeca]}%` }} />
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
-                                    <span>Doutrina</span>
-                                    <span className="text-brand-gold font-bold">{FAIXA_ROTULO[activeIncidencia.faixas.doutrina]}</span>
-                                  </div>
-                                  <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-brand-gold h-full" style={{ width: `${FAIXA_LARGURA[activeIncidencia.faixas.doutrina]}%` }} />
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
-                                    <span>Jurisprudência</span>
-                                    <span className="text-sky-450 font-bold">{FAIXA_ROTULO[activeIncidencia.faixas.jurisprudencia]}</span>
-                                  </div>
-                                  <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-sky-400 h-full" style={{ width: `${FAIXA_LARGURA[activeIncidencia.faixas.jurisprudencia]}%` }} />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
                           </div>
 
                           {/* Quick action buttons for the inspected day */}
@@ -6814,7 +7147,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 handleStartTrilhaStudy(activeInspectedDayNum, 'estudo');
                               }}
                               className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-widest transition-all bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 shadow-[0_8px_25px_rgba(212,175,55,0.4)] hover:shadow-[0_12px_35px_rgba(212,175,55,0.6)] hover:brightness-110 active:scale-95 cursor-pointer border border-amber-300/80 group"
-                              title="Iniciar estudo teórico guiado dividido em blocos"
+                              title="Iniciar estudo teórico guiado dividido em partes"
                             >
                               <Sparkles size={16} className="text-slate-950 group-hover:scale-125 transition-transform" />
                               <span className="font-extrabold tracking-wider">ESTUDAR DIA {activeInspectedDayNum}</span>
@@ -7019,6 +7352,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                             visibleLesson?.content
                           )
                         );
+                        const reviewReady = homologatedReviewReady(homologatedLessonState, tDay, tMatIdx ?? 0);
                         
                         const visibleMessages = (messages || []).filter(m => !getIsInstructionMessage(m));
                         
@@ -7048,7 +7382,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
 
                                 <p className="text-xs text-slate-300 leading-relaxed font-sans">
                                   {tDay ? (
-                                    <>Sessão de estudos pronta para o <strong>Dia {tDay} ({guidedSubject})</strong>. Clique abaixo para gerar sua mentoria analítica em 6 blocos com o Princípio de Pareto (80/20).</>
+                                    <>Sessão de estudos pronta para o <strong>Dia {tDay} ({guidedSubject})</strong>. Clique abaixo para gerar sua mentoria analítica em 6 partes.</>
                                   ) : (
                                     <>Sessão pronta para <strong>{guidedSubject}</strong>. Clique no botão abaixo para iniciar a mentoria guiada.</>
                                   )}
@@ -7097,7 +7431,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                   <p className="text-xs text-slate-400 leading-relaxed font-sans">
                                     {tDay ? (
                                       <>
-                                        Iniciando a sessão de estudos para a <strong>Parte {(tMatIdx !== undefined) ? tMatIdx + 1 : 1} de {tTotal}</strong> do seu cronograma. ATHENA está processando a fonte, jurisprudências e regulamentos doutrinários para moldar um material otimizado.
+                                        Iniciando a sessão de estudos para o <strong>Bloco {(tMatIdx !== undefined) ? tMatIdx + 1 : 1} de {tTotal}</strong> do seu cronograma. ATHENA está processando a fonte, jurisprudências e regulamentos doutrinários para moldar um material otimizado.
                                       </>
                                     ) : (
                                       <>
@@ -7180,7 +7514,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                         )}
                                       </div>
                                       <h4 className="text-sm font-bold text-slate-100 mt-1">
-                                        Dia {tDay} • Parte {(tMatIdx ?? 0) + 1} de {tTotal} ({guidedSubject})
+                                        Dia {tDay} • Bloco {(tMatIdx ?? 0) + 1} de {tTotal} ({guidedSubject})
                                       </h4>
                                       {cacheCurrent && homologatedLessonState?.approvedAt && (
                                         <p className="text-[11px] text-slate-400 mt-0.5">
@@ -7191,6 +7525,27 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                   </div>
 
                                   <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
+                                    {legalReviewTestButtonVisible(Boolean(isCEO)) && (
+                                      <button
+                                        type="button"
+                                        onClick={openLegalReviewTest}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                        title="Testa o revisor com material sintético. O catálogo dos alunos não é alterado."
+                                      >
+                                        Testar Revisor Jurídico
+                                      </button>
+                                    )}
+                                    {legalReviewButtonVisible(Boolean(isCEO), reviewReady) && tDay !== undefined && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openLegalReview(tDay, tMatIdx ?? 0)}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                        title="Revisão jurídica editorial integral da aula em cache com qualidade técnica aprofundada."
+                                      >
+                                        <Search size={14} />
+                                        Revisar
+                                      </button>
+                                    )}
                                     <button
                                       onClick={handleCeoRegenerateQuestions}
                                       disabled={isLoading || isRegeneratingQuestions}
@@ -7205,7 +7560,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                       onClick={handleCeoRegenerateLesson}
                                       disabled={isLoading || isRegeneratingQuestions}
                                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Regerar a aula inteira com a IA Gemini"
+                                      title={`Regerar a aula inteira com a IA ${regenerateEngineName(contentProvider)}`}
                                     >
                                       <RotateCw size={14} className={cn(isLoading && "animate-spin")} />
                                       Regerar IA
@@ -7277,6 +7632,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 onApproveLesson={handleCeoApproveLesson}
                                 onApproveAndAdvance={handleCeoApproveAndAdvance}
                                 onEditLesson={handleCeoEditOpen}
+                                onReviewLesson={openLegalReview}
                                 isSavingHomologation={isSavingHomologation}
                                 homologatedLessonState={homologatedLessonState}
                                 onGoHome={handleGoHome}
@@ -7418,7 +7774,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
             className="fixed right-2.5 bottom-24 md:right-4 md:top-1/2 md:-translate-y-1/2 md:bottom-auto z-30 flex flex-col items-center gap-2 p-2 bg-slate-900/95 backdrop-blur-md rounded-2xl border border-brand-gold/30 shadow-[0_15px_40px_rgba(0,0,0,0.6)] max-w-[48px]"
           >
             <div className="text-[8px] font-black text-brand-gold select-none pb-1 border-b border-white/5 uppercase tracking-tighter text-center leading-none">
-              Bloco
+              Parte
             </div>
             <div className="flex flex-col gap-2 relative my-1">
               {/* Vertical connecting line */}
@@ -7593,7 +7949,9 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                 </div>
                 <div>
                   <h3 className="text-base font-serif font-bold text-slate-100">Cérebro IA ATHENA</h3>
-                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">Google Gemini 2026</p>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">
+                    {contentProvider === 'chatgpt' ? 'ChatGPT' : 'Google Gemini'}
+                  </p>
                 </div>
               </div>
               <button
@@ -7605,15 +7963,62 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
             </div>
 
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContentProvider('gemini');
+                    setContentProviderState('gemini');
+                    setTestAiResult(null);
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    contentProvider === 'gemini'
+                      ? 'bg-brand-gold/15 border-brand-gold/60 text-white shadow-lg'
+                      : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold">Gemini</span>
+                    {contentProvider === 'gemini' && <Check size={12} className="text-brand-gold" />}
+                  </div>
+                  <p className="text-[9px] text-slate-400 leading-tight">Cérebro atual das aulas</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContentProvider('chatgpt');
+                    setContentProviderState('chatgpt');
+                    setTestAiResult(null);
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    contentProvider === 'chatgpt'
+                      ? 'bg-brand-gold/15 border-brand-gold/60 text-white shadow-lg'
+                      : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold">ChatGPT</span>
+                    {contentProvider === 'chatgpt' && <Check size={12} className="text-brand-gold" />}
+                  </div>
+                  <p className="text-[9px] text-slate-400 leading-tight">Próximas aulas e o Regerar</p>
+                </button>
+              </div>
+
               <div className="p-3.5 bg-slate-950/60 rounded-2xl border border-white/5 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cérebro IA Oficial</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    {contentProvider === 'chatgpt' ? 'ChatGPT no servidor' : 'Cérebro IA Oficial'}
+                  </span>
                   <span className="text-[9px] font-mono uppercase bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-bold">
                     Temp: 0.10 (Anti-Alucinação)
                   </span>
                 </div>
-                
-                {/* Seletor Visual de Modelo Oficial 2026 */}
+
+                {contentProvider === 'chatgpt' ? (
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    As aulas novas, o Regerar e as questões passam a ser escritos pelo ChatGPT. O Gemini continua disponível neste seletor. A chave da OpenAI não entra no aplicativo.
+                  </p>
+                ) : (
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <button
                     type="button"
@@ -7653,6 +8058,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                     <p className="text-[9px] text-slate-400 leading-tight">Raciocínio Profundo • Nível Banca / 2ª Fase</p>
                   </button>
                 </div>
+                )}
 
                 <div className="flex items-center justify-between pt-1 border-t border-white/5">
                   <span className="text-[9px] text-slate-500">Modo de Execução:</span>
@@ -7687,7 +8093,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                       : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
                   }`}>
                     <div className="flex items-center justify-between font-bold text-[11px] mb-1">
-                      <span>{testAiResult.success ? "✓ Conectado ao Google Gemini" : "✕ Falha na Comunicação"}</span>
+                      <span>{testAiResult.success ? `✓ Conectado ao ${contentEngineLabel(testAiResult.model)}` : "✕ Falha na Comunicação"}</span>
                       {testAiResult.latencyMs > 0 && (
                         <span className="text-[10px] text-slate-400 font-normal">{testAiResult.latencyMs}ms</span>
                       )}
@@ -7702,7 +8108,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
               </div>
 
               <p className="text-[10px] text-slate-400 leading-relaxed">
-                A chave da API Gemini permanece exclusivamente no servidor (variável de ambiente). O aplicativo móvel e o navegador nunca recebem nem armazenam essa credencial.
+                As chaves do Gemini e do ChatGPT ficam só no servidor. O aplicativo não recebe nem guarda essas credenciais. Alunos continuam no Gemini.
               </p>
             </div>
           </motion.div>
@@ -7787,6 +8193,228 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
     </AnimatePresence>
 
     {/* Modal de Edição de Curadoria do CEO */}
+    <LegalReviewPanel
+      open={legalReviewOpen}
+      phase={legalReviewPhase}
+      stageLabel={legalReviewStage}
+      error={legalReviewError}
+      notice={legalReviewNotice}
+      review={legalReview}
+      busy={legalReviewBusy}
+      onClose={() => {
+        if (legalReviewPollRef.current) {
+          legalReviewPollRef.current();
+          legalReviewPollRef.current = null;
+        }
+        setLegalReviewOpen(false);
+      }}
+      onRetryFetch={() => {
+        if (legalReviewDay !== null && legalReviewPart !== null) {
+          void openLegalReview(legalReviewDay, legalReviewPart, legalReviewBlock !== null ? legalReviewBlock : undefined);
+        }
+      }}
+      conflict={legalReviewConflict}
+      onViewHistorical={() => setLegalReviewPhase('result')}
+      onStart={() => { void (legalReviewTestMode ? runLegalReviewTest() : runLegalReview(false)); }}
+      onForce={() => { void runLegalReview(true); }}
+      onApprove={() => { void approveOpenLegalReview(); }}
+      onReject={() => { void rejectOpenLegalReview(); }}
+      onEdit={() => setLegalReviewPhase('edit')}
+      onBack={() => setLegalReviewPhase('result')}
+      onSaveCandidate={(markdown) => { void saveOpenLegalReviewCandidate(markdown); }}
+      onReaudit={() => { void reauditOpenLegalReview(); }}
+      onResolveChange={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await resolveLegalReviewChange(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar resolução da alteração.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onResolveQuestion={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await resolveLegalReviewQuestion(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar resolução da questão coordenada.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onResolveFinding={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await resolveLegalReviewFinding(legalReview.id, params);
+          // Critério Obrigatório de Sucesso (Etapa 19.2):
+          // 1. Validar resposta positiva do endpoint
+          const resolvedKey = params.findingKey;
+          if (resolvedKey && res.review?.findingDecisions && !res.review.findingDecisions[resolvedKey]) {
+            throw new Error("A API respondeu mas a deliberação não consta no estado retornado pelo servidor.");
+          }
+
+          // 2. Confirmação obrigatória por releitura independente (read-after-write) do backend (Etapa 19.3)
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+
+            const freshRev = recheck.review;
+            // 2.1 Mesmo reviewId
+            if (freshRev.id !== legalReview.id) {
+              throw new Error(`Inconsistência de versão: a consulta independente retornou outra revisão (${freshRev.id} vs ${legalReview.id}). Persistência não confirmada.`);
+            }
+
+            // 2.2 Integridade do candidateHash
+            if (freshRev.candidateHash !== legalReview.candidateHash) {
+              throw new Error("O hash do candidato foi modificado durante a operação. Recarregue a página antes de prosseguir.");
+            }
+
+            // 2.3 Confirmação da decisão persistida
+            if (resolvedKey) {
+              const freshDec = freshRev.findingDecisions?.[resolvedKey];
+              if (!freshDec) {
+                throw new Error(`A persistência do achado '${resolvedKey}' não pôde ser confirmada na nova leitura do banco de dados.`);
+              }
+              if (freshDec.action !== params.action) {
+                throw new Error(`Divergência de ação gravada para o achado '${resolvedKey}': esperava '${params.action}', obteve '${freshDec.action}'.`);
+              }
+              if (freshDec.justification?.trim() !== params.justification?.trim()) {
+                throw new Error(`Divergência de fundamentação gravada para o achado '${resolvedKey}'. Persistência rejeitada.`);
+              }
+              if (params.expectedCandidateHash && freshDec.expectedCandidateHash !== params.expectedCandidateHash) {
+                throw new Error(`Divergência de hash esperado gravado para o achado '${resolvedKey}'.`);
+              }
+            }
+
+            setLegalReview(freshRev);
+            return;
+          }
+
+          setLegalReview(res.review);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao processar deliberação do achado jurídico.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCloseSupplement={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await closeLegalReviewSupplement(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar encerramento da complementação jurídica.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCreateHumanChange={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await createHumanLegalReviewChange(legalReview.id, params);
+          if (!res.review) {
+            throw new Error("A API respondeu mas o estado atualizado da revisão não foi retornado.");
+          }
+
+          // Confirmação read-after-write por releitura fresca do backend
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+            const freshRev = recheck.review;
+            // Valida que a nova alteração humana consta em freshRev.changes
+            const matchingHumanChange = (freshRev.changes || []).find(
+              (c) => c.authorType === "HUMAN_CEO" && c.originFindingKey === params.originFindingKey
+            );
+            if (!matchingHumanChange) {
+              throw new Error("A alteração humana criada não foi confirmada na releitura fresca do banco de dados.");
+            }
+            setLegalReview(freshRev);
+            return;
+          }
+
+          setLegalReview(res.review);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao salvar alteração textual humana.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCreateAddendum={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await createLegalReviewAddendum(legalReview.id, params);
+          if (!res.review) {
+            throw new Error("A API respondeu mas o estado atualizado da revisão não foi retornado.");
+          }
+
+          // Confirmação read-after-write por releitura fresca do backend
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+            const freshRev = recheck.review;
+            const matchingAddendum = (freshRev.addenda || []).find(
+              (a) => a.targetFindingKey === params.targetFindingKey
+            );
+            if (!matchingAddendum) {
+              throw new Error("O aditamento criado não foi confirmado na releitura fresca do banco de dados.");
+            }
+            setLegalReview(freshRev);
+            return;
+          }
+
+          setLegalReview(res.review);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao emitir aditamento histórico.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      testMode={legalReviewTestMode}
+      sectionPreview={legalReviewBlock !== null && !legalReviewTestMode}
+      testDraft={legalReviewTestDraft}
+      onTestDraftChange={setLegalReviewTestDraft}
+      onEndTest={() => { void endLegalReviewTest(); }}
+      onRequestSupplement={async () => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await requestLegalReviewSupplement(legalReview.id);
+          setLegalReview(res.review);
+          if (res.review.supplement?.status === 'reserved' || res.review.supplement?.status === 'running') {
+            startSupplementPolling(legalReview.day, legalReview.part, legalReviewBlock);
+          }
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Falha ao executar complementação jurídica.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+    />
     <AnimatePresence>
       {isEditingLesson && (
         <motion.div
@@ -7810,7 +8438,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   <h3 className="text-base font-serif font-bold text-slate-100">Editor de Curadoria do CEO</h3>
                   <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold font-mono">
                     {editingLessonIndex !== undefined && messages[editingLessonIndex]
-                      ? `Ajustar Parte ${(messages[editingLessonIndex].trilhaMaterialIndex !== undefined ? messages[editingLessonIndex].trilhaMaterialIndex + 1 : 1)} (${messages[editingLessonIndex].subject || 'Direito'}) Antes de Homologar`
+                      ? `Ajustar Bloco ${(messages[editingLessonIndex].trilhaMaterialIndex !== undefined ? messages[editingLessonIndex].trilhaMaterialIndex + 1 : 1)} (${messages[editingLessonIndex].subject || 'Direito'}) Antes de Homologar`
                       : 'Ajustar Texto da Lição Antes de Homologar'}
                   </p>
                 </div>

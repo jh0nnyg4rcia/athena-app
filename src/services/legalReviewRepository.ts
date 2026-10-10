@@ -1,0 +1,248 @@
+import { createHash, randomUUID } from "node:crypto";
+import { isSectionReviewKey } from "../lib/catalogBlock";
+import type { EditorialIntegrityValidation, HumanReviewDecision, LegalReviewIndex, LegalReviewSupplement, LegalReviewView, StoredCatalogLesson } from "../lib/legalReviewTypes";
+import { computeDecisionStateHash } from "../lib/legalReviewValidate";
+
+export function hashLessonContent(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function stableValue(value: unknown): unknown {
+  if (value === undefined) return null;
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(stableValue);
+  const record = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(record).sort()) {
+    if (record[key] !== undefined) sorted[key] = stableValue(record[key]);
+  }
+  return sorted;
+}
+
+/** Hash do snapshot que a aprovação compara. Inclui os campos que a revisão não pode sobrescrever em silêncio. */
+export function hashCatalogSnapshot(lesson: {
+  content: string;
+  subject: string;
+  topic?: string;
+  challenge?: unknown;
+  approvedAt?: number | null;
+  version?: number | null;
+}): string {
+  const canonical = JSON.stringify(stableValue({
+    content: lesson.content,
+    subject: lesson.subject,
+    topic: lesson.topic ?? "",
+    challenge: lesson.challenge ?? null,
+    approvedAt: lesson.approvedAt ?? null,
+    version: typeof lesson.version === "number" ? lesson.version : null,
+  }));
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+export function newReviewId(): string {
+  return `rev_${randomUUID()}`;
+}
+
+export function isReviewId(value: unknown): value is string {
+  return typeof value === "string" && /^rev_[0-9a-f-]{36}$/i.test(value);
+}
+
+/** Tempo máximo sem renovação em que a revisão ainda pode estar executando. */
+export const PROCESSING_LEASE_MS = 2 * 60 * 1000;
+
+/** Renovação do cadeado enquanto o processo da auditoria continua vivo. */
+export const PROCESSING_HEARTBEAT_MS = 20 * 1000;
+
+export const INTERRUPTED_PROCESSING_MESSAGE =
+  "A revisão anterior foi interrompida antes de concluir. A aula publicada não foi alterada.";
+
+export function processingLockFresh(index: LegalReviewIndex | null, now: number): boolean {
+  if (!index?.processingReviewId || !index.processingStartedAt) return false;
+  return now - index.processingStartedAt < PROCESSING_LEASE_MS;
+}
+
+/** Bloqueia só uma revisão cujo registro ainda está na fila ou em processamento e cujo cadeado foi renovado. */
+export function processingLockBlocks(
+  index: LegalReviewIndex | null,
+  review: { id: string; status: string } | null,
+  now: number
+): boolean {
+  if (!processingLockFresh(index, now) || !review || !index?.processingReviewId) return false;
+  return review.id === index.processingReviewId && (review.status === "processing" || review.status === "queued");
+}
+
+export class LegalReviewError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "LegalReviewError";
+    this.status = status;
+  }
+}
+
+export interface LegalReviewRepository {
+  getLesson(lessonId: string): Promise<StoredCatalogLesson | null>;
+  getIndex(lessonId: string): Promise<LegalReviewIndex | null>;
+  begin(review: LegalReviewView): Promise<void>;
+  claimJob?(reviewId: string, lessonId: string, now: number): Promise<boolean>;
+  complete(review: LegalReviewView): Promise<void>;
+  fail(reviewId: string, lessonId: string, message: string, status?: "failed" | "uncertain_failure"): Promise<void>;
+  touchProcessing(lessonId: string, reviewId: string, now: number): Promise<boolean>;
+  get(reviewId: string): Promise<LegalReviewView | null>;
+  saveCandidate(reviewId: string, markdown: string, now: number): Promise<LegalReviewView>;
+  saveHumanDecisions?(
+    reviewId: string,
+    markdown: string,
+    humanDecisions: Record<string, HumanReviewDecision>,
+    editorialIntegrity: EditorialIntegrityValidation,
+    now: number
+  ): Promise<LegalReviewView>;
+  saveFindingDecision?(
+    reviewId: string,
+    findingDecision: import("../lib/legalReviewTypes").HumanFindingDecision,
+    now: number
+  ): Promise<LegalReviewView>;
+  addHumanChange?(
+    reviewId: string,
+    humanChange: import("../lib/legalReviewTypes").LegalReviewChange,
+    nextMarkdown: string,
+    now: number,
+    expectedCandidateHash: string
+  ): Promise<LegalReviewView>;
+  addAddendum?(
+    reviewId: string,
+    addendum: import("../lib/legalReviewTypes").LegalReviewAddendum,
+    rectifiedDecision: import("../lib/legalReviewTypes").HumanFindingDecision,
+    now: number,
+    expectedHashes: {
+      expectedCandidateHash: string;
+      expectedDecisionStateHash: string;
+    }
+  ): Promise<LegalReviewView>;
+  closeSupplementResolution?(
+    reviewId: string,
+    resolution: import("../lib/legalReviewTypes").SupplementHumanResolution,
+    now: number,
+    expectedHashes?: {
+      expectedCandidateHash: string;
+      expectedDecisionStateHash: string;
+    }
+  ): Promise<LegalReviewView>;
+  reject(reviewId: string, uid: string, now: number): Promise<LegalReviewView>;
+  approve(reviewId: string, uid: string, email: string, now: number): Promise<
+    | { ok: true; lesson: StoredCatalogLesson }
+    | { ok: false; conflict: true }
+  >;
+  reserveSupplement?(
+    reviewId: string,
+    uid: string,
+    email: string,
+    pendingItems: import("../lib/legalReviewTypes").SupplementPendingItem[],
+    now: number,
+    attemptId?: string
+  ): Promise<{ ok: boolean; review?: LegalReviewView; reason?: string }>;
+  markSupplementStarted?(
+    reviewId: string,
+    now: number
+  ): Promise<boolean>;
+  failPreCallSupplement?(
+    reviewId: string,
+    reason: string,
+    now: number
+  ): Promise<LegalReviewView>;
+  recordUncertainEnqueueSupplement?(
+    reviewId: string,
+    reason: string,
+    now: number
+  ): Promise<LegalReviewView>;
+  recordSupplementOutcome?(
+    reviewId: string,
+    supplement: LegalReviewSupplement,
+    now: number
+  ): Promise<LegalReviewView>;
+}
+
+export function readLessonSlot(body: unknown): { day: number; part: number } | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as { day?: unknown; part?: unknown };
+  const day = record.day;
+  const part = record.part;
+  if (typeof day !== "number" || !Number.isInteger(day) || day < 1 || day > 100) return null;
+  if (typeof part !== "number" || !Number.isInteger(part) || part < 0 || part > 20) return null;
+  return { day, part };
+}
+
+/** undefined: pedido antigo, sem parte interna. null: índice inválido. */
+export function readBlockIndex(body: unknown): number | null | undefined {
+  if (!body || typeof body !== "object" || !("blockIndex" in body)) return undefined;
+  const value = (body as { blockIndex?: unknown }).blockIndex;
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 99) return null;
+  return value;
+}
+
+export function lessonDocId(day: number, part: number): string {
+  return `day_${day}_part_${part}`;
+}
+
+export const LEGAL_REVIEW_TEST_LESSON_ID = "ceo_review_test";
+
+export const LEGAL_REVIEW_TEST_PUBLISH_MESSAGE =
+  "Revisão de teste não pode ser publicada. Nenhuma aula foi alterada.";
+
+export function reviewCannotBePublished(review: { testMode?: boolean; lessonId?: string; previewOnly?: boolean }): boolean {
+  return review.testMode === true
+    || review.previewOnly === true
+    || review.lessonId === LEGAL_REVIEW_TEST_LESSON_ID
+    || isSectionReviewKey(review.lessonId || "");
+}
+
+export function publicReview(review: LegalReviewView): LegalReviewView {
+  return {
+    id: review.id,
+    lessonId: review.lessonId,
+    day: review.day,
+    part: review.part,
+    blockIndex: review.blockIndex,
+    catalogLessonId: review.catalogLessonId,
+    previewOnly: review.previewOnly === true,
+    subject: review.subject,
+    topic: review.topic,
+    originalHash: review.originalHash,
+    originalApprovedAt: review.originalApprovedAt,
+    originalContent: review.originalContent,
+    reviewedMarkdown: review.reviewedMarkdown,
+    changes: review.changes,
+    unverifiedClaims: review.unverifiedClaims,
+    summary: review.summary,
+    reviewNotes: review.reviewNotes,
+    verificationLevel: review.verificationLevel,
+    confidence: review.confidence,
+    outcome: review.outcome,
+    status: review.status,
+    model: review.model,
+    reviewDate: review.reviewDate,
+    requestedByUid: review.requestedByUid,
+    requestedAt: review.requestedAt,
+    approvedByUid: review.approvedByUid,
+    approvedAt: review.approvedAt,
+    rejectedByUid: review.rejectedByUid,
+    rejectedAt: review.rejectedAt,
+    webSearchUsed: review.webSearchUsed,
+    testMode: review.testMode === true,
+    usage: review.usage,
+    consultedSources: review.consultedSources || [],
+    manuallyEdited: Boolean(review.manuallyEdited),
+    manuallyEditedAt: review.manuallyEditedAt,
+    candidateHash: review.candidateHash || "",
+    auditedCandidateHash: review.auditedCandidateHash || "",
+    sourceHistory: review.sourceHistory || [],
+    editorialIntegrity: review.editorialIntegrity,
+    humanDecisions: review.humanDecisions || {},
+    findingDecisions: review.findingDecisions || {},
+    decisionStateHash: computeDecisionStateHash(review),
+    supplement: review.supplement,
+    addenda: review.addenda || [],
+  };
+}

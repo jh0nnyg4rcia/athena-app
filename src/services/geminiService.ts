@@ -1,7 +1,8 @@
 /**
- * Cliente ATHENA: inferência Gemini somente via proxy Express.
- * Nenhuma chave de API é lida, armazenada ou enviada a partir do app (web ou Capacitor).
+ * Cliente ATHENA: inferência somente via proxy Express.
+ * Nenhuma chave (Gemini ou OpenAI) é lida, armazenada ou enviada a partir do app.
  */
+import { getContentProvider, providerForCeoChoice, type ContentProvider } from "../lib/contentProvider";
 
 try {
   localStorage.removeItem("athena_gemini_api_key");
@@ -31,6 +32,17 @@ export const setSelectedModel = (model: string) => {
     console.warn("[ATHENA] Não foi possível salvar o modelo no armazenamento local:", e);
   }
 };
+
+/** Só o CEO envia ChatGPT. Aluno permanece no Gemini mesmo se o aparelho tiver outra escolha salva. */
+let allowChatGptChoice = false;
+
+export function setAllowChatGptChoice(allowed: boolean): void {
+  allowChatGptChoice = allowed;
+}
+
+function providerForRequest(): ContentProvider {
+  return providerForCeoChoice(allowChatGptChoice, getContentProvider());
+}
 
 export const isNativeMobile = (): boolean => {
   if (typeof window === "undefined") return false;
@@ -82,6 +94,48 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
     headers.Authorization = `Bearer ${token}`;
   }
   return headers;
+}
+
+export function postAthenaApi<T>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  timeoutMs: number
+): Promise<T> {
+  return fetchAthenaApi<T>(endpoint, body, timeoutMs);
+}
+
+export function getAthenaApi<T>(
+  endpoint: string,
+  timeoutMs = 60_000
+): Promise<T> {
+  return fetchAthenaApiGet<T>(endpoint, timeoutMs);
+}
+
+async function fetchAthenaApiGet<T>(
+  endpoint: string,
+  timeoutMs: number
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(getApiUrl(endpoint), {
+      method: "GET",
+      headers: await getAuthHeaders(),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Erro de conexão HTTP: ${response.status}`);
+    }
+    return (await response.json()) as T;
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`Tempo limite excedido (${timeoutMs / 1000}s) no proxy ATHENA.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function fetchAthenaApi<T>(
@@ -136,7 +190,7 @@ export async function testGeminiConnection(): Promise<GeminiConnectionTestResult
       success: boolean;
       model?: string;
       message?: string;
-    }>("/api/test-gemini", { preferredModel: getSelectedModel() }, 20000);
+    }>("/api/test-gemini", { preferredModel: getSelectedModel(), contentProvider: providerForRequest() }, 20000);
     return {
       success: Boolean(data.success),
       model: data.model || getSelectedModel(),
@@ -173,6 +227,7 @@ export async function askATHENA(
       mentorshipStyle,
       mentorshipPhase,
       preferredModel: getSelectedModel(),
+      contentProvider: providerForRequest(),
     },
     90000
   );
@@ -187,7 +242,7 @@ export async function askATHENA(
 export async function regenerateObjectiveChallenge(brief: string): Promise<AthenaResult> {
   const data = await fetchAthenaApi<{ responseText?: string; model?: string }>(
     "/api/regenerate-challenge",
-    { brief },
+    { brief, contentProvider: providerForRequest() },
     90000
   );
   const text = (data.responseText || "").trim();
@@ -211,5 +266,6 @@ export async function evaluateAnswer(
     phase,
     userName,
     preferredModel: getSelectedModel(),
+    contentProvider: providerForRequest(),
   }, 90000);
 }
