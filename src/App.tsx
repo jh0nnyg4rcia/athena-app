@@ -114,7 +114,7 @@ import {
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
 import { LegalReviewPanel } from './components/LegalReviewPanel';
-import { approveLegalReview, closeLegalReviewSupplement, createHumanLegalReviewChange, createLegalReviewAddendum, fetchLatestLegalReview, reauditLegalReview, rejectLegalReview, requestAsyncLegalReview, requestLegalReview, requestLegalReviewSupplement, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewFinding, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { approveLegalReview, closeLegalReviewSupplement, createHumanLegalReviewChange, createLegalReviewAddendum, fetchLatestLegalReview, reauditLegalReview, reconcileLegalReviewSnapshot, rejectLegalReview, requestAsyncLegalReview, requestLegalReview, requestLegalReviewSupplement, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewFinding, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
 import { LEGAL_REVIEW_TEST_MATERIAL } from './lib/legalReviewTestMaterial';
 import { legalReviewButtonVisible, legalReviewTestButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
@@ -2041,6 +2041,7 @@ export default function App() {
   const [legalReviewStage, setLegalReviewStage] = useState('Analisando aula');
   const [legalReviewError, setLegalReviewError] = useState<string | null>(null);
   const [legalReviewConflict, setLegalReviewConflict] = useState(false);
+  const [legalReviewCatalogHash, setLegalReviewCatalogHash] = useState<string | null>(null);
   const [legalReviewNotice, setLegalReviewNotice] = useState<{ lastReviewDate: string } | null>(null);
   const [legalReview, setLegalReview] = useState<LegalReviewView | null>(null);
   const [legalReviewBusy, setLegalReviewBusy] = useState(false);
@@ -4781,6 +4782,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     setLegalReviewNotice(null);
     setLegalReview(null);
     setLegalReviewConflict(false);
+    setLegalReviewCatalogHash(null);
     setLegalReviewBusy(true);
     setLegalReviewOpen(true);
     if (legalReviewPollRef.current) {
@@ -4791,6 +4793,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       const latest = await fetchLatestLegalReview(day, part, typeof blockIndex === 'number' ? blockIndex : undefined);
       if (latest.found && latest.review) {
         setLegalReviewConflict(Boolean(latest.conflict));
+        setLegalReviewCatalogHash(latest.catalogHash || null);
         if (latest.review.status === 'pending_approval') {
           setLegalReview(latest.review);
           setLegalReviewPhase('result');
@@ -8214,6 +8217,23 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
         }
       }}
       conflict={legalReviewConflict}
+      currentCatalogHash={legalReviewCatalogHash}
+      onReconcileCatalog={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await reconcileLegalReviewSnapshot(legalReview.id, params);
+          setLegalReview(res.review);
+          setLegalReviewConflict(false);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao processar reconciliação de catálogo.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
       onViewHistorical={() => setLegalReviewPhase('result')}
       onStart={() => { void (legalReviewTestMode ? runLegalReviewTest() : runLegalReview(false)); }}
       onForce={() => { void runLegalReview(true); }}

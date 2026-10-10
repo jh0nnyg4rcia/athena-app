@@ -16,6 +16,7 @@ export interface LatestLegalReviewResponse {
   review?: LegalReviewView;
   conflict?: boolean;
   status?: string;
+  catalogHash?: string;
 }
 
 export function fetchLatestLegalReview(
@@ -174,6 +175,49 @@ export function createLegalReviewAddendum(
   }
 ): Promise<{ review: LegalReviewView }> {
   return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/addenda`, params, 60_000);
+}
+
+export interface LegalReviewReconcilePreviewResponse {
+  reviewId: string;
+  lessonId: string;
+  originalHash: string;
+  catalogHash: string;
+  candidateHash: string;
+  totalHunks: number;
+  materialChangesDetected: boolean;
+  materialHunksCount: number;
+  formattingHunksCount: number;
+  alignedChangesCount: number;
+  details: string[];
+  hunks: Array<{
+    type: "FORMATTING" | "ALIGNED_WITH_CHANGE" | "MATERIAL_LEGAL_DIVERGENCE";
+    originalSlice: string;
+    catalogSlice: string;
+    explanation: string;
+    alignedChangeId?: string;
+  }>;
+}
+
+export function fetchLegalReviewReconcilePreview(
+  reviewId: string
+): Promise<LegalReviewReconcilePreviewResponse> {
+  return getAthenaApi<LegalReviewReconcilePreviewResponse>(
+    `/api/legal-review/${encodeURIComponent(reviewId)}/reconcile-preview`,
+    30_000
+  );
+}
+
+export function reconcileLegalReviewSnapshot(
+  reviewId: string,
+  params: {
+    expectedCatalogHash: string;
+    expectedCandidateHash?: string;
+    expectedDecisionStateHash?: string;
+    justification: string;
+    acknowledgeMaterialDivergence?: boolean;
+  }
+): Promise<{ review: LegalReviewView }> {
+  return postAthenaApi(`/api/legal-review/${encodeURIComponent(reviewId)}/reconcile`, params, 60_000);
 }
 
 

@@ -14,7 +14,7 @@ import {
 } from "../lib/legalReviewTypes";
 import { candidateMarkdownAccepted, nextPublishedLesson, reviewAfterManualEdit } from "./legalReviewPublish";
 import { isCeoEmail } from "../lib/contentProvider";
-import { validateFindingsForClosure, validateFindingsHomologation, validateEditorialIntegrity, computeDecisionStateHash } from "../lib/legalReviewValidate";
+import { validateFindingsForClosure, validateFindingsHomologation, validateEditorialIntegrity, computeDecisionStateHash, validateReconciliationIntegrity } from "../lib/legalReviewValidate";
 import {
   LegalReviewError,
   LEGAL_REVIEW_TEST_PUBLISH_MESSAGE,
@@ -915,7 +915,22 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
           if (!lesson) {
             throw new LegalReviewError("A aula publicada não foi encontrada. Nada foi substituído.", 404);
           }
-          if (hashCatalogSnapshot(lesson) !== review.originalHash) {
+          const currentCatalogHash = hashCatalogSnapshot(lesson);
+          const matchesOriginal = currentCatalogHash === review.originalHash;
+
+          if (review.reconciliation) {
+            const check = validateReconciliationIntegrity(review, currentCatalogHash);
+            if (!check.valid) {
+              if (matchesOriginal) {
+                // Catálogo foi revertido ao originalHash histórico, opera com segurança
+              } else {
+                throw new LegalReviewError(
+                  `A aprovação está bloqueada porque a reconciliação com o catálogo foi invalidada:\n- ${check.reason}\nÉ necessária uma nova reconciliação pelo CEO antes da homologação.`,
+                  409
+                );
+              }
+            }
+          } else if (!matchesOriginal) {
             return { ok: false as const, conflict: true as const };
           }
           const index = asIndex(review.lessonId, indexSnap.exists ? indexSnap.data() : undefined);
@@ -960,6 +975,88 @@ export function createFirestoreLegalReviewRepository(): LegalReviewRepository {
             } : {}),
           }, { merge: true });
           return { ok: true as const, lesson: published };
+        });
+      } catch (error) {
+        if (error instanceof LegalReviewError) throw error;
+        throw unavailable();
+      }
+    },
+    async reconcileReviewCatalogSnapshot(reviewId, reconciliation, now) {
+      try {
+        const db = await loadDb();
+        return await db.runTransaction(async (tx) => {
+          if (!isCeoEmail(reconciliation.reconciledByEmail)) {
+            throw new LegalReviewError("A reconciliação do catálogo exige a identidade autenticada do CEO.", 403);
+          }
+          const reviewRef = db.collection(REVIEWS).doc(reviewId);
+          const reviewSnap = await tx.get(reviewRef);
+          const review = asReview(reviewSnap.exists ? reviewSnap.data() : undefined);
+          if (!review || review.status !== "pending_approval") {
+            throw new LegalReviewError("Esta revisão não está aguardando aprovação.", 409);
+          }
+          if (review.id !== reconciliation.reviewId || review.lessonId !== reconciliation.lessonId) {
+            throw new LegalReviewError("Os metadados da reconciliação não correspondem a esta revisão.", 400);
+          }
+          if (reconciliation.historicalOriginalHash !== review.originalHash) {
+            throw new LegalReviewError("O hash original histórico informado não coincide com a revisão.", 400);
+          }
+          if ((reconciliation.justification || "").trim().length < 15) {
+            throw new LegalReviewError("A justificativa do CEO para reconciliação é insuficiente (mínimo de 15 caracteres).", 400);
+          }
+
+          // Idempotência estrita: se a reconciliação ativa for idêntica (mesmo catálogo, candidato, deliberações e justificativa)
+          if (review.reconciliation && review.reconciliation.status === "RECONCILED_BY_CEO") {
+            const rec = review.reconciliation;
+            const sameCat = rec.reconciledCatalogHash === reconciliation.reconciledCatalogHash;
+            const sameCand = (rec.candidateHashAtReconciliation || "") === (reconciliation.candidateHashAtReconciliation || "");
+            const sameDec = (rec.decisionStateHashAtReconciliation || "") === (reconciliation.decisionStateHashAtReconciliation || "");
+            const sameJust = rec.justification.trim() === reconciliation.justification.trim();
+            if (sameCat && sameCand && sameDec && sameJust) {
+              return review;
+            }
+          }
+
+          // Proteção transacional de concorrência em múltiplas abas (candidato e deliberações)
+          if (reconciliation.candidateHashAtReconciliation && review.candidateHash !== reconciliation.candidateHashAtReconciliation) {
+            throw new LegalReviewError("O texto candidato foi editado concorrentemente. Recarregue a página antes de reconciliar.", 409);
+          }
+          const currentDecisionStateHash = computeDecisionStateHash(review).toLowerCase();
+          if (reconciliation.decisionStateHashAtReconciliation && currentDecisionStateHash !== reconciliation.decisionStateHashAtReconciliation.toLowerCase()) {
+            throw new LegalReviewError("As deliberações de achados foram modificadas concorrentemente. Recarregue a página antes de reconciliar.", 409);
+          }
+
+          const lessonRef = db.collection(LESSONS).doc(review.lessonId);
+          const lessonSnap = await tx.get(lessonRef);
+          const lesson = asLesson(review.lessonId, lessonSnap.exists ? lessonSnap.data() : undefined);
+          if (!lesson) {
+            throw new LegalReviewError("A aula do catálogo oficial não foi encontrada.", 404);
+          }
+          const currentCatalogHash = hashCatalogSnapshot(lesson);
+          if (currentCatalogHash !== reconciliation.reconciledCatalogHash) {
+            throw new LegalReviewError(
+              "O catálogo foi modificado após a análise de reconciliação. O hash atual difere do reconciliado.",
+              409
+            );
+          }
+
+          const priorReconciliation = review.reconciliation;
+          const priorHistory = [...(review.reconciliationHistory || [])];
+          if (priorReconciliation) {
+            priorHistory.push(priorReconciliation);
+          }
+
+          const updatedReview: LegalReviewView = {
+            ...review,
+            reconciliation,
+            reconciliationHistory: priorHistory,
+          };
+
+          tx.set(reviewRef, cleanFirestoreData({
+            reconciliation,
+            reconciliationHistory: priorHistory,
+          }), { merge: true });
+
+          return updatedReview;
         });
       } catch (error) {
         if (error instanceof LegalReviewError) throw error;

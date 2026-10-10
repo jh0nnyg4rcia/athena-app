@@ -134,6 +134,11 @@ export interface LegalReviewRepository {
     | { ok: true; lesson: StoredCatalogLesson }
     | { ok: false; conflict: true }
   >;
+  reconcileReviewCatalogSnapshot?(
+    reviewId: string,
+    reconciliation: import("../lib/legalReviewTypes").LegalReviewReconciliation,
+    now: number
+  ): Promise<LegalReviewView>;
   reserveSupplement?(
     reviewId: string,
     uid: string,
@@ -244,5 +249,7 @@ export function publicReview(review: LegalReviewView): LegalReviewView {
     decisionStateHash: computeDecisionStateHash(review),
     supplement: review.supplement,
     addenda: review.addenda || [],
+    reconciliation: review.reconciliation,
+    reconciliationHistory: review.reconciliationHistory || [],
   };
 }

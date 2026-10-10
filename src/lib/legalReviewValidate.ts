@@ -4738,4 +4738,231 @@ export function validateFindingsHomologation(review: import("./legalReviewTypes"
   };
 }
 
+// =============================================================================
+// ETAPA 20.6.12: ANÁLISE DE DIVERGÊNCIA E VALIDAÇÃO DE INTEGRIDADE DA RECONCILIAÇÃO
+// =============================================================================
+
+export interface CatalogDivergenceHunk {
+  hunkIndex: number;
+  kind: "add" | "remove" | "replace";
+  original: string;
+  catalog: string;
+  isMaterial: boolean;
+  classification: "FORMATTING" | "ALIGNED_WITH_CHANGE" | "MATERIAL_LEGAL_DIVERGENCE";
+  reason: string;
+}
+
+export interface CatalogDivergenceAnalysis {
+  totalHunks: number;
+  materialChangesDetected: boolean;
+  materialHunksCount: number;
+  formattingHunksCount: number;
+  alignedChangesCount: number;
+  details: string[];
+  hunks: CatalogDivergenceHunk[];
+}
+
+const LEGAL_NORMATIVE_KEYWORDS = /\b(art\.|artigo|lei|leis|código|cód\.|súmula|decreto|constituiç|stf|stj|tcu|crime|pena|prazo|nulidade|competência|princípio|eficácia|vigência|inciso|parágrafo|alínea)\b/i;
+
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function isPureFormatting(original: string, catalog: string): boolean {
+  if (normalizeWhitespace(original) === normalizeWhitespace(catalog)) return true;
+  const strippedOrig = original.replace(/[:\-–—*#_`]/g, "").trim();
+  const strippedCat = catalog.replace(/[:\-–—*#_`]/g, "").trim();
+  if (normalizeWhitespace(strippedOrig) === normalizeWhitespace(strippedCat)) return true;
+  return false;
+}
+
+function isCoveredByApprovedChanges(originalText: string, catalogText: string, changes: LegalReviewChange[]): boolean {
+  return changes.some((c) => {
+    const changeOrig = normalizeWhitespace(c.originalText || "");
+    const changeRev = normalizeWhitespace(c.revisedText || "");
+    const normOrig = normalizeWhitespace(originalText);
+    const normCat = normalizeWhitespace(catalogText);
+    return (
+      (changeOrig.length >= 10 && (normOrig.includes(changeOrig) || changeOrig.includes(normOrig))) ||
+      (changeRev.length >= 10 && (normCat.includes(changeRev) || changeRev.includes(normCat)))
+    );
+  });
+}
+
+/**
+ * Analisa as diferenças estruturais entre o snapshot original da revisão e o catálogo atual.
+ * Classifica cada bloco como formatação inofensiva, alteração já contemplada por correção aprovada,
+ * ou divergência jurídica material que exige atenção deliberada do CEO.
+ */
+export function analyzeCatalogDivergence(
+  originalContent: string,
+  catalogContent: string,
+  approvedChanges: LegalReviewChange[] = []
+): CatalogDivergenceAnalysis {
+  const rawHunks = changeHunks(originalContent, catalogContent);
+  const hunks: CatalogDivergenceHunk[] = [];
+  let materialCount = 0;
+  let formattingCount = 0;
+  let alignedCount = 0;
+
+  for (let idx = 0; idx < rawHunks.length; idx++) {
+    const h = rawHunks[idx];
+    const orig = h.original || "";
+    const cat = h.revised || "";
+
+    if (isPureFormatting(orig, cat)) {
+      formattingCount++;
+      hunks.push({
+        hunkIndex: idx + 1,
+        kind: h.kind,
+        original: orig,
+        catalog: cat,
+        isMaterial: false,
+        classification: "FORMATTING",
+        reason: "Variação meramente tipográfica, de espaçamento ou pontuação de marcadores.",
+      });
+      continue;
+    }
+
+    if (isCoveredByApprovedChanges(orig, cat, approvedChanges)) {
+      alignedCount++;
+      hunks.push({
+        hunkIndex: idx + 1,
+        kind: h.kind,
+        original: orig,
+        catalog: cat,
+        isMaterial: false,
+        classification: "ALIGNED_WITH_CHANGE",
+        reason: "Trecho correspondente a alteração deliberada e aprovada pelo CEO na revisão jurídica.",
+      });
+      continue;
+    }
+
+    const touchesLegal = LEGAL_NORMATIVE_KEYWORDS.test(orig) || LEGAL_NORMATIVE_KEYWORDS.test(cat);
+    const substantialTextDiff = Math.abs(orig.length - cat.length) > 30 || orig.length > 50;
+
+    if (touchesLegal || substantialTextDiff) {
+      materialCount++;
+      hunks.push({
+        hunkIndex: idx + 1,
+        kind: h.kind,
+        original: orig,
+        catalog: cat,
+        isMaterial: true,
+        classification: "MATERIAL_LEGAL_DIVERGENCE",
+        reason: touchesLegal
+          ? "Divergência textual contendo termos normativos ou legais (lei, artigo, jurisprudência, etc.)."
+          : "Divergência textual substancial não classificada como formatação pura.",
+      });
+    } else {
+      formattingCount++;
+      hunks.push({
+        hunkIndex: idx + 1,
+        kind: h.kind,
+        original: orig,
+        catalog: cat,
+        isMaterial: false,
+        classification: "FORMATTING",
+        reason: "Ajuste textual menor sem impacto normativo substantivo.",
+      });
+    }
+  }
+
+  const materialChangesDetected = materialCount > 0;
+  const details = [
+    `Total de blocos divergentes (hunks): ${hunks.length}.`,
+    `Ajustes tipográficos/formatação: ${formattingCount}.`,
+    `Trechos alinhados a correções já aprovadas: ${alignedCount}.`,
+    `Divergências materiais identificadas: ${materialCount}.`,
+  ];
+
+  if (materialChangesDetected) {
+    details.push("ATENÇÃO: Foram identificadas alterações materiais que exigem confirmação expressa do CEO.");
+  } else {
+    details.push("Todas as diferenças entre o snapshot e o catálogo atual são tipográficas ou compatíveis com as correções aprovadas.");
+  }
+
+  return {
+    totalHunks: hunks.length,
+    materialChangesDetected,
+    materialHunksCount: materialCount,
+    formattingHunksCount: formattingCount,
+    alignedChangesCount: alignedCount,
+    details,
+    hunks,
+  };
+}
+
+/**
+ * Validação rigorosa e fail-closed da integridade da reconciliação.
+ * Garante que uma reconciliação antiga seja invalidada se o texto candidato,
+ * as deliberações, os aditamentos ou o catálogo tiverem sido alterados posteriormente.
+ */
+export function validateReconciliationIntegrity(
+  review: {
+    originalHash: string;
+    candidateHash?: string;
+    supplement?: { findings?: import("./legalReviewTypes").SupplementFindingItem[] };
+    findingDecisions?: Record<string, import("./legalReviewTypes").HumanFindingDecision>;
+    addenda?: import("./legalReviewTypes").LegalReviewAddendum[];
+    reconciliation?: import("./legalReviewTypes").LegalReviewReconciliation;
+  },
+  currentCatalogHash: string
+): { valid: boolean; reason?: string } {
+  const rec = review.reconciliation;
+  if (!rec) {
+    return { valid: false, reason: "A revisão não possui registro de reconciliação com o catálogo." };
+  }
+
+  if (rec.status !== "RECONCILED_BY_CEO") {
+    return { valid: false, reason: `Status da reconciliação inválido: '${rec.status}'. Esperado: 'RECONCILED_BY_CEO'.` };
+  }
+
+  // 1. originalHash da revisão deve bater com o historicalOriginalHash registrado
+  if (rec.historicalOriginalHash !== review.originalHash) {
+    return {
+      valid: false,
+      reason: `Inconsistência de histórico original: originalHash atual (${review.originalHash}) difere do histórico reconciliado (${rec.historicalOriginalHash}).`,
+    };
+  }
+
+  // 2. Concorrência do catálogo: o catálogo oficial deve bater com o reconciledCatalogHash
+  if (currentCatalogHash !== rec.reconciledCatalogHash) {
+    return {
+      valid: false,
+      reason: `O catálogo oficial foi alterado após a reconciliação (Hash reconciliado: ${rec.reconciledCatalogHash}, Hash atual do catálogo: ${currentCatalogHash}).`,
+    };
+  }
+
+  // 3. candidateHash vigente deve ser idêntico ao candidateHashAtReconciliation
+  const currentCandHash = (review.candidateHash || "").trim().toLowerCase();
+  const recCandHash = (rec.candidateHashAtReconciliation || "").trim().toLowerCase();
+  if (!recCandHash || currentCandHash !== recCandHash) {
+    return {
+      valid: false,
+      reason: `O texto candidato foi editado após o ato de reconciliação (Hash no ato: ${recCandHash}, Hash atual: ${currentCandHash}).`,
+    };
+  }
+
+  // 4. decisionStateHash vigente deve ser idêntico ao decisionStateHashAtReconciliation
+  const currentDecHash = computeDecisionStateHash(review).toLowerCase();
+  const recDecHash = (rec.decisionStateHashAtReconciliation || "").trim().toLowerCase();
+  if (recDecHash && currentDecHash !== recDecHash) {
+    return {
+      valid: false,
+      reason: `As deliberações de achados jurídicos foram modificadas após o ato de reconciliação (Hash no ato: ${recDecHash}, Hash atual: ${currentDecHash}).`,
+    };
+  }
+
+  // 5. Invalidação por aditamento emitido após a reconciliação
+  if (review.addenda && review.addenda.some((a) => a.createdAt > rec.reconciledAt)) {
+    return {
+      valid: false,
+      reason: "Foi lavrado novo aditamento formal (ADD) após o ato de reconciliação, invalidando o snapshot de deliberações ancorado.",
+    };
+  }
+
+  return { valid: true };
+}
+
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronUp, Clock, Database, Edit3, ExternalLink, FileText, Layers, Lock, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronUp, Clock, Database, Edit3, ExternalLink, FileText, Layers, Lock, Search, ShieldCheck, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { diffLines } from "../lib/legalReviewDiff";
 import type {
@@ -42,6 +42,10 @@ import {
   validateFindingsHomologation,
   computeDecisionStateHash,
 } from "../lib/legalReviewValidate";
+import {
+  fetchLegalReviewReconcilePreview,
+  type LegalReviewReconcilePreviewResponse,
+} from "../services/legalReviewClient";
 
 type Phase = "confirm" | "running" | "notice" | "result" | "edit" | "error";
 
@@ -391,6 +395,8 @@ export function LegalReviewPanel({
   onRequestSupplement,
   conflict = false,
   onViewHistorical,
+  currentCatalogHash,
+  onReconcileCatalog,
 }: {
   open: boolean;
   phase: Phase;
@@ -476,6 +482,14 @@ export function LegalReviewPanel({
   onRequestSupplement?: () => Promise<void>;
   conflict?: boolean;
   onViewHistorical?: () => void;
+  currentCatalogHash?: string | null;
+  onReconcileCatalog?: (params: {
+    expectedCatalogHash: string;
+    expectedCandidateHash?: string;
+    expectedDecisionStateHash?: string;
+    justification: string;
+    acknowledgeMaterialDivergence?: boolean;
+  }) => Promise<void>;
 }) {
   const [view, setView] = useState<"side" | "diff">("side");
   const [draft, setDraft] = useState("");
@@ -535,6 +549,46 @@ export function LegalReviewPanel({
   const [addendumError, setAddendumError] = useState<string | null>(null);
   const [isSubmittingAddendum, setIsSubmittingAddendum] = useState(false);
   const [showAddendaList, setShowAddendaList] = useState(true);
+
+  // Estados locais para Reconciliação com Catálogo (Etapa 20.6.11 / 20.6.12)
+  const [reconcileModalOpen, setReconcileModalOpen] = useState(false);
+  const [reconcileJustification, setReconcileJustification] = useState("");
+  const [reconcileBusy, setReconcileBusy] = useState(false);
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
+  const [reconcilePreview, setReconcilePreview] = useState<LegalReviewReconcilePreviewResponse | null>(null);
+  const [reconcilePreviewLoading, setReconcilePreviewLoading] = useState(false);
+  const [reconcileAcknowledgeMaterial, setReconcileAcknowledgeMaterial] = useState(false);
+  const [reconcileHunksExpanded, setReconcileHunksExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!reconcileModalOpen || !review?.id) {
+      setReconcilePreview(null);
+      setReconcileAcknowledgeMaterial(false);
+      setReconcileError(null);
+      return;
+    }
+    let cancelled = false;
+    setReconcilePreviewLoading(true);
+    fetchLegalReviewReconcilePreview(review.id)
+      .then((data) => {
+        if (!cancelled) {
+          setReconcilePreview(data);
+        }
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setReconcileError(err?.message || "Erro ao carregar prévia do comparativo de reconciliação.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setReconcilePreviewLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reconcileModalOpen, review?.id]);
 
 
   useEffect(() => {
@@ -858,11 +912,62 @@ export function LegalReviewPanel({
 
           {phase === "result" && review && summary && (
             <div className="space-y-5">
+              {review.reconciliation && (
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-emerald-300 text-sm">
+                      <ShieldCheck size={16} />
+                      <span>Revisão Reconciliada com Versão Posterior do Catálogo</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                      {review.reconciliation.status}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 font-mono text-[11px] bg-slate-950/40 p-2.5 rounded-xl border border-white/5">
+                    <div>
+                      <span className="text-slate-400">Hash original histórico:</span>{" "}
+                      <span className="text-slate-200" title={review.originalHash}>{review.originalHash.slice(0, 16)}...</span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-400">Hash reconciliado do catálogo:</span>{" "}
+                      <span className="text-emerald-200" title={review.reconciliation.reconciledCatalogHash}>{review.reconciliation.reconciledCatalogHash.slice(0, 16)}...</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Data/Hora:</span>{" "}
+                      <span className="text-slate-200">{new Date(review.reconciliation.reconciledAt).toLocaleString("pt-BR")}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Responsável:</span>{" "}
+                      <span className="text-slate-200">{review.reconciliation.reconciledByEmail}</span>
+                    </div>
+                  </div>
+                  <div className="text-slate-300">
+                    <span className="font-bold text-emerald-300">Justificativa do CEO: </span>
+                    {review.reconciliation.justification}
+                  </div>
+                </div>
+              )}
               {conflict && (
-                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-1.5">
-                  <div className="flex items-center gap-2 font-bold text-amber-300 text-sm">
-                    <AlertTriangle size={16} />
-                    <span>Divergência com Catálogo — Visualização Histórica (Aprovação Bloqueada)</span>
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-amber-300 text-sm">
+                      <AlertTriangle size={16} />
+                      <span>Divergência com Catálogo — Visualização Histórica (Aprovação Bloqueada)</span>
+                    </div>
+                    {onReconcileCatalog && review?.status === "pending_approval" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReconcileModalOpen(true);
+                          setReconcileError(null);
+                          setReconcileJustification("");
+                        }}
+                        disabled={busy}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase cursor-pointer flex items-center gap-1 transition-all"
+                      >
+                        <Layers size={13} /> Reconciliar com Catálogo
+                      </button>
+                    )}
                   </div>
                   <p>
                     O conteúdo do catálogo oficial difere do snapshot original desta auditoria. A visualização das pendências, fontes e resultados está disponível em modo histórico, mas a substituição da aula publicada está bloqueada para preservar a integridade do catálogo.
@@ -3053,12 +3158,27 @@ export function LegalReviewPanel({
               {testing ? (
                 <button type="button" onClick={onEndTest} disabled={busy} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold cursor-pointer">Encerrar teste</button>
               ) : preview ? null : (
-                (() => {
-                  const homologation = review.supplement ? validateFindingsHomologation(review) : { ok: true, failureReasons: [] };
-                  const hasInconclusiveSupplement = !homologation.ok;
-                  const isBlocked = busy || conflict || review.editorialIntegrity?.passed === false || review.verificationLevel === "FALHA_NA_VERIFICACAO" || hasInconclusiveSupplement;
-                  return (
+                <>
+                  {conflict && onReconcileCatalog && review?.status === "pending_approval" && (
                     <button
+                      type="button"
+                      onClick={() => {
+                        setReconcileModalOpen(true);
+                        setReconcileError(null);
+                        setReconcileJustification("");
+                      }}
+                      disabled={busy}
+                      className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase cursor-pointer flex items-center gap-1.5 transition-all shadow-lg"
+                    >
+                      <Layers size={14} /> Reconciliar com Catálogo
+                    </button>
+                  )}
+                  {(() => {
+                    const homologation = review.supplement ? validateFindingsHomologation(review) : { ok: true, failureReasons: [] };
+                    const hasInconclusiveSupplement = !homologation.ok;
+                    const isBlocked = busy || conflict || review.editorialIntegrity?.passed === false || review.verificationLevel === "FALHA_NA_VERIFICACAO" || hasInconclusiveSupplement;
+                    return (
+                      <button
                       type="button"
                       onClick={onApprove}
                       disabled={isBlocked}
@@ -3082,8 +3202,9 @@ export function LegalReviewPanel({
                       <Check size={14} /> Aprovar e substituir
                     </button>
                   );
-                })()
-              )}
+                })()}
+              </>
+            )}
             </>
           )}
           {phase === "edit" && (
@@ -3283,6 +3404,224 @@ export function LegalReviewPanel({
           </div>
         );
       })()}
+
+      {reconcileModalOpen && review && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-amber-500/30 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <Layers className="text-amber-400" size={20} />
+                <h3 className="text-base font-bold text-slate-100">Reconciliação Segura com Catálogo Oficial</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReconcileModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200 p-1"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200 space-y-1.5 leading-relaxed">
+              <p className="font-semibold text-amber-300">
+                Atestação formal do CEO para superação da divergência de catálogo:
+              </p>
+              <p>
+                O catálogo oficial foi atualizado após a criação do snapshot inicial desta auditoria. Ao reconciliar, você atesta formalmente que as correções deliberadas e aprovadas pelo CEO (CHG-001 a CHG-013 e CHG-H-001) e o encerramento do Estágio B permanecem válidos e compatíveis com a versão vigente da aula.
+              </p>
+              <p className="text-[11px] text-amber-300/80">
+                O hash histórico original (<code>{review.originalHash.slice(0, 12)}...</code>) será permanentemente preservado na trilha de auditoria.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono text-xs">
+              <div className="p-3 bg-slate-950 rounded-xl border border-white/5 space-y-1">
+                <span className="text-slate-400 text-[11px]">Hash original da revisão:</span>
+                <p className="text-slate-200 text-[11px] break-all">{review.originalHash}</p>
+              </div>
+              <div className="p-3 bg-slate-950 rounded-xl border border-white/5 space-y-1">
+                <span className="text-amber-400 text-[11px]">Hash atual do catálogo aceito:</span>
+                <p className="text-amber-200 text-[11px] break-all">{currentCatalogHash || "Aguardando hash..."}</p>
+              </div>
+            </div>
+
+            {/* Painel Autoritativo de Comparação do Backend */}
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-white/10 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <ShieldCheck size={14} className="text-sky-400" />
+                  Cotejo Autoritativo Backend (Divergências com o Catálogo)
+                </span>
+                {reconcilePreviewLoading && (
+                  <span className="text-[11px] text-amber-400 animate-pulse">Analisando diferenças...</span>
+                )}
+              </div>
+
+              {reconcilePreviewLoading ? (
+                <div className="py-4 text-center text-xs text-slate-400">
+                  Calculando cotejo entre o snapshot e o catálogo atual...
+                </div>
+              ) : reconcilePreview ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                    <div className="p-2 rounded-lg bg-slate-900 border border-white/5">
+                      <span className="text-[10px] text-slate-400 block">Total de Trechos</span>
+                      <span className="font-bold text-slate-200 font-mono">{reconcilePreview.totalHunks}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-slate-900 border border-blue-500/20">
+                      <span className="text-[10px] text-blue-300 block">Formatação</span>
+                      <span className="font-bold text-blue-400 font-mono">{reconcilePreview.formattingHunksCount}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-slate-900 border border-emerald-500/20">
+                      <span className="text-[10px] text-emerald-300 block">Alinhado a CHG</span>
+                      <span className="font-bold text-emerald-400 font-mono">{reconcilePreview.alignedChangesCount}</span>
+                    </div>
+                    <div className={`p-2 rounded-lg bg-slate-900 border ${reconcilePreview.materialChangesDetected ? 'border-rose-500/40 bg-rose-950/20' : 'border-slate-800'}`}>
+                      <span className={`text-[10px] block ${reconcilePreview.materialChangesDetected ? 'text-rose-300 font-bold' : 'text-slate-400'}`}>Materiais</span>
+                      <span className={`font-bold font-mono ${reconcilePreview.materialChangesDetected ? 'text-rose-400 font-black' : 'text-slate-200'}`}>{reconcilePreview.materialHunksCount}</span>
+                    </div>
+                  </div>
+
+                  {reconcilePreview.materialChangesDetected ? (
+                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-rose-300">
+                        <AlertTriangle size={15} className="shrink-0" />
+                        <span>Atenção: Divergência Jurídica Material Detectada</span>
+                      </div>
+                      <p className="leading-relaxed">
+                        Foram encontradas alterações com impacto normativo/jurídico não cobertas pelas correções aprovadas da revisão. A reconciliação exige confirmação expressa do CEO e fundamentação substancial (mínimo de 50 caracteres).
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 text-[11px] text-rose-200/90 pl-1">
+                        {reconcilePreview.details.map((d, i) => (
+                          <li key={i}>{d}</li>
+                        ))}
+                      </ul>
+                      <label className="flex items-start gap-2 pt-2 text-rose-200 cursor-pointer border-t border-rose-500/20">
+                        <input
+                          type="checkbox"
+                          checked={reconcileAcknowledgeMaterial}
+                          onChange={(e) => setReconcileAcknowledgeMaterial(e.target.checked)}
+                          className="mt-0.5 rounded border-rose-400/40 bg-slate-900"
+                        />
+                        <span className="text-[11px] font-semibold">
+                          Declaro ciência expressa das divergências materiais e atesto que a versão revisada permanece juridicamente compatível com o catálogo oficial.
+                        </span>
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                      <CheckCircle2 size={14} className="shrink-0 text-emerald-400" />
+                      <span>Todas as alterações encontradas foram classificadas com segurança como formatação ou correções já contempladas.</span>
+                    </div>
+                  )}
+
+                  {reconcilePreview.hunks && reconcilePreview.hunks.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setReconcileHunksExpanded((prev) => !prev)}
+                        className="text-[11px] text-slate-400 hover:text-slate-200 font-semibold flex items-center gap-1"
+                      >
+                        {reconcileHunksExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        {reconcileHunksExpanded ? "Ocultar detalhes dos trechos" : `Inspecionar ${reconcilePreview.hunks.length} trechos comparados`}
+                      </button>
+
+                      {reconcileHunksExpanded && (
+                        <div className="max-h-48 overflow-y-auto space-y-2 p-2 bg-slate-900 rounded-lg border border-white/5 text-[11px]">
+                          {reconcilePreview.hunks.map((h, idx) => (
+                            <div key={idx} className="p-2 rounded bg-slate-950 border border-white/5 space-y-1 font-mono">
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className={`px-1.5 py-0.5 rounded font-bold ${
+                                  h.type === "MATERIAL_LEGAL_DIVERGENCE"
+                                    ? "bg-rose-950 text-rose-300 border border-rose-500/30"
+                                    : h.type === "ALIGNED_WITH_CHANGE"
+                                    ? "bg-emerald-950 text-emerald-300 border border-emerald-500/30"
+                                    : "bg-blue-950 text-blue-300 border border-blue-500/30"
+                                }`}>
+                                  {h.type}
+                                </span>
+                                <span className="text-slate-400">{h.explanation}</span>
+                              </div>
+                              <div className="text-slate-400 text-[10px]">Snapshot Original: <span className="text-slate-200">{h.originalSlice.slice(0, 100)}</span></div>
+                              <div className="text-amber-400 text-[10px]">Catálogo Atual: <span className="text-amber-200">{h.catalogSlice.slice(0, 100)}</span></div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            {reconcileError && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs">
+                {reconcileError}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">
+                Justificativa formal do CEO {reconcilePreview?.materialChangesDetected ? "(mínimo de 50 caracteres para divergência material):" : "(mínimo de 15 caracteres):"}
+              </label>
+              <textarea
+                value={reconcileJustification}
+                onChange={(e) => setReconcileJustification(e.target.value)}
+                placeholder={reconcilePreview?.materialChangesDetected ? "Fundamente detalhadamente por que as divergências materiais identificadas no catálogo não afetam as conclusões jurídicas desta revisão..." : "Ex.: Verificado que a alteração posterior do catálogo consistiu em ajustes tipográficos/formatação prévia, mantendo compatibilidade integral com as correções jurídicas aprovadas."}
+                rows={4}
+                className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-amber-400 resize-none leading-relaxed"
+              />
+              <div className="text-right text-[11px] text-slate-500">
+                {reconcileJustification.trim().length} / {reconcilePreview?.materialChangesDetected ? 50 : 15} caracteres
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setReconcileModalOpen(false)}
+                disabled={reconcileBusy}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  reconcileBusy ||
+                  !currentCatalogHash ||
+                  reconcilePreviewLoading ||
+                  (reconcilePreview?.materialChangesDetected
+                    ? (!reconcileAcknowledgeMaterial || reconcileJustification.trim().length < 50)
+                    : reconcileJustification.trim().length < 15)
+                }
+                onClick={async () => {
+                  if (!onReconcileCatalog || !currentCatalogHash) return;
+                  setReconcileBusy(true);
+                  setReconcileError(null);
+                  try {
+                    await onReconcileCatalog({
+                      expectedCatalogHash: currentCatalogHash,
+                      expectedCandidateHash: review.candidateHash || "",
+                      expectedDecisionStateHash: computeDecisionStateHash(review),
+                      justification: reconcileJustification.trim(),
+                      acknowledgeMaterialDivergence: reconcileAcknowledgeMaterial,
+                    });
+                    setReconcileModalOpen(false);
+                  } catch (err: any) {
+                    setReconcileError(err?.message || "Erro ao processar reconciliação.");
+                  } finally {
+                    setReconcileBusy(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {reconcileBusy ? "Gravando..." : "Confirmar Reconciliação"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

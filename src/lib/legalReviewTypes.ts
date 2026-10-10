@@ -266,6 +266,38 @@ export interface SupplementHumanResolution {
   history?: SupplementHumanResolutionHistoryEntry[];
 }
 
+// =============================================================================
+// ETAPA 20.6.11: RECONCILIAÇÃO SEGURA DE VERSÕES COM O CATÁLOGO OFICIAL
+// =============================================================================
+
+export interface LegalReviewReconciliationDiffSummary {
+  totalHunks: number;
+  materialChangesDetected: boolean;
+  details: string[];
+}
+
+export interface LegalReviewReconciliation {
+  reconciledAt: number;
+  reconciledByUid: string;
+  reconciledByEmail: string;
+  reviewId: string;
+  lessonId: string;
+  /** Hash histórico original e imutável da auditoria jurídica */
+  historicalOriginalHash: string;
+  /** Hash do catálogo encontrado no momento da verificação */
+  catalogHashFound: string;
+  /** Hash do catálogo aceito formalmente na reconciliação pelo CEO */
+  reconciledCatalogHash: string;
+  /** Hash SHA-256 do reviewedMarkdown no momento da reconciliação */
+  candidateHashAtReconciliation: string;
+  /** Hash SHA-256 do estado de deliberações individuais no momento da reconciliação */
+  decisionStateHashAtReconciliation?: string;
+  diffSummary: LegalReviewReconciliationDiffSummary;
+  /** Justificativa expressa do CEO atestando compatibilidade (mínimo de 15 caracteres) */
+  justification: string;
+  status: "RECONCILED_BY_CEO";
+}
+
 
 /**
  * Deriva um identificador único, determinístico e estável para um achado da complementação jurídica.
@@ -569,6 +601,10 @@ export interface LegalReviewView {
   supplement?: LegalReviewSupplement;
   /** Aditamentos históricos imutáveis emitidos pelo CEO (Etapa 20.3) */
   addenda?: LegalReviewAddendum[];
+  /** Reconciliação formal e auditável com versão posterior do catálogo (Etapa 20.6.11) */
+  reconciliation?: LegalReviewReconciliation;
+  /** Histórico cumulativo de reconciliações com versões do catálogo */
+  reconciliationHistory?: LegalReviewReconciliation[];
 }
 
 export type LegalSupplementStatus =

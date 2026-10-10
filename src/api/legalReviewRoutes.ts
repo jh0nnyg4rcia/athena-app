@@ -14,6 +14,8 @@ import {
   createHumanLegalReviewChangeFlow,
   createLegalReviewAddendumFlow,
   closeLegalReviewSupplementFlow,
+  reconcileLegalReviewSnapshotFlow,
+  getLegalReviewReconcilePreviewFlow,
   saveLegalReviewCandidate,
   startLegalReview,
   startLegalReviewSection,
@@ -597,6 +599,66 @@ export function registerLegalReviewRoutes(
           overallJustification,
           expectedCandidateHash: cleanExpCandHash,
           expectedDecisionStateHash: cleanExpDecHash,
+        },
+        req.athenaUser?.uid || "",
+        req.athenaUser?.email || ""
+      );
+      res.json({ review });
+    } catch (error) {
+      sendReviewError(res, error);
+    }
+  });
+
+  app.get("/api/legal-review/:reviewId/reconcile-preview", rateLimit(60, 60_000), requireCeo, async (req, res) => {
+    if (!isReviewId(req.params.reviewId)) {
+      res.status(400).json({ error: "Identificador de revisão inválido." });
+      return;
+    }
+    try {
+      const preview = await getLegalReviewReconcilePreviewFlow(
+        repo,
+        req.params.reviewId,
+        req.athenaUser?.email || ""
+      );
+      res.json(preview);
+    } catch (error) {
+      sendReviewError(res, error);
+    }
+  });
+
+  app.post("/api/legal-review/:reviewId/reconcile", rateLimit(20, 60 * 60_000), requireCeo, async (req, res) => {
+    if (!isReviewId(req.params.reviewId)) {
+      res.status(400).json({ error: "Identificador de revisão inválido." });
+      return;
+    }
+    const {
+      expectedCatalogHash,
+      expectedCandidateHash,
+      expectedDecisionStateHash,
+      justification,
+      acknowledgeMaterialDivergence,
+    } = req.body || {};
+
+    if (typeof justification !== "string" || justification.trim().length < 15) {
+      res.status(400).json({ error: "A justificativa do CEO é obrigatória (mínimo de 15 caracteres)." });
+      return;
+    }
+    const cleanExpectedHash = typeof expectedCatalogHash === "string" ? expectedCatalogHash.trim().toLowerCase() : "";
+    if (!cleanExpectedHash || !/^[a-f0-9]{64}$/i.test(cleanExpectedHash)) {
+      res.status(400).json({ error: "O parâmetro 'expectedCatalogHash' é obrigatório e deve ser SHA-256 de 64 caracteres." });
+      return;
+    }
+
+    try {
+      const review = await reconcileLegalReviewSnapshotFlow(
+        repo,
+        req.params.reviewId,
+        {
+          expectedCatalogHash: cleanExpectedHash,
+          expectedCandidateHash: typeof expectedCandidateHash === "string" ? expectedCandidateHash.trim() : undefined,
+          expectedDecisionStateHash: typeof expectedDecisionStateHash === "string" ? expectedDecisionStateHash.trim() : undefined,
+          justification: justification.trim(),
+          acknowledgeMaterialDivergence: acknowledgeMaterialDivergence === true,
         },
         req.athenaUser?.uid || "",
         req.athenaUser?.email || ""
