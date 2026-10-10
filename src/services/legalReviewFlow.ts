@@ -1107,13 +1107,22 @@ export async function resolveHumanLegalReviewFinding(
 
     case "APONTAR_CORRECAO": {
       state = "CORRECAO_NECESSARIA";
-      correctionChangeId = params.correctionChangeId?.trim() || finding.changeId;
-      if (!correctionChangeId) {
+      const rawCid = params.correctionChangeId?.trim() || finding.changeId;
+      if (!rawCid) {
         throw new LegalReviewError(
-          "Para apontar necessidade de correção, vincule o achado a uma alteração existente ou especifique o identificador da alteração no texto.",
+          "Para apontar necessidade de correção, vincule o achado a uma alteração existente em review.changes desta revisão.",
           400
         );
       }
+      // Validação estrita de existência em review.changes da revisão atual
+      const matchingChange = (current.changes || []).find(c => c.id === rawCid);
+      if (!matchingChange) {
+        throw new LegalReviewError(
+          `A alteração corretiva informada ('${rawCid}') não existe em review.changes desta revisão. Não é permitido vincular identificadores inexistentes, pertencentes a outra revisão ou utilizar findingKey como substituto de alteração textual.`,
+          400
+        );
+      }
+      correctionChangeId = matchingChange.id;
       break;
     }
 

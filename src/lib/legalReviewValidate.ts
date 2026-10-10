@@ -4511,19 +4511,25 @@ export function validateFindingsForClosure(review: import("./legalReviewTypes").
       }
 
       case "CORRECAO_NECESSARIA": {
-        // Exige vínculo com a alteração
-        const cid = dec.correctionChangeId || f.changeId;
+        // Exige vínculo estrito com alteração real da própria revisão
+        const cid = (dec.correctionChangeId || f.changeId || "").trim();
         if (!cid) {
           failureReasons.push(`Achado '${stableKey}': correção necessária exige identificador da alteração corretiva vinculada.`);
         } else {
-          const linkedChange = review.changes.find(c => c.id === cid);
-          if (linkedChange && linkedChange.revisedExcerpt) {
+          const linkedChange = (review.changes || []).find(c => c.id === cid);
+          if (!linkedChange) {
+            failureReasons.push(
+              `Achado '${stableKey}': a alteração corretiva vinculada ('${cid}') não existe em review.changes desta revisão.`
+            );
+          } else if (!linkedChange.revisedExcerpt || !linkedChange.revisedExcerpt.trim()) {
+            failureReasons.push(
+              `Achado '${stableKey}': a alteração vinculada (${cid}) não possui texto substitutivo/corrigido definido.`
+            );
+          } else if (!currentMarkdown.includes(linkedChange.revisedExcerpt.trim())) {
             // Verifica se o texto corrigido está presente no reviewedMarkdown atual
-            if (!currentMarkdown.includes(linkedChange.revisedExcerpt.trim())) {
-              failureReasons.push(
-                `Achado '${stableKey}': o texto corrigido da alteração vinculada (${cid}) não está presente no texto final da aula.`
-              );
-            }
+            failureReasons.push(
+              `Achado '${stableKey}': o texto corrigido da alteração vinculada (${cid}) não está incorporado ao texto final da aula.`
+            );
           }
         }
         break;

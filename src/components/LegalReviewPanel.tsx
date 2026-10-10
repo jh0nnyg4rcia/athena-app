@@ -1330,7 +1330,13 @@ export function LegalReviewPanel({
                                   <label className="text-[11px] font-bold text-slate-300">Ação Jurídica:</label>
                                   <select
                                     value={findingAction}
-                                    onChange={(e) => setFindingAction(e.target.value as HumanFindingAction)}
+                                    onChange={(e) => {
+                                      const nextAction = e.target.value as HumanFindingAction;
+                                      setFindingAction(nextAction);
+                                      if (nextAction === "APONTAR_CORRECAO" && !findingCorrectionChangeId && f.changeId) {
+                                        setFindingCorrectionChangeId(f.changeId);
+                                      }
+                                    }}
                                     className="w-full bg-slate-900 border border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
                                   >
                                     <option value="CONFIRMAR">Confirmar com Evidência (CONFIRMADO_PELO_CEO)</option>
@@ -1408,18 +1414,125 @@ export function LegalReviewPanel({
                                   </div>
                                 )}
 
-                                {findingAction === "APONTAR_CORRECAO" && (
-                                  <div className="space-y-1">
-                                    <label className="text-[11px] font-bold text-slate-300">Identificador da Alteração a Corrigir:</label>
-                                    <input
-                                      type="text"
-                                      value={findingCorrectionChangeId}
-                                      onChange={(e) => setFindingCorrectionChangeId(e.target.value)}
-                                      placeholder="Ex: CHG-001 ou código da alteração"
-                                      className="w-full bg-slate-900 border border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
-                                    />
-                                  </div>
-                                )}
+                                {findingAction === "APONTAR_CORRECAO" && (() => {
+                                  // 1. Resolução rigorosa das alterações pertencentes exclusivamente à revisão atual
+                                  const availableChanges = review.changes || [];
+                                  const linkedChange = availableChanges.find(c => c.id === findingCorrectionChangeId);
+                                  const naturalChange = f.changeId ? availableChanges.find(c => c.id === f.changeId) : undefined;
+                                  const hasNaturalLink = Boolean(naturalChange);
+
+                                  return (
+                                    <div className="space-y-2 p-2.5 rounded-lg bg-amber-950/20 border border-amber-500/20">
+                                      <div className="space-y-1">
+                                        <label className="text-[11px] font-bold text-amber-200 flex items-center justify-between">
+                                          <span>Vincular Alteração Corretiva:</span>
+                                          {hasNaturalLink ? (
+                                            <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                                              ✓ Vínculo natural comprovado da IA ({naturalChange!.id})
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] text-amber-300 font-mono bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-500/30">
+                                              ⚠️ Achado autônomo (exige avaliação humana)
+                                            </span>
+                                          )}
+                                        </label>
+
+                                        {availableChanges.length > 0 ? (
+                                          <select
+                                            value={findingCorrectionChangeId}
+                                            onChange={(e) => setFindingCorrectionChangeId(e.target.value)}
+                                            className="w-full bg-slate-900 border border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                                          >
+                                            <option value="">
+                                              {hasNaturalLink ? "Selecione a alteração (ou mantenha o vínculo natural)..." : "Selecione uma alteração para avaliação humana..."}
+                                            </option>
+                                            {hasNaturalLink && (
+                                              <optgroup label="Vínculo Natural Comprovado">
+                                                <option value={naturalChange!.id}>
+                                                  [{naturalChange!.id}] {TYPE_LABEL[naturalChange!.type] || naturalChange!.type} (Natural deste achado)
+                                                </option>
+                                              </optgroup>
+                                            )}
+                                            <optgroup label={hasNaturalLink ? "Outras Alterações da Revisão" : "Alterações da Revisão para Avaliação Humana"}>
+                                              {availableChanges
+                                                .filter(c => c.id !== naturalChange?.id)
+                                                .map((c) => {
+                                                  const labelType = TYPE_LABEL[c.type] || c.type;
+                                                  const excerptPreview = (c.revisedExcerpt || c.originalExcerpt || "").replace(/\n/g, " ").slice(0, 70);
+                                                  return (
+                                                    <option key={c.id} value={c.id}>
+                                                      [{c.id}] {labelType}: "{excerptPreview}{excerptPreview.length >= 70 ? '...' : ''}"
+                                                    </option>
+                                                  );
+                                                })}
+                                            </optgroup>
+                                          </select>
+                                        ) : (
+                                          <div className="p-2 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs">
+                                            Nenhuma alteração proposta catalogada nesta revisão.
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Detalhes da alteração vinculada selecionada */}
+                                      {linkedChange ? (
+                                        <div className="p-2 rounded-lg bg-slate-900/90 border border-amber-500/30 text-xs space-y-1.5 font-sans">
+                                          <div className="flex items-center justify-between text-[11px] border-b border-white/10 pb-1">
+                                            <span className="font-bold text-amber-300">
+                                              {linkedChange.id} — {TYPE_LABEL[linkedChange.type] || linkedChange.type} ({linkedChange.category})
+                                            </span>
+                                            <div className="flex items-center gap-1.5">
+                                              {linkedChange.id === naturalChange?.id ? (
+                                                <span className="text-[10px] text-emerald-400 font-semibold">
+                                                  [Vínculo Natural]
+                                                </span>
+                                              ) : (
+                                                <span className="text-[10px] text-amber-300 font-semibold">
+                                                  [Alteração Sugerida Humana]
+                                                </span>
+                                              )}
+                                              <span className="text-[10px] text-slate-400 font-mono">
+                                                Gravidade: {SEVERITY_LABEL[linkedChange.severity] || linkedChange.severity}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-400 text-[10px] block">Texto original da alteração:</span>
+                                            <p className="text-slate-300 italic bg-black/30 p-1.5 rounded text-[11px]">
+                                              "{linkedChange.originalExcerpt}"
+                                            </p>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-400 text-[10px] block">Texto corrigido proposto:</span>
+                                            <p className="text-emerald-300 font-medium bg-black/30 p-1.5 rounded text-[11px]">
+                                              "{linkedChange.revisedExcerpt}"
+                                            </p>
+                                          </div>
+                                          {linkedChange.reason && (
+                                            <div>
+                                              <span className="text-slate-400 text-[10px]">Justificativa editorial da IA: </span>
+                                              <span className="text-slate-300 text-[11px]">{linkedChange.reason}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="p-2 rounded-lg bg-slate-900/60 border border-white/10 text-slate-300 text-[11px] space-y-1">
+                                          <p className="text-amber-300 font-medium flex items-center gap-1">
+                                            <span>ℹ️</span>
+                                            <span>
+                                              {hasNaturalLink
+                                                ? "Selecione o vínculo natural acima para confirmar a correção."
+                                                : "Ausência de alteração corretiva correspondente prévia."}
+                                            </span>
+                                          </p>
+                                          <p className="text-slate-400 leading-relaxed">
+                                            Não presuma que qualquer alteração disponível corrija este achado. Se nenhuma das alterações existentes sanar o problema, não selecione uma alteração não relacionada: utilize a aba <strong>"Editar Aula"</strong> para redigir o ajuste textual necessário.
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
 
                                 {findingAction === "DECLARAR_NAO_COMPROVADO" && (
                                   <div className="space-y-2 p-2.5 rounded-lg bg-rose-950/20 border border-rose-500/20">
@@ -1501,7 +1614,12 @@ export function LegalReviewPanel({
                                       if (findingAction === "APONTAR_CORRECAO") {
                                         const corrId = findingCorrectionChangeId.trim() || f.changeId;
                                         if (!corrId) {
-                                          setFindingFormError("Para apontar necessidade de correção, informe o identificador da alteração a corrigir.");
+                                          setFindingFormError("Para apontar necessidade de correção, selecione a alteração correspondente nesta revisão.");
+                                          return;
+                                        }
+                                        const existsInReview = (review.changes || []).some(c => c.id === corrId);
+                                        if (!existsInReview) {
+                                          setFindingFormError(`A alteração '${corrId}' não pertence às alterações catalogadas nesta revisão jurídica.`);
                                           return;
                                         }
                                       }
