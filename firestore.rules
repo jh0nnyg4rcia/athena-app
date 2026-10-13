@@ -183,5 +183,13 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+
+    match /legal_reviews/{reviewId} {
+      allow read, write: if false;
+    }
+
+    match /legal_review_index/{lessonId} {
+      allow read, write: if false;
+    }
   }
 }

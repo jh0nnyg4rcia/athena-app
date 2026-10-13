@@ -1,4 +1,5 @@
 import { HomologatedLesson, Review, TrilhaPartCache } from '../types';
+import { cloudMayReplaceLocal, mayPersistCatalogLesson } from '../lib/lessonLoad';
 
 const DB_NAME = 'athena_lesson_vault';
 const DB_VERSION = 2;
@@ -15,8 +16,22 @@ export type VaultTrilhaPart = TrilhaPartCache & {
 
 const memoryLessons = new Map<string, HomologatedLesson>();
 const memoryTrilha = new Map<string, VaultTrilhaPart>();
+/** Consulta já concluída neste processo. Ausência no Map, sozinha, não entra aqui. */
+const lessonPresence = new Map<string, "found" | "not_found">();
+
+export type VaultLessonStatus = "found" | "not_found" | "not_loaded";
+
+export type VaultLessonRead =
+  | { status: "found"; lesson: HomologatedLesson; source: "memory" | "indexeddb"; ms: number }
+  | { status: "not_found" | "not_loaded"; ms: number };
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+/** Verdadeiro só depois de um getAll de lessons concluído. Falha de leitura volta a false. */
+let lessonsHydrationOk = false;
+
+export function vaultLessonsHydrated(): boolean {
+  return lessonsHydrationOk;
+}
 
 function openVault(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
@@ -75,6 +90,30 @@ function idbDelete(storeName: string, key: string): Promise<void> {
   );
 }
 
+function idbGetOne<T>(storeName: string, key: string): Promise<T | undefined> {
+  return openVault().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, "readonly");
+        const req = tx.objectStore(storeName).get(key);
+        req.onsuccess = () => resolve(req.result as T | undefined);
+        req.onerror = () => reject(req.error);
+      })
+  );
+}
+
+function idbGetKey(storeName: string, key: string): Promise<IDBValidKey | undefined> {
+  return openVault().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, "readonly");
+        const req = tx.objectStore(storeName).getKey(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      })
+  );
+}
+
 function idbGetAll<T>(storeName: string): Promise<T[]> {
   return openVault().then(
     (db) =>
@@ -88,12 +127,88 @@ function idbGetAll<T>(storeName: string): Promise<T[]> {
   );
 }
 
+/** Falha de abertura ou de getAll não vira lista vazia: migração nenhuma pode tratar isso como ausência. */
+function idbGetAllRequired<T>(storeName: string): Promise<T[]> {
+  return openVault().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const req = tx.objectStore(storeName).getAll();
+        req.onsuccess = () => resolve((req.result || []) as T[]);
+        req.onerror = () => reject(req.error || new Error('Falha ao ler o cofre'));
+      })
+  );
+}
+
 export function rememberLesson(lesson: HomologatedLesson): void {
-  if (lesson?.id) memoryLessons.set(lesson.id, lesson);
+  if (!lesson?.id) return;
+  memoryLessons.set(lesson.id, lesson);
+  lessonPresence.set(lesson.id, "found");
 }
 
 export function forgetLesson(id: string): void {
   memoryLessons.delete(id);
+  lessonPresence.delete(id);
+}
+
+export function lessonLoadState(id: string): VaultLessonStatus {
+  const known = lessonPresence.get(id);
+  if (known) return known;
+  return "not_loaded";
+}
+
+function readClock(): number {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
+  return Date.now();
+}
+
+/**
+ * Lê só este id. Não chama getAll e não grava, apaga ou reescreve outros registros.
+ * Se o IndexedDB não responder, o estado continua "not_loaded".
+ */
+export async function readVaultLesson(id: string): Promise<VaultLessonRead> {
+  const remembered = memoryLessons.get(id);
+  if (remembered) {
+    lessonPresence.set(id, "found");
+    return { status: "found", lesson: remembered, source: "memory", ms: 0 };
+  }
+  const started = readClock();
+  try {
+    const stored = await idbGetOne<HomologatedLesson>(LESSONS_STORE, id);
+    const ms = readClock() - started;
+    if (stored && (stored.id || stored.content || stored.blocks?.length)) {
+      const lesson = { ...stored, id: stored.id || id };
+      rememberLesson(lesson);
+      return { status: "found", lesson, source: "indexeddb", ms };
+    }
+    lessonPresence.set(id, "not_found");
+    return { status: "not_found", ms };
+  } catch {
+    return { status: "not_loaded", ms: readClock() - started };
+  }
+}
+
+/**
+ * Confirma se o id existe no cofre sem trazer o Markdown.
+ * "not_loaded" significa que a consulta não pôde ser feita.
+ */
+export async function confirmVaultLesson(id: string): Promise<VaultLessonStatus> {
+  if (lessonPresence.get(id) === "found" || memoryLessons.has(id)) {
+    lessonPresence.set(id, "found");
+    return "found";
+  }
+  if (lessonPresence.get(id) === "not_found") return "not_found";
+  try {
+    const key = await idbGetKey(LESSONS_STORE, id);
+    if (key !== undefined && key !== null) {
+      lessonPresence.set(id, "found");
+      return "found";
+    }
+    lessonPresence.set(id, "not_found");
+    return "not_found";
+  } catch {
+    return "not_loaded";
+  }
 }
 
 export function getRememberedLesson(id: string): HomologatedLesson | undefined {
@@ -111,6 +226,23 @@ export async function putVaultLesson(lesson: HomologatedLesson): Promise<void> {
   } catch (err) {
     console.warn('[LessonVault] Falha ao gravar lição no IndexedDB:', err);
   }
+}
+
+/**
+ * Grava uma aula vinda do catálogo só com prova de ausência ou de carimbo mais novo.
+ * Erro de leitura, carimbo ausente, zero ou empate mantêm o que já está no cofre.
+ */
+export async function persistCatalogLesson(
+  cloud: HomologatedLesson,
+  readLocal: (id: string) => HomologatedLesson | null = () => null
+): Promise<boolean> {
+  if (!cloud?.id) return false;
+  const status = await confirmVaultLesson(cloud.id);
+  const remembered = getRememberedLesson(cloud.id);
+  const local = status === "found" ? remembered : remembered || readLocal(cloud.id);
+  if (!mayPersistCatalogLesson(status, local, cloud)) return false;
+  await putVaultLesson(cloud);
+  return true;
 }
 
 export async function deleteVaultLesson(id: string): Promise<void> {
@@ -172,6 +304,28 @@ export async function listVaultReviews(): Promise<Review[]> {
   }
 }
 
+/**
+ * Cópia legada só entra no cofre se o IndexedDB não tiver esse id,
+ * ou se o carimbo provar que ela é estritamente mais nova.
+ * Na dúvida, o registro já carregado permanece. A chave antiga não é apagada.
+ */
+function persistLegacyLessonIfSafe(lesson: HomologatedLesson): void {
+  if (!lesson?.id) return;
+  const existing = getRememberedLesson(lesson.id);
+  if (existing && !cloudMayReplaceLocal(existing, lesson)) return;
+  rememberLesson(lesson);
+  void idbPut(LESSONS_STORE, lesson);
+}
+
+/** Memória só aceita legado depois da leitura bem-sucedida do cofre, e com a mesma prova. */
+export function rememberLegacyLessonIfSafe(lesson: HomologatedLesson): boolean {
+  if (!lessonsHydrationOk || !lesson?.id) return false;
+  const existing = getRememberedLesson(lesson.id);
+  if (existing && !cloudMayReplaceLocal(existing, lesson)) return false;
+  rememberLesson(lesson);
+  return true;
+}
+
 function migrateLocalStorageIntoVault(): void {
   if (typeof window === 'undefined') return;
   try {
@@ -183,10 +337,7 @@ function migrateLocalStorageIntoVault(): void {
       try {
         if (key.startsWith('athena_homologated_')) {
           const lesson = JSON.parse(raw) as HomologatedLesson;
-          if (lesson?.id) {
-            memoryLessons.set(lesson.id, lesson);
-            void idbPut(LESSONS_STORE, lesson);
-          }
+          if (lesson?.id) persistLegacyLessonIfSafe(lesson);
         } else if (key.startsWith('athena_compressed_reviews_')) {
           const parsed = JSON.parse(raw) as Review[];
           if (Array.isArray(parsed)) {
@@ -222,19 +373,19 @@ function migrateLocalStorageIntoVault(): void {
 
 export async function loadVaultIntoMemory(): Promise<{ lessons: number; trilhaParts: number }> {
   try {
-    const [lessons, parts] = await Promise.all([
-      idbGetAll<HomologatedLesson>(LESSONS_STORE),
-      idbGetAll<VaultTrilhaPart>(TRILHA_STORE)
-    ]);
+    const lessons = await idbGetAllRequired<HomologatedLesson>(LESSONS_STORE);
+    const parts = await idbGetAll<VaultTrilhaPart>(TRILHA_STORE);
     for (const lesson of lessons) {
-      if (lesson?.id) memoryLessons.set(lesson.id, lesson);
+      if (lesson?.id) rememberLesson(lesson);
     }
     for (const part of parts) {
       if (part?.id) memoryTrilha.set(part.id, part);
     }
+    lessonsHydrationOk = true;
     migrateLocalStorageIntoVault();
     return { lessons: lessons.length, trilhaParts: parts.length };
   } catch (err) {
+    lessonsHydrationOk = false;
     console.warn('[LessonVault] Falha ao hidratar IndexedDB:', err);
     return { lessons: 0, trilhaParts: 0 };
   }

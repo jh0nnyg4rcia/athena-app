@@ -1,9 +1,10 @@
-/** Voz institucional da ATHENA: carreira ampla, sem concurso nominado, sem tabelas. */
+/** Voz institucional da ATHENA: só Magistratura, Ministério Público e Defensoria, sem concurso nominado, sem tabelas. */
+import { presentSavedLesson } from "./presentSavedLesson";
 
 export const ATHENA_AUDIENCE_TITLE = "Futuro(a) Aprovado(a)";
 
 export const ATHENA_CAREERS_LABEL =
-  "concursos da magistratura, do ministério público, da defensoria pública, da procuradoria e de delegado de polícia";
+  "concursos da Magistratura, do Ministério Público e da Defensoria Pública";
 
 export function flattenMarkdownTables(text: string): string {
   if (!text || !text.includes("|")) return text;
@@ -55,8 +56,8 @@ export function generalizeContestNames(text: string): string {
   const replacements: Array<[RegExp, string]> = [
     [/\bDPU\s*\d{4}\b/gi, "concurso da defensoria pública"],
     [/\bDPE[-\s]?[A-Z]{2}\s*\d{4}\b/gi, "concurso da defensoria pública"],
-    [/\bPG[EF][-\s]?[A-Z]{0,2}\s*\d{4}\b/gi, "concurso da procuradoria"],
-    [/\bPC[-\s]?[A-Z]{2}\s*\d{4}\b/gi, "concurso de delegado de polícia"],
+    [/\bPG[EF][-\s]?[A-Z]{0,2}\s*\d{4}\b/gi, "concurso da Magistratura, do Ministério Público ou da Defensoria Pública"],
+    [/\bPC[-\s]?[A-Z]{2}\s*\d{4}\b/gi, "concurso da Magistratura, do Ministério Público ou da Defensoria Pública"],
     [/\bMP[-\s]?[A-Z]{2,3}\s*\d{4}\b/gi, "concurso do ministério público"],
     [/\bTRF\s*-?\s*\d\s*\d{4}\b/gi, "concurso da magistratura"],
     [/\bMagistratura Federal TRF\s*-?\s*\d\s*\d{4}\b/gi, "concurso da magistratura"],
@@ -76,7 +77,7 @@ export function sanitizeAthenaVoice(text: string): string {
   out = out.replace(/Futuros?\s+Magistrados?/gi, ATHENA_AUDIENCE_TITLE);
   out = out.replace(/Futuro\(a\)\s+Juiz\(a\)/gi, ATHENA_AUDIENCE_TITLE);
   out = generalizeContestNames(out);
-  return out;
+  return presentSavedLesson(out);
 }
 
 export function keepObjectiveChallengeQuestions<T extends { correctIndex?: number }>(

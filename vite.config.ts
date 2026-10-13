@@ -8,7 +8,10 @@ export default defineConfig({
   define: {
     // Nunca injete GEMINI_API_KEY / VITE_GEMINI_* no bundle. Chave só no processo Node.
     'process.env.GEMINI_API_KEY': JSON.stringify(''),
+    'process.env.OPENAI_API_KEY': JSON.stringify(''),
+    'process.env.OPENAI_REVIEW_MODEL': JSON.stringify(''),
     'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(''),
+    'import.meta.env.VITE_OPENAI_API_KEY': JSON.stringify(''),
     '__ATHENA_BUILD_API_KEY__': JSON.stringify(''),
   },
   resolve: {
