@@ -3,25 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ATHENA — Mentoria Jurídica com Inteligência Artificial | Método 80/20 de Pareto</title>
+  <title>ATHENA — Mentoria Jurídica com Inteligência Artificial | Experimente Gratuitamente</title>
   
   <!-- SEO & Metatags -->
-  <meta name="description" content="A mais avançada mentoria jurídica potencializada por Inteligência Artificial para Magistratura, Ministério Público e Defensoria Pública.">
-  <meta name="keywords" content="Mentoria Jurídica, Concursos Públicos, Magistratura, Ministério Público, Defensoria Pública, Inteligência Artificial, STF, STJ, Jurisprudência, Direito Constitucional">
+  <meta name="description" content="Uma preparação jurídica estruturada em 100 dias com Inteligência Artificial, revisão e questões comentadas para concursos de Magistratura e Ministério Público. Experimente grátis os Dias 1 e 2.">
+  <meta name="keywords" content="Mentoria Jurídica, Concursos Públicos, Magistratura, Ministério Público, Defensoria Pública, Inteligência Artificial, STF, STJ, Jurisprudência, Questões Comentadas">
   <meta name="author" content="ATHENA Mentoria Jurídica">
-  <link rel="canonical" href="https://projetoathena.app.br">
+  <link rel="canonical" href="https://projetoathena.app.br/">
 
   <!-- Open Graph / WhatsApp / Facebook -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://projetoathena.app.br/">
   <meta property="og:title" content="ATHENA — Mentoria Jurídica com Inteligência Artificial">
-  <meta property="og:description" content="Preparação de alta performance para carreiras jurídicas com o Método 80/20 de Pareto, Jurisprudência STF/STJ e simulados comentados.">
+  <meta property="og:description" content="Sua jornada rumo à aprovação começa aqui. Preparação estruturada em 100 dias com IA. Experimente grátis os Dias 1 e 2.">
   <meta property="og:image" content="https://projetoathena.app.br/athena-banner.png">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="ATHENA — Mentoria Jurídica com Inteligência Artificial">
-  <meta name="twitter:description" content="A mais avançada plataforma de mentoria jurídica adaptativa para aprovação em concursos de ponta.">
+  <meta name="twitter:description" content="Preparação jurídica de elite para Magistratura e Ministério Público. Experimente gratuitamente os Dias 1 e 2.">
   <meta name="twitter:image" content="https://projetoathena.app.br/athena-banner.png">
 
   <!-- Favicon -->
@@ -31,20 +31,21 @@
   <!-- Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
 
   <style>
     :root {
       --bg-dark: #020617;
       --bg-card: #0f172a;
-      --bg-card-hover: #111c33;
+      --bg-card-hover: #131e38;
       --gold: #d4af37;
       --gold-light: #e4c56a;
       --gold-dark: #a6862a;
       --emerald: #10b981;
+      --emerald-light: #34d399;
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
-      --border-card: rgba(212, 175, 55, 0.18);
+      --border-card: rgba(212, 175, 55, 0.2);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -52,8 +53,9 @@
     body {
       background-color: var(--bg-dark);
       background-image:
-        radial-gradient(circle at top right, rgba(212, 175, 55, 0.1), transparent 42%),
-        radial-gradient(circle at bottom left, rgba(6, 78, 59, 0.18), transparent 48%);
+        radial-gradient(circle at top right, rgba(212, 175, 55, 0.12), transparent 45%),
+        radial-gradient(circle at bottom left, rgba(6, 78, 59, 0.18), transparent 50%),
+        radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.7), transparent 70%);
       color: var(--text-main);
       font-family: 'Inter', sans-serif;
       line-height: 1.6;
@@ -70,62 +72,68 @@
       left: 0;
       right: 0;
       z-index: 50;
-      height: 4rem;
-      background: rgba(2, 6, 23, 0.8);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      height: 4.25rem;
+      background: rgba(2, 6, 23, 0.85);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid rgba(212, 175, 55, 0.18);
     }
 
     .nav-container {
+      max-width: 1140px;
       height: 100%;
       margin: 0 auto;
-      padding: 0 1rem 0 1.25rem;
+      padding: 0 1.25rem;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
     }
 
-    .logo-box {
+    .header-brand {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: 0.85rem;
       text-decoration: none;
     }
 
-    .logo-img {
-      width: 42px;
-      height: 42px;
-      border-radius: 10px;
-      box-shadow: 0 0 15px rgba(212, 175, 55, 0.28);
+    .header-seal-img {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      border: 1.5px solid var(--gold);
+      box-shadow: 0 0 15px rgba(212, 175, 55, 0.35);
+      object-fit: cover;
     }
 
     .logo-text {
       font-family: 'Playfair Display', serif;
-      font-weight: 700;
-      font-size: 1.05rem;
-      letter-spacing: -0.01em;
-      color: #f1f5f9;
+      font-weight: 800;
+      font-size: 1.15rem;
+      letter-spacing: 0.05em;
+      color: #f8fafc;
+      display: block;
+      line-height: 1.1;
     }
 
-    .logo-kicker {
-      display: block;
-      margin-top: 0.1rem;
-      font-family: 'Inter', sans-serif;
-      font-size: 0.62rem;
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-top: 0.15rem;
+      font-size: 0.65rem;
       font-weight: 700;
-      letter-spacing: 0.16em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: rgba(212, 175, 55, 0.75);
+      color: var(--gold-light);
     }
 
     .status-dot {
-      width: 0.4rem;
-      height: 0.4rem;
+      width: 0.45rem;
+      height: 0.45rem;
       border-radius: 999px;
-      background: #10b981;
-      box-shadow: 0 0 8px rgba(16, 185, 129, 0.55);
+      background: var(--emerald-light);
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.7);
     }
 
     .nav-links {
@@ -138,17 +146,24 @@
     .nav-link {
       color: var(--text-muted);
       text-decoration: none;
-      font-size: 0.9rem;
+      font-size: 0.92rem;
       font-weight: 500;
       transition: color 0.2s;
     }
 
     .nav-link:hover { color: var(--gold-light); }
 
-    .nav-cta {
-      display: flex;
+    .menu-btn {
+      display: none;
       align-items: center;
-      gap: 0.75rem;
+      justify-content: center;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(212, 175, 55, 0.25);
+      background: rgba(15, 23, 42, 0.85);
+      color: #f8fafc;
+      cursor: pointer;
     }
 
     /* Buttons */
@@ -157,607 +172,114 @@
       align-items: center;
       justify-content: center;
       gap: 0.5rem;
-      padding: 0.75rem 1.5rem;
-      border-radius: 0.75rem;
-      font-size: 0.95rem;
+      padding: 0.75rem 1.6rem;
+      border-radius: 0.85rem;
+      font-size: 0.92rem;
       font-weight: 700;
       text-decoration: none;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: all 0.22s ease;
+      text-align: center;
     }
 
     .btn-gold {
-      background: #d4af37;
+      background: linear-gradient(135deg, #d4af37 0%, #b8972e 100%);
       color: #020617;
-      border-radius: 1rem;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.05em;
       text-transform: uppercase;
-      font-size: 0.78rem;
+      font-size: 0.85rem;
       box-shadow: 0 8px 24px rgba(212, 175, 55, 0.28);
+      border: 1px solid rgba(255, 255, 255, 0.2);
     }
 
     .btn-gold:hover {
       transform: translateY(-2px);
-      box-shadow: 0 15px 30px -5px rgba(212, 175, 55, 0.35);
-      filter: brightness(1.05);
+      box-shadow: 0 14px 30px rgba(212, 175, 55, 0.4);
+      filter: brightness(1.08);
     }
 
     .btn-outline {
       background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: #fff;
+      border: 1px solid rgba(212, 175, 55, 0.35);
+      color: #f8fafc;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 0.85rem;
     }
 
     .btn-outline:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: rgba(255, 255, 255, 0.3);
-      transform: translateY(-2px);
-    }
-
-    .btn-google-play {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.65rem;
-      padding: 0.75rem 1.25rem;
-      border-radius: 0.75rem;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      color: #e2e8f0;
-      text-decoration: none;
-      font-size: 0.9rem;
-      transition: all 0.2s ease;
-    }
-
-    .btn-google-play:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: var(--gold);
-      transform: translateY(-2px);
-    }
-
-    .badge-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: rgba(212, 175, 55, 0.1);
-      border: 1px solid rgba(212, 175, 55, 0.22);
-      color: var(--gold-light);
-      padding: 0.4rem 1.15rem;
-      border-radius: 9999px;
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-    }
-
-    .hero-brand-line {
-      display: flex;
-      align-items: center;
-      gap: 0.85rem;
-      margin-bottom: 1.25rem;
-      flex-wrap: wrap;
-    }
-
-    .hero-brand-emblem {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .hero-emblem-img {
-      width: 52px;
-      height: 52px;
-      border-radius: 14px;
-      object-fit: cover;
-      box-shadow: 0 0 24px rgba(212, 175, 55, 0.35), 0 6px 18px rgba(0, 0, 0, 0.6);
-      border: 1.5px solid rgba(212, 175, 55, 0.45);
-      background: #020617;
-      transition: transform 0.25s ease, box-shadow 0.25s ease;
-    }
-
-    .hero-emblem-img:hover {
-      transform: scale(1.05);
-      box-shadow: 0 0 35px rgba(212, 175, 55, 0.55), 0 10px 24px rgba(0, 0, 0, 0.7);
-    }
-
-    /* Container */
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-    }
-
-    /* Hero */
-    .hero-section {
-      padding: 3rem 1.5rem 3.5rem;
-    }
-
-    .hero-container {
-      max-width: 1060px;
-      margin: 0 auto;
-    }
-
-    .app-main .container { max-width: 980px; }
-    .app-main .hero-container { max-width: 1060px; }
-
-    /* Hero Two-Column Grid (Desktop default) */
-    .hero-grid {
-      display: grid;
-      grid-template-columns: 1.18fr 0.82fr;
-      grid-template-areas:
-        "header  visual"
-        "cta     visual"
-        "details visual";
-      column-gap: 2.75rem;
-      row-gap: 1.25rem;
-      align-items: center;
-      text-align: left;
-    }
-
-    .hero-item-header {
-      grid-area: header;
-    }
-
-    .hero-item-primary-cta {
-      grid-area: cta;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.45rem;
-    }
-
-    .hero-item-visual {
-      grid-area: visual;
-      display: flex;
-      justify-content: center;
-      width: 100%;
-    }
-
-    .hero-item-secondary {
-      grid-area: details;
-    }
-
-    .hero-title {
-      font-size: clamp(2.1rem, 3.8vw, 3.1rem);
-      font-weight: 700;
-      line-height: 1.15;
-      margin-bottom: 1rem;
-      color: #f1f5f9;
-      letter-spacing: -0.02em;
-    }
-
-    .hero-title span { color: var(--gold); }
-
-    .hero-subtitle {
-      font-size: clamp(1.05rem, 1.8vw, 1.22rem);
-      color: #cbd5e1;
-      font-weight: 500;
-      line-height: 1.5;
-      margin: 0 0 0.5rem;
-    }
-
-    .hero-description {
-      font-size: 0.94rem;
-      color: var(--text-muted);
-      line-height: 1.65;
-      margin: 0 0 1rem;
-    }
-
-    .hero-signature {
-      font-size: 0.8rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--gold);
-      margin-bottom: 1.25rem;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .hero-signature::before,
-    .hero-signature::after {
-      content: "";
-      display: inline-block;
-      width: 24px;
-      height: 1px;
-      background: rgba(212, 175, 55, 0.4);
-    }
-
-    /* Hero CTA Elements */
-    .btn-hero-waitlist {
-      padding: 0.9rem 1.85rem;
-      font-size: 1.02rem;
-      font-weight: 700;
-      box-shadow: 0 6px 24px rgba(212, 175, 55, 0.35);
-      border-radius: 0.85rem;
-    }
-
-    .hero-cta-hint {
-      font-size: 0.78rem;
-      color: #94a3b8;
-      letter-spacing: 0.01em;
-    }
-
-    .hero-secondary-actions {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-
-    .btn-hero-secondary {
-      padding: 0.7rem 1.35rem;
-      font-size: 0.88rem;
-      border-color: rgba(212, 175, 55, 0.35);
-      color: var(--gold-light);
-    }
-
-    .btn-hero-secondary:hover {
-      border-color: var(--gold);
       background: rgba(212, 175, 55, 0.12);
+      border-color: var(--gold);
+      transform: translateY(-2px);
       color: #fff;
     }
 
+    .btn-large {
+      padding: 1.15rem 2.25rem;
+      font-size: 0.98rem;
+    }
 
-    /* Smartphone Mockup Real Showcase */
-    .showcase-wrapper {
-      width: 100%;
-      max-width: 380px;
+    .container {
+      max-width: 1140px;
       margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1.15rem;
+      padding: 0 1.25rem;
     }
 
-    .phone-mockup-frame, .showcase-frame {
-      width: 100%;
-      max-width: 340px;
-      background: #020617;
-      border: 1px solid rgba(212, 175, 55, 0.38);
-      border-radius: 24px;
-      padding: 7px;
-      box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9), 0 0 24px rgba(212, 175, 55, 0.18);
-      position: relative;
-      transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    .phone-mockup-frame:hover, .showcase-frame:hover {
-      transform: translateY(-2px);
-      border-color: rgba(212, 175, 55, 0.6);
-      box-shadow: 0 26px 60px -10px rgba(0, 0, 0, 0.95), 0 0 32px rgba(212, 175, 55, 0.28);
-    }
-
-    .phone-screen, .showcase-screen {
-      width: 100%;
-      border-radius: 18px;
-      overflow: hidden;
-      background: #050a14;
-      position: relative;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-
-    .phone-screen img, .showcase-screen img {
-      width: 100%;
-      height: auto;
-      max-height: 485px;
-      object-fit: contain;
-      display: block;
-      border-radius: 16px;
-      transition: opacity 0.2s ease;
-    }
-
-    .phone-caption {
-      margin-top: 0.65rem;
-      text-align: center;
-      font-size: 0.8rem;
-      color: var(--gold-light);
-      font-weight: 600;
-      letter-spacing: 0.015em;
-      line-height: 1.4;
-      padding: 0 0.4rem;
-    }
-
-    /* Gallery Tabs for Real Screenshots */
-    .gallery-tabs-wrap {
-      display: flex;
-      gap: 0.45rem;
-      flex-wrap: wrap;
-      justify-content: center;
-      max-width: 370px;
-      margin: 0 auto;
-    }
-
-    .gallery-tab-btn {
-      padding: 0.48rem 0.82rem;
-      border-radius: 9999px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(15, 23, 42, 0.75);
-      color: #94a3b8;
-      font-size: 0.76rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.18s ease;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-    }
-
-    .gallery-tab-btn:hover {
-      color: #f8fafc;
-      border-color: rgba(212, 175, 55, 0.35);
-      background: rgba(15, 23, 42, 0.95);
-    }
-
-    .gallery-tab-btn.active {
-      color: #020617;
-      background: var(--gold);
-      border-color: var(--gold);
-      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.35);
-      font-weight: 700;
-    }
-
-    /* Waitlist Section */
-    .waitlist-section {
-      padding: 4rem 1.5rem;
-      background: radial-gradient(circle at 50% 40%, rgba(212, 175, 55, 0.12) 0%, rgba(15, 23, 42, 0.85) 65%);
-      border-top: 1px solid rgba(212, 175, 55, 0.2);
-      border-bottom: 1px solid rgba(212, 175, 55, 0.2);
-      position: relative;
-    }
-
-    .waitlist-card {
-      max-width: 640px;
-      margin: 0 auto;
-      background: rgba(15, 23, 42, 0.92);
-      border: 1px solid rgba(212, 175, 55, 0.3);
-      border-radius: 2rem;
-      padding: 2.5rem 2rem;
-      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(16px);
-      text-align: left;
-    }
-
-    .waitlist-card h3 {
-      font-family: 'Playfair Display', serif;
-      font-size: 1.75rem;
-      color: #f1f5f9;
-      margin-bottom: 0.5rem;
-      text-align: center;
-    }
-
-    .waitlist-card p.waitlist-lead {
-      color: var(--text-muted);
-      font-size: 0.92rem;
-      text-align: center;
-      margin-bottom: 2rem;
-      line-height: 1.5;
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.82rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--gold-light);
-      margin-bottom: 0.45rem;
-    }
-
-    .form-control {
-      width: 100%;
-      padding: 0.85rem 1rem;
-      background: rgba(2, 6, 23, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 0.85rem;
-      color: #f1f5f9;
-      font-size: 0.95rem;
-      font-family: inherit;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .form-control:focus {
-      border-color: var(--gold);
-      background: rgba(2, 6, 23, 0.95);
-    }
-
-    .form-control::placeholder {
-      color: #64748b;
-    }
-
-    .select-control {
-      appearance: none;
-      background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d4af37' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-      background-repeat: no-repeat;
-      background-position: right 1rem center;
-      background-size: 1.1em;
-      padding-right: 2.5rem;
-    }
-
-    .checkbox-group {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-      margin: 1.5rem 0 1.75rem;
-      font-size: 0.85rem;
-      color: #94a3b8;
-      line-height: 1.5;
-    }
-
-    .checkbox-group input[type="checkbox"] {
-      margin-top: 0.2rem;
-      width: 17px;
-      height: 17px;
-      accent-color: var(--gold);
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-
-    .checkbox-group a {
-      color: var(--gold);
-      text-decoration: underline;
-    }
-
-    .btn-disabled {
-      width: 100%;
-      padding: 1rem;
-      background: rgba(212, 175, 55, 0.2);
-      border: 1px solid rgba(212, 175, 55, 0.35);
-      color: rgba(241, 245, 249, 0.65);
-      border-radius: 1rem;
-      font-size: 0.9rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      cursor: not-allowed;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-    }
-
-    .field-error {
-      display: block;
-      color: #f87171;
-      font-size: 0.78rem;
-      margin-top: 0.35rem;
-      font-weight: 500;
-    }
-
-    .form-control.input-error {
-      border-color: #ef4444;
-      background: rgba(239, 68, 68, 0.08);
-    }
-
-    .waitlist-feedback {
-      padding: 0.85rem 1.1rem;
-      border-radius: 0.85rem;
-      margin-bottom: 1.25rem;
-      font-size: 0.88rem;
-      line-height: 1.5;
-    }
-
-    .waitlist-feedback.success {
-      background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(16, 185, 129, 0.4);
-      color: #34d399;
-    }
-
-    .waitlist-feedback.error {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.4);
-      color: #f87171;
-    }
-
-    .form-notice {
-      margin-top: 1rem;
-      text-align: center;
-      font-size: 0.78rem;
-      color: #64748b;
-      line-height: 1.4;
-    }
-
-    .commercial-disclaimer {
-      font-size: 0.76rem;
-      color: #94a3b8;
-      margin-top: 0.85rem;
-      padding: 0.65rem 0.85rem;
-      border-radius: 0.65rem;
-      background: rgba(2, 6, 23, 0.5);
-      border: 1px dashed rgba(212, 175, 55, 0.25);
-      text-align: center;
-    }
-
-    /* Metrics Grid */
-    .metrics-section {
-      padding: 0 0 2rem;
-    }
-
-    .metrics-grid > div {
-      background: rgba(15, 23, 42, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 1.5rem;
-      padding: 1.25rem 1rem;
-    }
-
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 2rem;
-      text-align: center;
-    }
-
-    .metric-number {
-      font-family: 'Playfair Display', serif;
-      font-size: 2.4rem;
-      font-weight: 700;
-      color: var(--gold);
-      margin-bottom: 0.3rem;
-    }
-
-    .metric-label {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-weight: 600;
-    }
-
-    /* Cards */
-    .card {
-      background: rgba(15, 23, 42, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 1.75rem;
-      padding: 1.75rem;
-      transition: border-color 0.2s ease;
-      box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.8);
-    }
-
-    .card:hover {
-      border-color: rgba(212, 175, 55, 0.28);
-    }
-
-    /* Section Headers */
     .section-head {
       text-align: center;
-      max-width: 760px;
-      margin: 0 auto 3.5rem;
+      max-width: 780px;
+      margin: 0 auto 3rem;
     }
 
     .section-tag {
-      color: var(--gold);
-      font-size: 0.85rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
+      display: inline-block;
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
-      margin-bottom: 0.5rem;
+      color: var(--gold-light);
+      background: rgba(212, 175, 55, 0.12);
+      border: 1px solid rgba(212, 175, 55, 0.35);
+      padding: 0.4rem 1.1rem;
+      border-radius: 9999px;
+      margin-bottom: 0.9rem;
     }
 
     .section-title {
-      font-size: clamp(1.8rem, 3.5vw, 2.5rem);
+      font-size: clamp(2rem, 3.8vw, 2.85rem);
       font-weight: 800;
+      line-height: 1.2;
+      color: #f8fafc;
       margin-bottom: 1rem;
     }
 
     .section-desc {
+      font-size: 1.1rem;
       color: var(--text-muted);
-      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+
+    /* Cards */
+    .card {
+      background: rgba(15, 23, 42, 0.82);
+      border: 1px solid var(--border-card);
+      border-radius: 1.25rem;
+      padding: 2rem;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(10px);
+      transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(212, 175, 55, 0.45);
+      box-shadow: 0 24px 55px rgba(0, 0, 0, 0.65), 0 0 20px rgba(212, 175, 55, 0.15);
     }
 
     /* 6 Blocks Grid */
     .blocks-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
       gap: 1.75rem;
     }
 
@@ -776,1216 +298,1241 @@
       margin-bottom: 1.25rem;
     }
 
+    /* 2-Column Showcase Layouts */
+    .showcase-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3.5rem;
+      align-items: center;
+    }
+
+    .showcase-row.reversed {
+      direction: rtl;
+    }
+
+    .showcase-row.reversed > * {
+      direction: ltr;
+    }
+
+    .showcase-phone-wrap {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .showcase-phone-wrap img {
+      max-width: 380px;
+      width: 100%;
+      height: auto;
+      border-radius: 1.75rem;
+      border: 1.5px solid rgba(212, 175, 55, 0.3);
+      box-shadow: 0 25px 65px -15px rgba(0, 0, 0, 0.8), 0 0 35px rgba(212, 175, 55, 0.22);
+      transition: transform 0.3s ease;
+    }
+
+    .showcase-phone-wrap img:hover {
+      transform: scale(1.02);
+    }
+
+    .feature-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .feature-item-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(212, 175, 55, 0.22);
+      border-radius: 1.15rem;
+      padding: 1.4rem 1.6rem;
+      transition: all 0.22s ease;
+    }
+
+    .feature-item-card:hover {
+      border-color: var(--gold);
+      background: rgba(17, 28, 51, 0.95);
+      transform: translateX(4px);
+    }
+
+    .feature-item-card h4 {
+      font-size: 1.15rem;
+      color: var(--gold-light);
+      margin-bottom: 0.45rem;
+      font-family: 'Playfair Display', serif;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .feature-item-card p {
+      font-size: 0.95rem;
+      color: #cbd5e1;
+      line-height: 1.55;
+    }
+
+    /* Hero Section */
+    .hero-section {
+      padding: 3.5rem 0 4.5rem;
+      position: relative;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 3.5rem;
+      align-items: center;
+    }
+
+    .hero-brand-line {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+
+    .hero-emblem-img {
+      width: 54px;
+      height: 54px;
+      border-radius: 14px;
+      border: 1.5px solid var(--gold);
+      box-shadow: 0 0 18px rgba(212, 175, 55, 0.35);
+      object-fit: cover;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(212, 175, 55, 0.12);
+      border: 1px solid rgba(212, 175, 55, 0.32);
+      color: var(--gold-light);
+      padding: 0.45rem 1.2rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .hero-title {
+      font-size: clamp(2.3rem, 4.2vw, 3.4rem);
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 1.25rem;
+      color: #f8fafc;
+      letter-spacing: -0.02em;
+    }
+
+    .hero-title span { color: var(--gold); }
+
+    .hero-subtitle {
+      font-size: clamp(1.1rem, 1.8vw, 1.25rem);
+      color: #cbd5e1;
+      font-weight: 400;
+      line-height: 1.6;
+      margin-bottom: 2rem;
+      max-width: 600px;
+    }
+
+    .hero-cta-group {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+
+    .hero-cta-hint {
+      color: var(--text-muted);
+      font-size: 0.94rem;
+      line-height: 1.5;
+    }
+
+    .hero-cta-hint strong {
+      color: var(--gold-light);
+    }
+
+    /* Metrics Section */
+    .metrics-section {
+      padding: 2.5rem 0;
+      background: rgba(15, 23, 42, 0.6);
+      border-top: 1px solid rgba(212, 175, 55, 0.15);
+      border-bottom: 1px solid rgba(212, 175, 55, 0.15);
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+      text-align: center;
+    }
+
+    .metric-number {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.9rem, 3.2vw, 2.6rem);
+      font-weight: 800;
+      color: var(--gold-light);
+      line-height: 1.1;
+      margin-bottom: 0.35rem;
+    }
+
+    .metric-label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
     /* Interactive Simulator */
     .simulator-wrap {
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid rgba(212, 175, 55, 0.22);
-      border-radius: 2rem;
-      padding: 2rem;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
-      max-width: 860px;
+      max-width: 820px;
       margin: 0 auto;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      border-radius: 1.5rem;
+      padding: 2.25rem;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);
     }
 
     .quiz-option {
-      background: #121927;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(2, 6, 23, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 0.85rem;
-      padding: 1.15rem 1.25rem;
+      padding: 1.15rem 1.4rem;
       margin-bottom: 0.85rem;
       cursor: pointer;
       display: flex;
       align-items: flex-start;
       gap: 1rem;
-      transition: all 0.2s ease;
-      font-size: 0.98rem;
+      transition: all 0.18s ease;
+      font-size: 0.96rem;
+      line-height: 1.5;
     }
 
     .quiz-option:hover {
       border-color: var(--gold);
-      background: #172134;
-      transform: translateX(4px);
-    }
-
-    .quiz-letter {
-      background: rgba(255, 255, 255, 0.1);
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      flex-shrink: 0;
-      font-size: 0.85rem;
+      background: rgba(212, 175, 55, 0.08);
     }
 
     .quiz-option.correct {
-      background: rgba(16, 185, 129, 0.15);
-      border-color: #10b981;
-      color: #ecfdf5;
-    }
-    .quiz-option.correct .quiz-letter {
-      background: #10b981;
-      color: #064e3b;
+      border-color: #10b981 !important;
+      background: rgba(16, 185, 129, 0.15) !important;
+      color: #34d399;
     }
 
     .quiz-option.wrong {
-      background: rgba(239, 68, 68, 0.15);
-      border-color: #ef4444;
-      color: #fef2f2;
+      border-color: #ef4444 !important;
+      background: rgba(239, 68, 68, 0.15) !important;
+      color: #fca5a5;
     }
-    .quiz-option.wrong .quiz-letter {
-      background: #ef4444;
-      color: #450a0a;
+
+    .opt-letter {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 0.5rem;
+      background: rgba(212, 175, 55, 0.18);
+      border: 1px solid var(--gold);
+      color: var(--gold-light);
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 0.9rem;
     }
 
     .explanation-box {
       margin-top: 1.5rem;
       padding: 1.5rem;
-      border-radius: 1rem;
-      background: rgba(16, 185, 129, 0.08);
-      border-left: 4px solid #10b981;
+      border-radius: 0.85rem;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.35);
       display: none;
-      animation: fadeIn 0.4s ease;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
+    /* Free Access Section */
+    .access-section {
+      padding: 5rem 0;
+      background: radial-gradient(circle at 50% 40%, rgba(212, 175, 55, 0.14) 0%, rgba(15, 23, 42, 0.9) 70%);
+      border-top: 1px solid rgba(212, 175, 55, 0.25);
+      border-bottom: 1px solid rgba(212, 175, 55, 0.25);
     }
 
-    /* Pricing */
-    .pricing-grid {
+    .access-card {
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid rgba(212, 175, 55, 0.35);
+      border-radius: 2rem;
+      padding: 3rem 2.5rem;
+      box-shadow: 0 30px 70px rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(14px);
+    }
+
+    .access-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 2rem;
-      max-width: 1000px;
-      margin: 0 auto;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: 3.5rem;
+      align-items: center;
     }
 
-    .pricing-card.featured {
-      border: 2px solid var(--gold);
-      background: linear-gradient(180deg, #162035 0%, #0e1526 100%);
-      transform: scale(1.03);
-      position: relative;
+    .access-perks-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin: 1.75rem 0 2.25rem;
     }
 
-    .popular-tag {
-      position: absolute;
-      top: -14px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #d4af37;
-      color: #020617;
-      font-size: 0.75rem;
-      font-weight: 800;
-      padding: 0.3rem 1.25rem;
-      border-radius: 9999px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+    .access-perk-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      font-size: 1.02rem;
+      color: #e2e8f0;
+    }
+
+    .access-perk-item svg {
+      width: 22px;
+      height: 22px;
+      stroke: var(--emerald-light);
+      flex-shrink: 0;
+      margin-top: 0.15rem;
     }
 
     /* FAQ */
     .faq-list {
-      max-width: 800px;
+      max-width: 820px;
       margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
     }
 
     .faq-item {
-      background: var(--bg-card);
-      border: 1px solid rgba(255, 255, 255, 0.07);
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 1rem;
-      margin-bottom: 1rem;
       overflow: hidden;
+      transition: border-color 0.2s;
+    }
+
+    .faq-item.active {
+      border-color: rgba(212, 175, 55, 0.35);
     }
 
     .faq-question {
-      padding: 1.35rem 1.5rem;
-      font-weight: 700;
-      font-size: 1.05rem;
+      padding: 1.25rem 1.6rem;
       cursor: pointer;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      transition: color 0.2s;
+      font-weight: 700;
+      color: #f1f5f9;
+      font-size: 1.02rem;
     }
 
     .faq-question:hover { color: var(--gold-light); }
 
     .faq-answer {
-      padding: 0 1.5rem 1.35rem;
+      padding: 0 1.6rem 1.4rem;
       color: var(--text-muted);
       font-size: 0.95rem;
+      line-height: 1.6;
       display: none;
     }
 
     .faq-item.active .faq-answer { display: block; }
-    .faq-item.active .faq-icon { transform: rotate(180deg); }
+    .faq-item.active .faq-icon { transform: rotate(180deg); color: var(--gold); }
 
     /* Footer */
     footer {
-      background: transparent;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      padding: 3rem 1.5rem 2.5rem;
-      color: var(--text-muted);
+      background: #020617;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 4rem 1.25rem 2.5rem;
     }
 
     .footer-grid {
-      max-width: 1200px;
+      max-width: 1140px;
       margin: 0 auto;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: 1.4fr 1fr 1fr 1fr;
       gap: 3rem;
       margin-bottom: 3rem;
     }
 
     .footer-col h4 {
-      font-family: 'Playfair Display', serif;
-      color: #f1f5f9;
-      font-size: 1.1rem;
+      color: var(--gold-light);
+      font-size: 0.88rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
       margin-bottom: 1.25rem;
     }
 
     .footer-col ul {
       list-style: none;
-    }
-
-    .footer-col li {
-      margin-bottom: 0.65rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
     }
 
     .footer-col a {
       color: var(--text-muted);
       text-decoration: none;
-      transition: color 0.2s;
       font-size: 0.9rem;
+      transition: color 0.2s;
     }
 
-    .footer-col a:hover { color: var(--gold-light); }
+    .footer-col a:hover { color: #f8fafc; }
 
     .footer-bottom {
-      max-width: 1200px;
+      max-width: 1140px;
       margin: 0 auto;
       padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      text-align: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
       font-size: 0.85rem;
-    }
-
-    .app-shell {
-      display: flex;
-      align-items: stretch;
-      min-height: calc(100vh - 4rem);
-    }
-
-    .app-sidebar {
-      width: 18rem;
-      flex-shrink: 0;
-      position: sticky;
-      top: 4rem;
-      height: calc(100vh - 4rem);
-      overflow-y: auto;
-      background: rgba(15, 23, 42, 0.82);
-      border-right: 1px solid rgba(212, 175, 55, 0.1);
-      padding: 1.5rem 1.15rem 2rem;
-      backdrop-filter: blur(16px);
-    }
-
-    .side-brand {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .side-seal-img {
-      width: 2.6rem;
-      height: 2.6rem;
-      border-radius: 0.75rem;
-      object-fit: cover;
-      box-shadow: 0 0 16px rgba(212, 175, 55, 0.35);
-      border: 1px solid rgba(212, 175, 55, 0.4);
-      flex-shrink: 0;
-    }
-
-    .side-nav {
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-      list-style: none;
-      margin-top: 1.25rem;
-    }
-
-    .side-nav a {
-      display: block;
-      padding: 0.75rem 0.9rem;
-      border-radius: 0.85rem;
-      color: #94a3b8;
-      text-decoration: none;
-      font-size: 0.92rem;
-      border: 1px solid transparent;
-    }
-
-    .side-nav a:hover,
-    .side-nav a.active {
-      color: var(--gold);
-      background: rgba(212, 175, 55, 0.1);
-      border-color: rgba(212, 175, 55, 0.2);
-    }
-
-    .side-cta {
-      display: flex;
-      width: 100%;
-      margin-bottom: 0.35rem;
-    }
-
-    .app-main { flex: 1; min-width: 0; }
-
-    .menu-btn, .sidebar-backdrop { display: none; }
-
-    .header-brand { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: inherit; }
-    .header-seal-img {
-      width: 2.2rem;
-      height: 2.2rem;
-      border-radius: 0.65rem;
-      object-fit: cover;
-      box-shadow: 0 0 14px rgba(212, 175, 55, 0.35);
-      border: 1px solid rgba(212, 175, 55, 0.4);
-      flex-shrink: 0;
-    }
-    .header-status {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
       color: #64748b;
-      font-size: 0.62rem;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
     }
+
+    /* Mobile Sidebar & Responsiveness */
+    .app-sidebar { display: none; }
+    .sidebar-backdrop { display: none; }
 
     @media (max-width: 900px) {
       .nav-links { display: none; }
-      .pricing-card.featured { transform: none; }
-      .menu-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 2.4rem;
-        height: 2.4rem;
-        border-radius: 0.75rem;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(15, 23, 42, 0.8);
-        color: #e2e8f0;
-        cursor: pointer;
-      }
+      .menu-btn { display: inline-flex; }
+
       .app-sidebar {
-        position: fixed;
-        z-index: 45;
-        top: 4rem;
-        left: 0;
-        bottom: 0;
-        width: min(85vw, 20rem);
-        height: auto;
-        transform: translateX(-105%);
-        transition: transform 0.22s ease;
-        background: #0f172a;
-      }
-      .app-sidebar.open { transform: translateX(0); }
-      .sidebar-backdrop.open {
         display: block;
         position: fixed;
-        inset: 4rem 0 0;
-        background: rgba(2, 6, 23, 0.55);
-        z-index: 40;
+        z-index: 55;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: min(85vw, 21rem);
+        background: #0b1120;
+        border-right: 1px solid rgba(212, 175, 55, 0.25);
+        padding: 1.5rem 1.25rem;
+        transform: translateX(-105%);
+        transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow-y: auto;
       }
 
-      /* REFINAMENTO MOBILE UX/UI (Ordem estrita 1 a 6) */
-      .hero-section {
-        padding: 1.75rem 1rem 2.25rem;
-        text-align: center;
+      .app-sidebar.open { transform: translateX(0); }
+
+      .sidebar-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.7);
+        backdrop-filter: blur(4px);
+        z-index: 52;
       }
 
-      .hero-grid {
+      .sidebar-backdrop.open { display: block; }
+
+      .side-brand {
         display: flex;
-        flex-direction: column;
         align-items: center;
-        gap: 1rem;
-        text-align: center;
-      }
-
-      /* 1. Logomarca e identificação ATHENA */
-      .hero-item-header {
-        order: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        width: 100%;
-      }
-
-      .hero-brand-line {
-        flex-direction: column;
-        align-items: center;
-        gap: 0.65rem;
-        margin-bottom: 0.85rem;
-      }
-
-      .hero-emblem-img {
-        width: 60px;
-        height: 60px;
-      }
-
-      .badge-pill {
-        font-size: 0.72rem;
-        padding: 0.35rem 0.85rem;
-        text-align: center;
-      }
-
-      /* 2. Título principal */
-      .hero-title {
-        font-size: clamp(1.8rem, 6.2vw, 2.25rem);
-        margin-bottom: 0.65rem;
-        text-align: center;
-        line-height: 1.2;
-      }
-
-      /* 3. Subtítulo */
-      .hero-subtitle {
-        font-size: 1.02rem;
-        margin-bottom: 0.25rem;
-        text-align: center;
-        line-height: 1.45;
-      }
-
-      /* 4. Botão da lista de espera */
-      .hero-item-primary-cta {
-        order: 2;
-        width: 100%;
-        max-width: 360px;
-        align-items: center;
-        margin: 0.35rem 0 0.55rem;
-      }
-
-      .btn-hero-waitlist {
-        width: 100%;
-        justify-content: center;
-        padding: 0.92rem 1.4rem;
-        font-size: 0.98rem;
-      }
-
-      .hero-cta-hint {
-        text-align: center;
-      }
-
-      /* 5. Demonstração do aplicativo */
-      .hero-item-visual {
-        order: 3;
-        width: 100%;
-        margin: 0.25rem 0 0.65rem;
-      }
-
-      .showcase-wrapper {
         gap: 0.75rem;
+        padding-bottom: 1.25rem;
+        margin-bottom: 1.25rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       }
 
-      .phone-mockup-frame, .showcase-frame {
-        max-width: 310px;
-        padding: 6px;
-        border-radius: 22px;
-      }
-
-      .phone-screen, .showcase-screen {
-        border-radius: 16px;
-      }
-
-      .phone-screen img, .showcase-screen img {
-        max-height: 440px;
-        border-radius: 14px;
-      }
-
-      .phone-caption {
-        font-size: 0.76rem;
-      }
-
-      .gallery-tabs-wrap {
-        gap: 0.38rem;
-        max-width: 330px;
-      }
-
-      .gallery-tab-btn {
-        padding: 0.42rem 0.72rem;
-        font-size: 0.72rem;
-      }
-
-      /* 6. Demais conteúdos */
-      .hero-item-secondary {
-        order: 4;
+      .side-nav {
+        list-style: none;
         display: flex;
         flex-direction: column;
-        align-items: center;
-        width: 100%;
-        margin-top: 0.4rem;
+        gap: 0.5rem;
+        margin: 1.25rem 0;
       }
 
-      .hero-description {
-        font-size: 0.88rem;
-        line-height: 1.55;
-        margin-bottom: 0.75rem;
+      .side-nav a {
+        display: block;
+        padding: 0.65rem 0.85rem;
+        color: #cbd5e1;
+        text-decoration: none;
+        font-weight: 500;
+        border-radius: 0.6rem;
+        transition: background 0.18s;
+      }
+
+      .side-nav a:hover {
+        background: rgba(212, 175, 55, 0.12);
+        color: var(--gold-light);
+      }
+
+      /* Single column on mobile */
+      .hero-grid,
+      .showcase-row,
+      .showcase-row.reversed,
+      .access-grid {
+        grid-template-columns: 1fr;
+        gap: 2.5rem;
         text-align: center;
-        max-width: 360px;
+        direction: ltr;
       }
 
-      .hero-signature {
-        margin-bottom: 1rem;
-        font-size: 0.74rem;
+      /* Reduced vertical spacing on tablet/mobile */
+      .hero-section {
+        padding: 2.75rem 0 3.25rem;
       }
 
-      .hero-secondary-actions {
-        width: 100%;
-        max-width: 340px;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.6rem;
+      section[style*="padding: 4.5rem 0"] {
+        padding: 3.25rem 0 !important;
       }
 
-      .btn-hero-secondary {
-        width: 100%;
+      .access-section {
+        padding: 3.5rem 0;
+      }
+
+      .section-head {
+        margin-bottom: 2rem;
+      }
+
+      #blocos {
+        margin-top: 2.75rem !important;
+      }
+
+      /* Card text legibility & contrast */
+      .feature-item-card {
+        padding: 1.25rem 1.4rem;
+        text-align: left;
+      }
+
+      .feature-item-card h4 {
+        font-size: 1.12rem;
+      }
+
+      .feature-item-card p {
+        font-size: 1rem;
+        color: #e2e8f0;
+        line-height: 1.6;
+      }
+
+      .card {
+        padding: 1.6rem 1.35rem;
+      }
+
+      .card p {
+        font-size: 0.98rem !important;
+        color: #e2e8f0 !important;
+        line-height: 1.6 !important;
+      }
+
+      .blocks-grid {
+        grid-template-columns: 1fr;
+        gap: 1.25rem;
+      }
+
+      .hero-brand-line,
+      .hero-cta-group {
         justify-content: center;
-        text-align: center;
       }
+
+      .hero-subtitle {
+        margin: 0 auto 2rem;
+      }
+
+      .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+      }
+
+      .footer-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 2rem;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .hero-section { padding: 2rem 0 2.5rem; }
+      section[style*="padding: 4.5rem 0"] { padding: 2.5rem 0 !important; }
+      .access-section { padding: 2.75rem 0; }
+      .section-head { margin-bottom: 1.75rem; }
+      .showcase-row,
+      .showcase-row.reversed,
+      .access-grid {
+        gap: 2rem;
+      }
+      .feature-list { gap: 1rem; }
+      .feature-item-card { padding: 1.15rem 1.2rem; }
+      .card { padding: 1.35rem 1.15rem; }
+      .simulator-wrap { padding: 1.5rem 1.15rem; }
+      .footer-grid { grid-template-columns: 1fr; }
+      .metrics-grid { grid-template-columns: 1fr; }
+      .hero-cta-group { flex-direction: column; width: 100%; }
+      .hero-cta-group .btn { width: 100%; }
+      .access-card { padding: 2rem 1.25rem; }
+      .header-status { display: none; }
+      .nav-cta-btn { padding: 0.45rem 0.75rem; font-size: 0.76rem; }
+    }
+
+    @media (max-width: 360px) {
+      .nav-cta-btn { display: none; }
     }
   </style>
 </head>
 <body>
 
+  <!-- NAVBAR -->
   <header class="glass-nav">
     <div class="nav-container">
       <div style="display: flex; align-items: center; gap: 0.75rem;">
         <button class="menu-btn" type="button" aria-label="Abrir menu" onclick="toggleSidebar()">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
         <a href="#topo" class="header-brand">
-          <img src="athena-icon.png" alt="Logomarca Oficial ATHENA" class="header-seal-img">
+          <img src="athena-icon.png" alt="Medalhão Oficial ATHENA" class="header-seal-img" width="44" height="44">
           <span>
             <span class="logo-text">ATHENA</span>
-            <span class="header-status"><span class="status-dot"></span> Online • Mentoria Ativa</span>
+            <span class="header-status"><span class="status-dot"></span> Mentoria Jurídica com IA</span>
           </span>
         </a>
       </div>
-      <a href="#lista-espera" class="btn btn-gold" style="padding: 0.52rem 1.15rem; font-size: 0.86rem;">Lista de espera</a>
+
+      <nav>
+        <ul class="nav-links">
+          <li><a href="#jornada" class="nav-link">Jornada 100 Dias</a></li>
+          <li><a href="#recursos" class="nav-link">Recursos</a></li>
+          <li><a href="#personalizacao" class="nav-link">Metodologia</a></li>
+          <li><a href="#simulador" class="nav-link">Simulador</a></li>
+          <li><a href="#faq" class="nav-link">Dúvidas</a></li>
+        </ul>
+      </nav>
+
+      <div>
+        <a href="https://athena-mentoria.web.app/" class="btn btn-gold nav-cta-btn" target="_blank" rel="noopener noreferrer">
+          Experimentar Grátis
+        </a>
+      </div>
     </div>
   </header>
 
-  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
-  <div class="app-shell">
-    <aside class="app-sidebar" id="app-sidebar">
-      <div class="side-brand">
-        <img src="athena-icon.png" alt="Logomarca Oficial ATHENA" class="side-seal-img">
-        <div>
-          <div class="logo-text">ATHENA</div>
-          <span class="logo-kicker">Mentoria Jurídica</span>
-        </div>
+  <!-- MOBILE SIDEBAR -->
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
+  <aside class="app-sidebar" id="app-sidebar">
+    <div class="side-brand">
+      <img src="athena-icon.png" alt="Medalhão Oficial ATHENA" class="header-seal-img" width="44" height="44">
+      <div>
+        <div class="logo-text">ATHENA</div>
+        <span class="header-status">Mentoria com IA</span>
       </div>
-      <a href="#lista-espera" class="btn btn-gold side-cta" onclick="closeSidebar()">Lista de Espera</a>
-      <ul class="side-nav">
-        <li><a href="#topo" onclick="closeSidebar()">Início</a></li>
-        <li><a href="#metodologia" onclick="closeSidebar()">Metodologia</a></li>
-        <li><a href="#mobilidade" onclick="closeSidebar()">Estudo no celular</a></li>
-        <li><a href="#blocos" onclick="closeSidebar()">6 blocos</a></li>
-        <li><a href="#simulador" onclick="closeSidebar()">Simulador</a></li>
-        <li><a href="#trilha" onclick="closeSidebar()">Carreiras</a></li>
-        <li><a href="#planos" onclick="closeSidebar()">Planos</a></li>
-        <li><a href="#lista-espera" onclick="closeSidebar()">Lista de espera</a></li>
-        <li><a href="#faq" onclick="closeSidebar()">Perguntas</a></li>
-        <li><a href="privacidade.html">Privacidade</a></li>
-        <li><a href="excluir-conta.html">Excluir conta</a></li>
-      </ul>
-    </aside>
-    <main class="app-main" id="topo">
+    </div>
+    <a href="https://athena-mentoria.web.app/" class="btn btn-gold" style="width: 100%;" target="_blank" rel="noopener noreferrer" onclick="closeSidebar()">
+      Experimentar Gratuitamente
+    </a>
+    <ul class="side-nav">
+      <li><a href="#topo" onclick="closeSidebar()">Início</a></li>
+      <li><a href="#jornada" onclick="closeSidebar()">Jornada 100 Dias</a></li>
+      <li><a href="#recursos" onclick="closeSidebar()">Recursos da Plataforma</a></li>
+      <li><a href="#personalizacao" onclick="closeSidebar()">Preparação Adaptada</a></li>
+      <li><a href="#simulador" onclick="closeSidebar()">Simulador de Questões</a></li>
+      <li><a href="#trilha" onclick="closeSidebar()">Carreiras Atendidas</a></li>
+      <li><a href="#experimente" onclick="closeSidebar()">Acesso Gratuito (Dias 1 e 2)</a></li>
+      <li><a href="#faq" onclick="closeSidebar()">Perguntas Frequentes</a></li>
+      <li><a href="privacidade.html">Política de Privacidade</a></li>
+      <li><a href="termos.html">Termos de Uso</a></li>
+      <li><a href="excluir-conta.html">Excluir Conta</a></li>
+    </ul>
+  </aside>
 
-  <!-- HERO SECTION V2 (2 Colunas Desktop / 1-6 Mobile) -->
-  <section class="hero-section">
-    <div class="container hero-container">
-      <div class="hero-grid">
+  <main class="app-main" id="topo">
 
-        <!-- 1. IDENTIFICAÇÃO E TÍTULOS (Desktop Topo Esquerda / Mobile 1, 2, 3) -->
-        <div class="hero-item-header">
-          <div class="hero-brand-line">
-            <div class="hero-brand-emblem">
-              <img src="athena-icon.png" alt="Logomarca Oficial ATHENA - Deusa da Sabedoria e Tecnologia" class="hero-emblem-img">
+    <!-- SEÇÃO 1 — HERO -->
+    <section class="hero-section">
+      <div class="container">
+        <div class="hero-grid">
+          
+          <div>
+            <div class="hero-brand-line">
+              <img src="athena-icon.png" alt="Medalhão ATHENA" class="hero-emblem-img" width="54" height="54">
+              <div class="badge-pill">Mentoria Jurídica com Inteligência Artificial</div>
             </div>
-            <div class="badge-pill">Mentoria Jurídica de Elite • Inteligência Artificial Aplicada</div>
+
+            <h1 class="hero-title font-serif">
+              Sua jornada rumo à aprovação <span>começa aqui.</span>
+            </h1>
+
+            <p class="hero-subtitle">
+              Uma preparação jurídica estruturada em 100 dias, com recursos de inteligência artificial, revisão e questões para concursos de Magistratura e Ministério Público.
+            </p>
+
+            <div class="hero-cta-group">
+              <a href="https://athena-mentoria.web.app/" class="btn btn-gold btn-large" target="_blank" rel="noopener noreferrer">
+                EXPERIMENTAR GRATUITAMENTE
+              </a>
+              <a href="https://athena-mentoria.web.app/" class="btn btn-outline btn-large" target="_blank" rel="noopener noreferrer">
+                JÁ TENHO CONTA — ENTRAR
+              </a>
+            </div>
+
+            <p class="hero-cta-hint">
+              ✨ <strong>Experimente gratuitamente os Dias 1 e 2</strong> da mentoria ATHENA. Basta criar sua conta para começar.
+            </p>
           </div>
 
-          <h1 class="hero-title font-serif">
-            Você ainda estuda <span>como antes?</span>
-          </h1>
+          <div class="showcase-phone-wrap">
+            <picture>
+              <source srcset="images/athena-real/hero.webp" type="image/webp">
+              <img 
+                src="images/athena-real/hero.jpg" 
+                alt="ATHENA — Sua jornada começa aqui. Aplicativo oficial em smartphones com Trilha de Elite e Mapa de Estudos" 
+                width="819" 
+                height="1024" 
+                loading="eager" 
+                fetchpriority="high" 
+                decoding="async"
+              >
+            </picture>
+          </div>
 
-          <p class="hero-subtitle">
-            Sua preparação jurídica evoluiu. Sua mentoria também precisa evoluir.
+        </div>
+      </div>
+    </section>
+
+    <!-- METRICS STRIP -->
+    <section class="metrics-section">
+      <div class="container">
+        <div class="metrics-grid">
+          <div>
+            <div class="metric-number">100</div>
+            <div class="metric-label">Dias de Trilha Estruturada</div>
+          </div>
+          <div>
+            <div class="metric-number">80/20</div>
+            <div class="metric-label">Método de Pareto Focado</div>
+          </div>
+          <div>
+            <div class="metric-number">STF & STJ</div>
+            <div class="metric-label">Jurisprudência Vinculante</div>
+          </div>
+          <div>
+            <div class="metric-number">DIAS 1 E 2</div>
+            <div class="metric-label">Acesso Gratuito Liberado</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SEÇÃO 2 — JORNADA DE 100 DIAS -->
+    <section id="jornada" style="padding: 4.5rem 0;">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-tag">Metodologia Sequencial</div>
+          <h2 class="section-title font-serif">100 dias. Uma jornada estruturada.</h2>
+          <p class="section-desc">
+            Apresentamos o método ATHENA como uma experiência organizada, permitindo que você acompanhe sua evolução um dia de cada vez.
           </p>
         </div>
 
-        <!-- 4. BOTÃO DA LISTA DE ESPERA (Desktop CTA Primário / Mobile 4) -->
-        <div class="hero-item-primary-cta">
-          <a href="#lista-espera" class="btn btn-gold btn-hero-waitlist">
-            ⏳ Garantir Vaga na Lista de Espera
-          </a>
-          <span class="hero-cta-hint">Pré-lançamento exclusivo • Vagas prioritárias no lançamento</span>
+        <div class="showcase-row">
+          
+          <div class="showcase-phone-wrap">
+            <picture>
+              <source srcset="images/athena-real/jornada.webp" type="image/webp">
+              <img 
+                src="images/athena-real/jornada.jpg" 
+                alt="ATHENA — Mapa da Jornada de 100 Dias. Um dia de cada vez" 
+                width="819" 
+                height="1024" 
+                loading="lazy" 
+                decoding="async"
+              >
+            </picture>
+          </div>
+
+          <div class="feature-list">
+            <div class="feature-item-card">
+              <h4>🗓️ Um Dia de Cada Vez</h4>
+              <p>Cada bloco possui metas claras e delimitadas: legislação, súmulas, teses dos tribunais superiores, doutrina e questões de fixação. Avance sem sobrecarga de cronogramas estáticos.</p>
+            </div>
+
+            <div class="feature-item-card">
+              <h4>⚡ Método Pareto 80/20</h4>
+              <p>Foco cirúrgico nos 20% das matérias e teses jurídicas que respondem por 80% das questões das bancas de Magistratura e Ministério Público.</p>
+            </div>
+
+            <div class="feature-item-card">
+              <h4>📊 Acompanhamento de Evolução</h4>
+              <p>O mapa da jornada de 1 a 100 dias registra visualmente cada conquista, orientando sua rotina e recomendando os próximos passos de forma clara.</p>
+            </div>
+
+            <div style="margin-top: 0.5rem;">
+              <a href="https://athena-mentoria.web.app/" class="btn btn-gold" target="_blank" rel="noopener noreferrer">
+                Ver Trilha no Aplicativo
+              </a>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- SEÇÃO 3 — RECURSOS DA PLATAFORMA -->
+    <section id="recursos" style="padding: 4.5rem 0; background: rgba(15, 22, 38, 0.45); border-top: 1px solid rgba(212, 175, 55, 0.15); border-bottom: 1px solid rgba(212, 175, 55, 0.15);">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-tag">Recursos de Estudo</div>
+          <h2 class="section-title font-serif">Tudo o Que Você Precisa para Ser Aprovado</h2>
+          <p class="section-desc">
+            Lei seca, jurisprudência, questões comentadas, revisão ativa e preparação completa por fases do concurso.
+          </p>
         </div>
 
-        <!-- 5. DEMONSTRAÇÃO DO APLICATIVO (Desktop Coluna Direita / Mobile 5) -->
-        <div class="hero-item-visual">
-          <div class="showcase-wrapper" id="showcase">
-            <div class="showcase-frame">
-              <div class="showcase-screen">
+        <div class="showcase-row reversed">
+          
+          <div class="showcase-phone-wrap">
+            <picture>
+              <source srcset="images/athena-real/recursos.webp" type="image/webp">
+              <img 
+                src="images/athena-real/recursos.jpg" 
+                alt="ATHENA — Interface de estudo com botão Estudar Dia 1, Treino 2ª Fase, Treino Oral e Mapa da Jornada" 
+                width="738" 
+                height="1024" 
+                loading="lazy" 
+                decoding="async"
+              >
+            </picture>
+          </div>
+
+          <div class="feature-list">
+            <div class="feature-item-card">
+              <h4>⚖️ Lei Seca & Doutrina Dirigida</h4>
+              <p>Artigos e conceitos estruturados com os dispositivos mais cobrados na CF/88, Código Penal, Código de Processo Civil e legislação especial.</p>
+            </div>
+
+            <div class="feature-item-card">
+              <h4>🏛️ Jurisprudência com Ratio Decidendi</h4>
+              <p>Teses vinculantes, súmulas e recursos repetitivos do STF e STJ analisados com fundamentação precisa e contexto prático forense.</p>
+            </div>
+
+            <div class="feature-item-card">
+              <h4>🎯 Questões Objetivas com Justificativa</h4>
+              <p>Simulados diários com gabarito fundamentado item por item, explicando por que cada assertiva está correta ou errada.</p>
+            </div>
+
+            <div class="feature-item-card">
+              <h4>🔄 Revisão Comprimida & Treino por Fases</h4>
+              <p>Repetição espaçada com caderno de erros, além de módulos dedicados para Treino de 2ª Fase (subjetiva) e Treino Oral.</p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- OS 6 BLOCOS PEDAGÓGICOS DA MENTORIA DIÁRIA -->
+        <div id="blocos" style="margin-top: 4rem;">
+          <div style="text-align: center; margin-bottom: 2.25rem;">
+            <div class="section-tag">Metodologia Diária</div>
+            <h3 class="font-serif" style="font-size: clamp(1.6rem, 2.8vw, 2.1rem); color: #f8fafc; margin-bottom: 0.5rem;">
+              Os 6 Blocos da Rotina de Estudos
+            </h3>
+            <p style="color: var(--text-muted); font-size: 1rem; max-width: 680px; margin: 0 auto;">
+              Cada dia na plataforma é estruturado em 6 etapas complementares para fixação progressiva e retenção duradoura:
+            </p>
+          </div>
+
+          <div class="blocks-grid">
+            <div class="card">
+              <div class="block-number">01</div>
+              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Jurisprudência em Teses</h4>
+              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Análise de julgados paradigmáticos do STF e STJ com <em>ratio decidendi</em> clara e contexto forense.</p>
+            </div>
+
+            <div class="card">
+              <div class="block-number">02</div>
+              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Fundamentação Constitucional</h4>
+              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Articulação direta com os dispositivos da Constituição Federal de 1988 e a legislação correlata.</p>
+            </div>
+
+            <div class="card">
+              <div class="block-number">03</div>
+              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Doutrina Majoritária</h4>
+              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Síntese das correntes dominantes e distinções conceituais cobradas pelas bancas examinadoras.</p>
+            </div>
+
+            <div class="card">
+              <div class="block-number">04</div>
+              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Casos Práticos Forenses</h4>
+              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Aplicação da matéria a cenários práticos da atuação judicial e ministerial.</p>
+            </div>
+
+            <div class="card">
+              <div class="block-number">05</div>
+              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Questões Comentadas</h4>
+              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Simulados diários de fixação com justificativa jurídica detalhada assertiva por assertiva.</p>
+            </div>
+
+            <div class="card">
+              <div class="block-number">06</div>
+              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Desafio Discursivo & Oral</h4>
+              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Treinamento de argumentação técnica e resposta oral com critérios de precisão terminológica.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SEÇÃO 4 — PREPARAÇÃO PERSONALIZADA -->
+    <section id="personalizacao" style="padding: 4.5rem 0;">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-tag">Personalização Estratégica</div>
+          <h2 class="section-title font-serif">Uma preparação adaptada à sua jornada.</h2>
+          <p class="section-desc">
+            Organize seus estudos de acordo com o seu nível de maturidade e as exigências específicas de cada fase do concurso.
+          </p>
+        </div>
+
+        <div class="showcase-row">
+          
+          <div class="showcase-phone-wrap">
+            <picture>
+              <source srcset="images/athena-real/personalizacao.webp" type="image/webp">
+              <img 
+                src="images/athena-real/personalizacao.jpg" 
+                alt="ATHENA — Perfil Automático e Fases do Concurso: Provas Objetivas, Provas Subjetivas e Provas Orais" 
+                width="753" 
+                height="1024" 
+                loading="lazy" 
+                decoding="async"
+              >
+            </picture>
+          </div>
+
+          <div class="feature-list">
+            <div class="feature-item-card">
+              <h4>⚙️ Perfil Automático Ativo</h4>
+              <p>A ATHENA calibra de forma inteligente a proporção entre texto de lei, doutrina e precedentes jurisprudenciais conforme a relevância temática de cada rodada.</p>
+            </div>
+
+            <div class="feature-item-card">
+              <h4>⚡ Provas Objetivas (1ª Fase)</h4>
+              <p>Treinamento intensivo de múltipla escolha com foco na literalidade das normas e na jurisprudência pacificada dos tribunais de cúpula.</p>
+            </div>
+
+            <div class="feature-item-card">
+              <h4>📝 Provas Subjetivas (2ª Fase)</h4>
+              <p>Estruturação de casos discursivos e peças forenses, desenvolvendo a capacidade de fundamentação técnica exigida pelos examinadores.</p>
+            </div>
+
+            <div class="feature-item-card">
+              <h4>🎙️ Provas Orais (3ª Fase)</h4>
+              <p>Simulação de arguições com checagem de postura, vocabulário e domínio dogmático dos institutos jurídicos.</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- SIMULADOR INTERATIVO AO VIVO -->
+    <section id="simulador" style="padding: 4.5rem 0; background: rgba(15, 22, 38, 0.45); border-top: 1px solid rgba(212, 175, 55, 0.15); border-bottom: 1px solid rgba(212, 175, 55, 0.15);">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-tag">Demonstração Interativa • Questão Autoral Inédita</div>
+          <h2 class="section-title font-serif">Experimente a Metodologia Agora</h2>
+          <p class="section-desc">Resolva a questão autoral inédita elaborada pela equipe ATHENA com base no Tema 855/STF e veja o padrão de correção fundamentada:</p>
+        </div>
+
+        <div class="simulator-wrap">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+            <span style="color: var(--gold-light); font-weight: 700; font-size: 0.9rem; text-transform: uppercase;">
+              ⚖️ Direito Constitucional • Simulado Autoral ATHENA (Tema 855/STF)
+            </span>
+            <span style="background: rgba(212, 175, 55, 0.16); color: var(--gold-light); padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 700;">
+              Padrão Magistratura & MP
+            </span>
+          </div>
+
+          <p style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1.75rem; line-height: 1.6;">
+            Com base na Constituição Federal de 1988 e na jurisprudência vinculante do Supremo Tribunal Federal (STF) sobre Direitos Fundamentais, assinale a opção <strong>CORRETA</strong>:
+          </p>
+
+          <div id="quiz-options">
+            <div class="quiz-option" onclick="handleSelectOption(this, false, 'A')">
+              <div class="opt-letter">A</div>
+              <div>A liberdade de associação para fins lícitos é plena, admitindo-se a interferência estatal no seu funcionamento administrativo para garantia preventiva da ordem pública.</div>
+            </div>
+
+            <div class="quiz-option" onclick="handleSelectOption(this, true, 'B')">
+              <div class="opt-letter">B</div>
+              <div>A exigência de aviso prévio para reuniões pacíficas não constitui condição para a legitimidade da manifestação, sendo prescindível a notificação formal se não houver frustração de reunião simultânea no mesmo local.</div>
+            </div>
+
+            <div class="quiz-option" onclick="handleSelectOption(this, false, 'C')">
+              <div class="opt-letter">C</div>
+              <div>O mandado de segurança coletivo pode ser impetrado por qualquer partido político registrado, independentemente de representação no Congresso Nacional.</div>
+            </div>
+
+            <div class="quiz-option" onclick="handleSelectOption(this, false, 'D')">
+              <div class="opt-letter">D</div>
+              <div>A garantia da inviolabilidade do domicílio é absoluta durante o período noturno, vedando o ingresso policial mesmo na hipótese de consentimento do morador.</div>
+            </div>
+          </div>
+
+          <div id="explanation-box" class="explanation-box">
+            <h4 style="color: #34d399; font-weight: 800; font-size: 1.1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+              ✓ Gabarito: Alternativa B (STF • Tema 855)
+            </h4>
+            <p style="color: #e2e8f0; font-size: 0.95rem; line-height: 1.6;">
+              <strong>Fundamentação STF (RE 806.339/SE - Tema 855/STF):</strong> O Plenário do STF fixou a tese de que a exigência constitucional de aviso prévio relativamente ao direito de reunião (art. 5º, XVI, da CF) não é condição para a legitimidade do ato. A ausência de notificação formal não torna ilícita a manifestação, salvo para evitar a realização de reuniões simultâneas e conflitantes no mesmo local e horário.
+            </p>
+            <div style="margin-top: 1.25rem;">
+              <a href="https://athena-mentoria.web.app/" class="btn btn-gold" style="padding: 0.6rem 1.25rem; font-size: 0.82rem;" target="_blank" rel="noopener noreferrer">
+                Resolver Mais Questões no App →
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CARREIRAS ATENDIDAS -->
+    <section id="trilha" style="padding: 4.5rem 0;">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-tag">Carreiras de Elite</div>
+          <h2 class="section-title font-serif">Preparação para os Concursos Mais Exigentes</h2>
+          <p class="section-desc">A mentoria é calibrada nas matrizes curriculares e no nível de profundidade das carreiras jurídicas de ponta:</p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.75rem;">
+          <div class="card" style="text-align: center;">
+            <div style="font-size: 2.4rem; margin-bottom: 0.75rem;">⚖️</div>
+            <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.3rem; margin-bottom: 0.5rem;">Magistratura</h4>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">Juiz de Direito Estadual e Juiz Federal.</p>
+          </div>
+
+          <div class="card" style="text-align: center;">
+            <div style="font-size: 2.4rem; margin-bottom: 0.75rem;">🏛️</div>
+            <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.3rem; margin-bottom: 0.5rem;">Ministério Público</h4>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">Promotor de Justiça (MPE) e Procurador da República (MPF).</p>
+          </div>
+
+          <div class="card" style="text-align: center;">
+            <div style="font-size: 2.4rem; margin-bottom: 0.75rem;">🛡️</div>
+            <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.3rem; margin-bottom: 0.5rem;">Defensoria Pública</h4>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">Defensor Público Estadual (DPE) e Federal (DPU).</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SEÇÃO 5 — EXPERIMENTE GRATUITAMENTE -->
+    <section id="experimente" class="access-section">
+      <div class="container">
+        <div class="access-card">
+          <div class="access-grid">
+            
+            <div class="showcase-phone-wrap">
+              <picture>
+                <source srcset="images/athena-real/acesso.webp" type="image/webp">
                 <img 
-                  id="phone-active-img"
-                  src="images/athena-real/02_jornada_100_dias.webp" 
-                  alt="Interface real do ATHENA — Jornada de 100 Dias"
-                  loading="eager"
+                  src="images/athena-real/acesso.jpg" 
+                  alt="ATHENA — Tela de login e cadastro gratuito no aplicativo web" 
+                  width="824" 
+                  height="1024" 
+                  loading="lazy" 
                   decoding="async"
                 >
-              </div>
-              <div class="phone-caption" id="phone-caption-text">
-                🗺️ Jornada de 100 Dias: Mapa completo com divisão sequencial pelo Método 80/20
-              </div>
+              </picture>
             </div>
 
-            <!-- Seletor de 5 Funcionalidades Reais -->
-            <div class="gallery-tabs-wrap">
-              <button 
-                type="button" 
-                class="gallery-tab-btn active" 
-                onclick="switchPhoneScreenshot('images/athena-real/02_jornada_100_dias.webp', '🗺️ Jornada de 100 Dias: Mapa completo com divisão sequencial pelo Método 80/20', this)"
-              >
-                🗺️ Jornada de 100 Dias
-              </button>
-              <button 
-                type="button" 
-                class="gallery-tab-btn" 
-                onclick="switchPhoneScreenshot('images/athena-real/04_aula_lei_seca.webp', '📖 Mentoria & Aulas: Estudo dirigido com CF/88, juiz natural e doutrina (Bloco 2/6)', this)"
-              >
-                📖 Mentoria & Aulas
-              </button>
-              <button 
-                type="button" 
-                class="gallery-tab-btn" 
-                onclick="switchPhoneScreenshot('images/athena-real/06_alternativa_respondida.webp', '🎯 Questões Objetivas: Resolução prática e validação imediata da alternativa (Bloco 5/6)', this)"
-              >
-                🎯 Questões Objetivas
-              </button>
-              <button 
-                type="button" 
-                class="gallery-tab-btn" 
-                onclick="switchPhoneScreenshot('images/athena-real/05_questao_comentada.webp', '🏛️ Correção Fundamentada: Entendimento técnico e jurisprudência vinculante do STF', this)"
-              >
-                🏛️ Correção Fundamentada
-              </button>
-              <button 
-                type="button" 
-                class="gallery-tab-btn" 
-                onclick="switchPhoneScreenshot('images/athena-real/03_perfil_e_navegacao.webp', '⚙️ Perfil & Fases: Configuração por fase (1ª, 2ª e Oral) e navegação completa', this)"
-              >
-                ⚙️ Perfil & Fases
-              </button>
+            <div>
+              <div class="section-tag">Acesso Imediato • Sem Cartão de Crédito</div>
+              <h2 class="font-serif" style="font-size: clamp(2rem, 3.5vw, 2.75rem); color: #f8fafc; line-height: 1.2; margin-bottom: 1rem;">
+                Conheça o ATHENA gratuitamente.
+              </h2>
+              <p style="font-size: 1.12rem; color: #cbd5e1; line-height: 1.6;">
+                Crie sua conta, explore os <strong>Dias 1 e 2</strong> e descubra uma nova experiência de preparação jurídica de alta performance.
+              </p>
+
+              <ul class="access-perks-list">
+                <li class="access-perk-item">
+                  <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span><strong>Acesso total aos Dias 1 e 2</strong> da mentoria diária para conhecer toda a metodologia.</span>
+                </li>
+                <li class="access-perk-item">
+                  <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span><strong>6 Blocos pedagógicos completos:</strong> lei seca, jurisprudência do STF/STJ, doutrina e questões.</span>
+                </li>
+                <li class="access-perk-item">
+                  <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span><strong>Simulado com correção item a item</strong> e justificativa detalhada de cada assertiva.</span>
+                </li>
+                <li class="access-perk-item">
+                  <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span><strong>Cadastro simplificado:</strong> entre com sua conta Google ou e-mail sem precisar de cartão de crédito.</span>
+                </li>
+              </ul>
+
+              <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+                <a href="https://athena-mentoria.web.app/" class="btn btn-gold btn-large" style="width: 100%;" target="_blank" rel="noopener noreferrer">
+                  COMEÇAR AGORA — EXPERIMENTAR GRÁTIS
+                </a>
+                <a href="https://athena-mentoria.web.app/" class="btn btn-outline" style="width: 100%;" target="_blank" rel="noopener noreferrer">
+                  JÁ TENHO CONTA — ENTRAR
+                </a>
+              </div>
+
+              <p style="font-size: 0.84rem; color: #94a3b8; margin-top: 1.25rem; line-height: 1.5; text-align: center;">
+                Experimente gratuitamente os Dias 1 e 2 da mentoria ATHENA. Os Dias 3 a 100 integram a assinatura da mentoria completa.
+              </p>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq" style="padding: 4.5rem 0;">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-tag">Tire Suas Dúvidas</div>
+          <h2 class="section-title font-serif">Perguntas Frequentes</h2>
+        </div>
+
+        <div class="faq-list">
+          <div class="faq-item active">
+            <div class="faq-question" onclick="toggleFaq(this)">
+              <span>Como funciona o período de testes gratuito?</span>
+              <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
+            </div>
+            <div class="faq-answer">
+              Você pode experimentar gratuitamente os <strong>Dias 1 e 2</strong> da mentoria ATHENA diretamente no aplicativo web (<a href="https://athena-mentoria.web.app/" target="_blank" rel="noopener noreferrer" style="color: var(--gold-light); font-weight: 600;">athena-mentoria.web.app</a>). Não é necessário cadastrar cartão de crédito para iniciar seus estudos. Os Dias 3 a 100 integram o plano por assinatura da mentoria completa.
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <div class="faq-question" onclick="toggleFaq(this)">
+              <span>A jurisprudência do STF e STJ é realmente atualizada?</span>
+              <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
+            </div>
+            <div class="faq-answer">
+              Sim. A ATHENA conta com curadoria jurídica especializada que valida todas as teses de Repercussão Geral, Recursos Repetitivos e Enunciados Sumulares com parâmetros estritos, eliminando números fictícios ou teses superadas.
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <div class="faq-question" onclick="toggleFaq(this)">
+              <span>O aplicativo funciona em celulares e tablets?</span>
+              <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
+            </div>
+            <div class="faq-answer">
+              Sim. O ATHENA é uma aplicação web moderna (PWA), desenhada especificamente para funcionar de maneira fluida em qualquer smartphone, tablet ou computador, sem necessidade de downloads pesados. Basta abrir o navegador e estudar.
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <div class="faq-question" onclick="toggleFaq(this)">
+              <span>Como posso solicitar o cancelamento ou a exclusão dos meus dados?</span>
+              <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
+            </div>
+            <div class="faq-answer">
+              Em conformidade com a LGPD e o Código de Defesa do Consumidor, você tem total autonomia para gerenciar seus dados e sua assinatura. Você pode solicitar a exclusão pela página <a href="excluir-conta.html" style="color: var(--gold-light); text-decoration: underline;">Excluir Conta</a> ou enviando e-mail para <a href="mailto:contato@projetoathena.app.br" style="color: var(--gold-light); font-weight: 600;">contato@projetoathena.app.br</a> com o assunto <em>"Cancelamento / Exclusão de Dados"</em>.
             </div>
           </div>
         </div>
-
-        <!-- 6. DEMAIS CONTEÚDOS (Desktop Detalhes e Ações Secundárias / Mobile 6) -->
-        <div class="hero-item-secondary">
-          <p class="hero-description">
-            Conheça o ATHENA: inteligência artificial aplicada à preparação para as carreiras jurídicas, com estudo direcionado, revisões estratégicas e uma jornada personalizada.
-          </p>
-
-          <div class="hero-signature">
-            ATHENA — Inteligência aplicada à sua aprovação.
-          </div>
-
-          <div class="hero-secondary-actions">
-            <a href="#simulador" class="btn btn-outline btn-hero-secondary">
-              Conheça o ATHENA
-            </a>
-            <a href="#metodologia" class="btn btn-outline btn-hero-secondary">
-              Ver Metodologia
-            </a>
-          </div>
-        </div>
-
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- METRICS / TRUST -->
-  <section class="metrics-section">
-    <div class="container">
-      <div class="metrics-grid">
-        <div>
-          <div class="metric-number">100</div>
-          <div class="metric-label">Dias de Trilha Estruturada</div>
-        </div>
-        <div>
-          <div class="metric-number">80/20</div>
-          <div class="metric-label">Método de Pareto Focado</div>
-        </div>
-        <div>
-          <div class="metric-number">1.000+</div>
-          <div class="metric-label">Questões Inéditas Comentadas</div>
-        </div>
-        <div>
-          <div class="metric-number">0%</div>
-          <div class="metric-label">Alucinações Jurisprudenciais</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- METODOLOGIA PARETO -->
-  <section id="metodologia" style="padding: 3.5rem 0;">
-    <div class="container">
-      <div class="section-head">
-        <div class="section-tag">Eficiência Absoluta</div>
-        <h2 class="section-title font-serif">O Fim do Estudo Disperso</h2>
-        <p class="section-desc">Por que ler manuais enciclopédicos de 2.000 páginas se as bancas de concurso repetem padrões claros de cobrança?</p>
-      </div>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem;">
-        <div class="card" style="border-left: 4px solid #ef4444;">
-          <h3 class="font-serif" style="color: #f87171; font-size: 1.35rem; margin-bottom: 1rem;">❌ Estudo Tradicional Disperso</h3>
-          <ul style="color: var(--text-muted); list-style: none; space-y: 0.75rem;">
-            <li style="margin-bottom: 0.75rem;">• Leitura passiva de milhares de páginas que nunca caem na prova.</li>
-            <li style="margin-bottom: 0.75rem;">• Memorização de número de acórdãos sem compreender a <em>Ratio Decidendi</em>.</li>
-            <li style="margin-bottom: 0.75rem;">• Sensação constante de sobrecarga e curva de esquecimento acelerada.</li>
-            <li>• Falta de prática diária de resolução de questões com feedback imediato.</li>
-          </ul>
-        </div>
-
-        <div class="card" style="border-left: 4px solid var(--gold); background: linear-gradient(180deg, #131d33 0%, #0d1424 100%);">
-          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.35rem; margin-bottom: 1rem;">⚡ O Método ATHENA (Pareto 80/20)</h3>
-          <ul style="color: #d1d5db; list-style: none;">
-            <li style="margin-bottom: 0.75rem;">• Foco na lei, na jurisprudência e na doutrina indispensáveis à Magistratura, ao Ministério Público e à Defensoria Pública.</li>
-            <li style="margin-bottom: 0.75rem;">• Jurisprudência consolidada do STF e STJ com teses vinculantes e repercussão geral.</li>
-            <li style="margin-bottom: 0.75rem;">• 6 Blocos diários que combinam doutrina, lei seca, jurisprudência e 10 questões.</li>
-            <li>• Economia estimada de mais de 350 horas de estudo no ano.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- MARKETING MOBILIDADE / SEM PLANNER / TUDO NO MESMO LUGAR -->
-  <section id="mobilidade" style="padding: 3.5rem 0; background: radial-gradient(circle at 50% 30%, rgba(212, 175, 55, 0.08) 0%, rgba(15, 22, 38, 0.6) 70%); border-top: 1px solid rgba(255, 255, 255, 0.06); border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
-    <div class="container">
-      <div class="section-head">
-        <div class="section-tag">Liberdade & Praticidade Absoluta</div>
-        <h2 class="section-title font-serif">Você Não Precisa de Planner.<br>Estude em Qualquer Lugar, na Palma da Sua Mão.</h2>
-        <p class="section-desc">Chega de perder tempo organizando cronogramas ou carregando livros pesados. Todo o seu material de aprovação reunido no mesmo lugar.</p>
-      </div>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem;">
-        
-        <!-- CARD 1: SEM PLANNER -->
-        <div class="card" style="border-top: 4px solid var(--gold);">
-          <div style="font-size: 2.3rem; margin-bottom: 0.85rem;">🗓️ ❌</div>
-          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.3rem; margin-bottom: 0.75rem;">Zero Planners, Zero Complicação</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem; line-height: 1.7;">
-            Você não precisa de planners de papel, planilhas complexas de Excel ou cronogramas difíceis de cumprir. A ATHENA já entrega sua <strong>Trilha dos 100 Dias pronta e estruturada pelo Método 80/20 de Pareto</strong>. Basta abrir o aplicativo e seguir o bloco diário planejado pela IA.
-          </p>
-        </div>
-
-        <!-- CARD 2: ESTUDE EM QUALQUER LUGAR (NA FILA, TRANSPORTE, ESPERA) -->
-        <div class="card" style="border-top: 4px solid #10b981;">
-          <div style="font-size: 2.3rem; margin-bottom: 0.85rem;">🚶‍♂️ ⏱️</div>
-          <h3 class="font-serif" style="color: #34d399; font-size: 1.3rem; margin-bottom: 0.75rem;">Estude Numa Fila ou Enquanto Espera</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem; line-height: 1.7;">
-            A sua aprovação é conquistada no aproveitamento inteligente do tempo. <strong>Está numa fila de banco ou supermercado? Esperando uma consulta? No trânsito ou numa pausa de 15 minutos?</strong> Abra a ATHENA no celular e resolva questões comentadas ou revise uma tese vinculante. O estudo acontece onde você estiver.
-          </p>
-        </div>
-
-        <!-- CARD 3: TUDO NO MESMO LUGAR -->
-        <div class="card" style="border-top: 4px solid #60a5fa;">
-          <div style="font-size: 2.3rem; margin-bottom: 0.85rem;">📱 🏛️</div>
-          <h3 class="font-serif" style="color: #93c5fd; font-size: 1.3rem; margin-bottom: 0.75rem;">Tudo no Mesmo Lugar</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem; line-height: 1.7;">
-            Acabe com a confusão de alternar entre vade mecum impresso, sites de tribunais, resumos em PDF e bancos de questões. <strong>Legislação, doutrina majoritária, informativos STF/STJ com ratio decidendi, simulados com gabarito item a item e simulador de prova oral</strong> estão todos integrados na palma da sua mão.
-          </p>
-        </div>
-
-      </div>
-
-      <!-- DESTAQUE MOBILE -->
-      <div style="margin-top: 3.5rem; background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(16, 185, 129, 0.06) 100%); border: 1px solid rgba(212, 175, 55, 0.22); border-radius: 1.25rem; padding: 2.25rem; text-align: center;">
-        <h4 class="font-serif" style="color: #fff; font-size: 1.35rem; margin-bottom: 0.75rem;">Sua Mentoria Completa no Bolso, Pronta Para Usar</h4>
-        <p style="color: #cbd5e1; max-width: 760px; margin: 0 auto 1.5rem; font-size: 1rem;">
-          Com a ATHENA, qualquer intervalo vira uma sessão produtiva de estudos de alto rendimento. Sem peso na mochila, sem desculpas.
+    <!-- CTA FINAL PRÉ-RODAPÉ -->
+    <section style="padding: 4.5rem 0; text-align: center; background: radial-gradient(circle at 50% 50%, rgba(212, 175, 55, 0.12) 0%, transparent 70%);">
+      <div class="container">
+        <div class="section-tag" style="margin-bottom: 0.75rem;">Acesso Imediato</div>
+        <h2 class="font-serif" style="font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; margin-bottom: 1.25rem;">
+          Pronto para Elevar o Seu Nível de Estudos?
+        </h2>
+        <p style="color: var(--text-muted); font-size: 1.15rem; max-width: 650px; margin: 0 auto 2.25rem;">
+          Estude em qualquer lugar, na palma da sua mão. Crie sua conta gratuitamente e comece hoje mesmo os Dias 1 e 2 da mentoria ATHENA.
         </p>
         <div style="display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap;">
-          <a href="#lista-espera" class="btn btn-gold">
-            ⏳ Entrar na Lista de Espera
+          <a href="https://athena-mentoria.web.app/" class="btn btn-gold btn-large" target="_blank" rel="noopener noreferrer">
+            EXPERIMENTAR GRATUITAMENTE
           </a>
-          <span style="color: var(--text-muted); font-size: 0.88rem; border: 1px solid rgba(255,255,255,0.15); padding: 0.65rem 1.2rem; border-radius: 0.75rem; background: rgba(0,0,0,0.25);">
-            🟢 Em breve na Google Play Store
-          </span>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
-  <!-- OS 6 BLOCOS PEDAGÓGICOS -->
-  <section id="blocos" style="padding: 3.5rem 0; background: rgba(15, 22, 38, 0.4);">
-    <div class="container">
-      <div class="section-head">
-        <div class="section-tag">Engenharia Pedagógica</div>
-        <h2 class="section-title font-serif">Os 6 Blocos da Mentoria Diária</h2>
-        <p class="section-desc">Cada dia na plataforma ATHENA é dividido em 6 módulos sequenciais para garantir retenção definitiva e segurança técnica.</p>
-      </div>
-
-      <div class="blocks-grid">
-        <div class="card">
-          <div class="block-number">01</div>
-          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Jurisprudência em Teses</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem;">Análise minuciosa de julgados paradigmáticos do STF e STJ, com a <em>Ratio Decidendi</em> destacada e livre de alucinações.</p>
-        </div>
-
-        <div class="card">
-          <div class="block-number">02</div>
-          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Fundamentação Constitucional</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem;">Articulação com o texto expresso da Constituição Federal de 1988 e a legislação infraconstitucional vigente.</p>
-        </div>
-
-        <div class="card">
-          <div class="block-number">03</div>
-          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Doutrina Majoritária</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem;">Síntese das correntes dominantes nos tribunais e as pegadinhas conceituais favoritas de bancas examinadoras.</p>
-        </div>
-
-        <div class="card">
-          <div class="block-number">04</div>
-          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Casos Práticos Forenses</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem;">Aplicação direta do direito a cenários concretos da prática judiciária, preparando o candidato para as fases discursivas.</p>
-        </div>
-
-        <div class="card">
-          <div class="block-number">05</div>
-          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">10 Questões Comentadas</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem;">Simulado inédito de fixação imediata com justificativa jurídica fundamentada para cada alternativa (A, B, C e D).</p>
-        </div>
-
-        <div class="card">
-          <div class="block-number">06</div>
-          <h3 class="font-serif" style="color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.6rem;">Desafio Discursivo & Oral</h3>
-          <p style="color: var(--text-muted); font-size: 0.95rem;">Treinamento de argumentação oral e redação jurídica com avaliação e pontuação de precisão terminológica pela IA.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- SIMULADOR INTERATIVO AO VIVO -->
-  <section id="simulador" style="padding: 3.5rem 0;">
-    <div class="container">
-      <div class="section-head">
-        <div class="section-tag">Demonstração Interativa</div>
-        <h2 class="section-title font-serif">Experimente a IA da ATHENA Agora</h2>
-        <p class="section-desc">Resolva a questão real de Direito Constitucional abaixo e veja o gabarito fundamentado gerado instantaneamente:</p>
-      </div>
-
-      <div class="simulator-wrap">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-          <span style="color: var(--gold-light); font-weight: 700; font-size: 0.9rem; text-transform: uppercase;">
-            ⚖️ Direito Constitucional • Magistratura / MP
-          </span>
-          <span style="background: rgba(212, 175, 55, 0.16); color: var(--gold-light); padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 700;">
-            +50 XP
-          </span>
-        </div>
-
-        <p style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1.75rem; line-height: 1.6;">
-          Com base na Constituição Federal de 1988 e na jurisprudência vinculante do Supremo Tribunal Federal (STF) sobre Direitos Fundamentais, assinale a alternativa <strong>CORRETA</strong>:
-        </p>
-
-        <div id="quiz-options">
-          <div class="quiz-option" onclick="handleSelectOption(this, false, 'A')">
-            <div class="quiz-letter">A</div>
-            <div>A inviolabilidade do domicílio é absoluta, não admitindo ingresso sem mandado em caso de flagrante delito durante a noite.</div>
-          </div>
-
-          <div class="quiz-option" onclick="handleSelectOption(this, true, 'B')">
-            <div class="quiz-letter">B</div>
-            <div>A entrada forçada em domicílio sem mandado judicial só é lícita, mesmo em período noturno, quando amparada em fundadas razões devidamente justificadas a posteriori.</div>
-          </div>
-
-          <div class="quiz-option" onclick="handleSelectOption(this, false, 'C')">
-            <div class="quiz-letter">C</div>
-            <div>A exigência de aviso prévio às autoridades para reunião pacífica em locais abertos ao público constitui condição indispensável de validade sob pena de ilicitude do ato.</div>
-          </div>
-
-          <div class="quiz-option" onclick="handleSelectOption(this, false, 'D')">
-            <div class="quiz-letter">D</div>
-            <div>O direito à escusa de consciência permite ao cidadão recusar o cumprimento de obrigação legal sem qualquer sujeição a prestação alternativa fixada em lei.</div>
-          </div>
-        </div>
-
-        <div id="explanation-box" class="explanation-box">
-          <h4 style="color: #10b981; font-weight: 800; font-size: 1.1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-            <span>🎉 Gabarito Oficial Comentado pela IA ATHENA</span>
-          </h4>
-          <p style="color: #d1d5db; font-size: 0.95rem; margin-bottom: 0.5rem;">
-            <strong>Alternativa B está CORRETA.</strong> Trata-se da tese fixada pelo STF no <strong>Tema 280 da Repercussão Geral (RE 603.616)</strong>: <em>"A entrada forçada em domicílio sem mandado judicial só é lícita, mesmo em período noturno, quando amparada em fundadas razões, devidamente justificadas a posteriori, que indiquem que dentro da casa ocorre situação de flagrante delito."</em>
-          </p>
-          <p style="color: #9ca3af; font-size: 0.85rem;">
-            As demais alternativas são incorretas: A) O domicílio não é inviolável de forma absoluta (Art. 5º, XI); C) No Tema 855/STF, fixou-se que a falta de aviso prévio não invalida a manifestação se a comunicação for obtida por outros meios; D) A recusa desprovida de cumprimento de prestação alternativa acarreta a perda de direitos políticos (Art. 5º, VIII c/c Art. 15, IV, CF/88).
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CARREIRAS ATENDIDAS -->
-  <section id="trilha" style="padding: 3.5rem 0;">
-    <div class="container">
-      <div class="section-head">
-        <div class="section-tag">Para os Mais Concorridos</div>
-        <h2 class="section-title font-serif">Carreiras Jurídicas de Elite</h2>
-        <p class="section-desc">A mentoria é calibrada nas matrizes curriculares dos concursos mais exigentes do país:</p>
-      </div>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem;">
-        <div class="card" style="text-align: center;">
-          <div style="font-size: 2.2rem; margin-bottom: 0.75rem;">⚖️</div>
-          <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.2rem; margin-bottom: 0.5rem;">Magistratura</h4>
-          <p style="color: var(--text-muted); font-size: 0.9rem;">Juiz de Direito Estadual e Juiz Federal.</p>
-        </div>
-
-        <div class="card" style="text-align: center;">
-          <div style="font-size: 2.2rem; margin-bottom: 0.75rem;">🏛️</div>
-          <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.2rem; margin-bottom: 0.5rem;">Ministério Público</h4>
-          <p style="color: var(--text-muted); font-size: 0.9rem;">Promotor de Justiça (MPE) e Procurador da República (MPF).</p>
-        </div>
-
-        <div class="card" style="text-align: center;">
-          <div style="font-size: 2.2rem; margin-bottom: 0.75rem;">🛡️</div>
-          <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.2rem; margin-bottom: 0.5rem;">Defensoria Pública</h4>
-          <p style="color: var(--text-muted); font-size: 0.9rem;">Defensor Público Estadual (DPE) e Federal (DPU).</p>
-        </div>
-
-      </div>
-    </div>
-  </section>
-
-  <!-- PLANOS E ASSINATURA -->
-  <section id="planos" style="padding: 3.5rem 0; background: rgba(15, 22, 38, 0.4);">
-    <div class="container">
-      <div class="section-head">
-        <div class="section-tag">Acesso & Investimento</div>
-        <h2 class="section-title font-serif">Escolha o Seu Plano de Aprovação</h2>
-        <p class="section-desc">Estamos em <strong>período oficial de testes e validação</strong> com acesso 100% gratuito. Experimente agora toda a inteligência da ATHENA.</p>
-      </div>
-
-      <div class="pricing-grid">
-        <!-- PLANO 1: PERÍODO DE TESTE (ATUAL) -->
-        <div class="card pricing-card" style="border-top: 4px solid #10b981;">
-          <div style="display: inline-block; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.75rem; border-radius: 9999px; text-transform: uppercase; margin-bottom: 0.75rem;">Fase Atual • Testes Abertos</div>
-          <h3 class="font-serif" style="font-size: 1.35rem; color: #fff; margin-bottom: 0.5rem;">Período de Testes</h3>
-          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Acesso gratuito liberado para você testar e validar a metodologia.</p>
-          <div style="font-size: 2.8rem; font-weight: 800; color: #34d399; margin-bottom: 1.5rem;">
-            R$ 0 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ período de testes</span>
-          </div>
-          <ul style="list-style: none; margin-bottom: 2rem; color: #d1d5db; font-size: 0.95rem;">
-            <li style="margin-bottom: 0.75rem;">✓ Acesso liberado aos blocos da Trilha dos 100 Dias</li>
-            <li style="margin-bottom: 0.75rem;">✓ Resolução de questões com comentários alternativa por alternativa</li>
-            <li style="margin-bottom: 0.75rem;">✓ Jurisprudência consolidada do STF/STJ com Ratio Decidendi</li>
-            <li style="margin-bottom: 0.75rem;">✓ Treinamento de prova oral e discursiva avaliado por IA</li>
-            <li>✓ 100% gratuito, sem necessidade de cartão de crédito</li>
-          </ul>
-          <a href="#lista-espera" class="btn btn-outline" style="width: 100%;">
-            ⏳ Entrar na Lista de Espera
+          <a href="https://athena-mentoria.web.app/" class="btn btn-outline btn-large" target="_blank" rel="noopener noreferrer">
+            JÁ TENHO CONTA — ENTRAR
           </a>
         </div>
+      </div>
+    </section>
 
-        <!-- PLANO 2: MENSAL (APÓS PERÍODO DE TESTE) -->
-        <div class="card pricing-card featured">
-          <div class="popular-tag">Melhor Custo-Benefício</div>
-          <h3 class="font-serif" style="font-size: 1.35rem; color: var(--gold-light); margin-bottom: 0.5rem;">Mentoria Completa</h3>
-          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.75rem;">Acesso ilimitado e contínuo a todas as disciplinas e atualizações.</p>
-          <div style="font-size: 2.8rem; font-weight: 800; color: var(--gold-light); margin-bottom: 0.25rem;">
-            R$ 59,90 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ mês</span>
+    <!-- FOOTER -->
+    <footer>
+      <div class="footer-grid">
+        <div class="footer-col">
+          <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+            <img src="athena-icon.png" alt="ATHENA" class="header-seal-img" width="40" height="40">
+            <span class="logo-text">ATHENA</span>
           </div>
-          <p style="color: #34d399; font-size: 0.82rem; font-weight: 600; margin-bottom: 1.5rem;">
-            Cobrado apenas após o término do período de teste • Menos de R$ 2,00/dia
+          <p style="font-size: 0.9rem; line-height: 1.6; color: var(--text-muted);">
+            Mentoria jurídica de alta performance potencializada por inteligência artificial para concursos de Magistratura e Ministério Público.
           </p>
-          <ul style="list-style: none; margin-bottom: 2rem; color: #d1d5db; font-size: 0.95rem;">
-            <li style="margin-bottom: 0.75rem;">✓ Trilha completa dos 100 Dias estruturada pelo Método 80/20</li>
-            <li style="margin-bottom: 0.75rem;">✓ Mais de 1.000 questões inéditas com gabarito fundamentado</li>
-            <li style="margin-bottom: 0.75rem;">✓ Atualização de Jurisprudência STF/STJ em tempo real</li>
-            <li style="margin-bottom: 0.75rem;">✓ Avaliação de Provas Orais e Discursivas com IA sem limites</li>
-            <li style="margin-bottom: 0.75rem;">✓ Todo o material na palma da mão (sem precisar de planners)</li>
-            <li>✓ Sem carência e sem fidelidade: cancele quando quiser</li>
+        </div>
+
+        <div class="footer-col">
+          <h4>Navegação</h4>
+          <ul>
+            <li><a href="#jornada">Jornada 100 Dias</a></li>
+            <li><a href="#recursos">Recursos de Estudo</a></li>
+            <li><a href="#personalizacao">Metodologia</a></li>
+            <li><a href="#simulador">Simulador Interativo</a></li>
+            <li><a href="#faq">Perguntas Frequentes</a></li>
           </ul>
-          <div class="commercial-disclaimer">
-            ℹ️ <strong>Pré-lançamento ATHENA:</strong> as assinaturas ainda não estão disponíveis. Os valores apresentados são provisórios e poderão ser atualizados antes da abertura das contratações.
-          </div>
-          <div style="margin-top: 1rem;">
-            <a href="#lista-espera" class="btn btn-gold" style="width: 100%;">
-              ⏳ Entrar na Lista de Espera do Lançamento
-            </a>
-          </div>
+        </div>
+
+        <div class="footer-col">
+          <h4>Legal e Segurança</h4>
+          <ul>
+            <li><a href="privacidade.html">Política de Privacidade (LGPD)</a></li>
+            <li><a href="termos.html">Termos de Uso e Serviço</a></li>
+            <li><a href="excluir-conta.html">Excluir Conta e Dados</a></li>
+            <li><a href="mailto:contato@projetoathena.app.br">Contato Institucional</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>Acesso</h4>
+          <ul>
+            <li><a href="https://athena-mentoria.web.app/" target="_blank" rel="noopener noreferrer" style="color: var(--gold-light); font-weight: 600;">Aplicativo Oficial Web ↗</a></li>
+            <li><a href="https://instagram.com/projetoathena.app" target="_blank" rel="noopener noreferrer">Instagram Oficial ↗</a></li>
+            <li><span style="color: var(--text-muted); font-size: 0.88rem;">Dias 1 e 2 Liberados</span></li>
+          </ul>
         </div>
       </div>
-    </div>
-  </section>
 
-  <!-- SEÇÃO LISTA DE ESPERA (PRÉ-LANÇAMENTO) -->
-  <section id="lista-espera" class="waitlist-section">
-    <div class="container">
-      <div class="section-head" style="margin-bottom: 2rem;">
-        <div class="section-tag">Pré-Lançamento Exclusivo</div>
-        <h2 class="section-title font-serif">Lista de Espera ATHENA</h2>
-        <p class="section-desc">Garanta prioridade de acesso e condições especiais no lançamento oficial da plataforma.</p>
-      </div>
-
-      <div class="waitlist-card">
-        <h3>Receba o Convite em Primeira Mão</h3>
-        <p class="waitlist-lead">
-          Cadastre-se para ser avisado assim que novas vagas e o sistema definitivo de adesão forem abertos.
-        </p>
-
-        <form 
-          id="waitlist-form" 
-          action="https://formspree.io/f/xppqjeep" 
-          method="POST" 
-          onsubmit="return false;" 
-          novalidate
-        >
-          <!-- Metadados Técnicos de Auditoria de Consentimento (Campos Preparados) -->
-          <input type="hidden" name="_consent_declared" id="lead-consent-declared" value="true">
-          <input type="hidden" name="_consent_timestamp" id="lead-consent-timestamp" value="">
-          <input type="hidden" name="_policy_version" id="lead-policy-version" value="v1.2-out-2026">
-          <input type="hidden" name="_consent_text_snapshot" id="lead-consent-text-snapshot" value="Concordo em receber por e-mail informações sobre o lançamento, convites de acesso e novidades do Projeto ATHENA. Estou ciente de que posso revogar meu consentimento a qualquer momento, conforme a Política de Privacidade.">
-          <input type="hidden" name="_campaign_source" id="lead-campaign-source" value="landing_v2_waitlist">
-
-          <div class="form-group">
-            <label for="lead-name">Nome Completo</label>
-            <input 
-              type="text" 
-              id="lead-name" 
-              name="name"
-              class="form-control" 
-              placeholder="Ex.: Dra. Gabriela Silveira"
-              autocomplete="name"
-              required
-            >
-            <span class="field-error" id="name-error" role="alert" aria-live="polite" style="display:none;"></span>
-          </div>
-
-          <div class="form-group">
-            <label for="lead-email">E-mail Profissional</label>
-            <input 
-              type="email" 
-              id="lead-email" 
-              name="email"
-              class="form-control" 
-              placeholder="seu.email@exemplo.com"
-              autocomplete="email"
-              required
-            >
-            <span class="field-error" id="email-error" role="alert" aria-live="polite" style="display:none;"></span>
-          </div>
-
-          <div class="form-group">
-            <label for="lead-career">Carreira de Interesse Principal</label>
-            <select id="lead-career" name="carreira_interesse" class="form-control select-control" required>
-              <option value="" disabled selected>Selecione sua carreira principal...</option>
-              <option value="magistratura">Magistratura Estadual e Federal</option>
-              <option value="ministerio-publico">Ministério Público (Estadual e Federal)</option>
-              <option value="defensoria">Defensoria Pública (Estadual e União)</option>
-              <option value="ambas">Ambas as Carreiras Jurídicas de Elite</option>
-            </select>
-            <span class="field-error" id="career-error" role="alert" aria-live="polite" style="display:none;"></span>
-          </div>
-
-          <div class="checkbox-group">
-            <input 
-              type="checkbox" 
-              id="lead-consent" 
-              name="consentimento_lgpd" 
-              required
-              aria-required="true"
-            >
-            <label for="lead-consent">
-              Concordo em receber por e-mail informações sobre o lançamento, convites de acesso e novidades do Projeto ATHENA. Estou ciente de que posso revogar meu consentimento a qualquer momento, conforme a <a href="privacidade.html#lista-espera" target="_blank" rel="noopener noreferrer">Política de Privacidade</a>.
-            </label>
-          </div>
-          <span class="field-error" id="consent-error" role="alert" aria-live="polite" style="display:none; margin-top: -1rem; margin-bottom: 1.25rem;"></span>
-
-          <!-- Feedback Status Banner -->
-          <div id="waitlist-feedback" class="waitlist-feedback" role="alert" aria-live="polite" style="display:none;"></div>
-
-          <button 
-            type="button" 
-            class="btn-disabled" 
-            id="waitlist-submit-btn"
-            title="Formulário em fase de preparação de interface. Integração de envio desabilitada nesta etapa."
-            disabled
-          >
-            🔒 Cadastro Indisponível (Em Preparação)
-          </button>
-
-          <p class="form-notice">
-            🛡️ Seus dados estão protegidos. Para solicitar revogação do consentimento ou descadastramento a qualquer momento, envie e-mail para <a href="mailto:projetoathena.app@gmail.com" style="color: var(--gold-light);">projetoathena.app@gmail.com</a> com o assunto "Descadastrar da Lista de Espera ATHENA".
-          </p>
-        </form>
-      </div>
-    </div>
-  </section>
-
-  <!-- FAQ -->
-  <section id="faq" style="padding: 3.5rem 0;">
-    <div class="container">
-      <div class="section-head">
-        <div class="section-tag">Tire Suas Dúvidas</div>
-        <h2 class="section-title font-serif">Perguntas Frequentes</h2>
-      </div>
-
-      <div class="faq-list">
-        <div class="faq-item active">
-          <div class="faq-question" onclick="toggleFaq(this)">
-            <span>Como funciona o período de testes gratuito?</span>
-            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-          </div>
-          <div class="faq-answer">
-            A plataforma ATHENA está em fase de pré-lançamento e testes. Baixe o aplicativo Android para conhecer a metodologia ou cadastre-se na lista de espera. As assinaturas ainda não estão disponíveis e os valores apresentados são provisórios, podendo ser atualizados antes da abertura das contratações.
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <div class="faq-question" onclick="toggleFaq(this)">
-            <span>A jurisprudência do STF e STJ é realmente atualizada?</span>
-            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-          </div>
-          <div class="faq-answer">
-            Sim. A ATHENA conta com curadoria jurídica especializada que valida todas as teses de Repercussão Geral, Recursos Repetitivos e Enunciados Sumulares com parâmetros de baixa temperatura na IA, eliminando números fictícios ou teses superadas.
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <div class="faq-question" onclick="toggleFaq(this)">
-            <span>O aplicativo está disponível na Google Play Store?</span>
-            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-          </div>
-          <div class="faq-answer">
-            A ATHENA está em fase final de homologação para lançamento oficial na Google Play Store. Cadastre-se na nossa Lista de Espera para ser notificado com prioridade e receber o link de instalação assim que o aplicativo for liberado.
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <div class="faq-question" onclick="toggleFaq(this)">
-            <span>Como posso solicitar o cancelamento ou a exclusão dos meus dados?</span>
-            <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-          </div>
-          <div class="faq-answer">
-            Em conformidade com a LGPD e o Código de Defesa do Consumidor, você tem total autonomia e liberdade para gerenciar sua assinatura. Para cancelar a renovação automática ou solicitar a exclusão integral e definitiva dos seus dados cadastrais de nossos servidores, basta enviar um e-mail com o assunto <em>"Cancelamento / Exclusão de Dados"</em> para o nosso canal institucional: <a href="mailto:projetoathena.app@gmail.com" style="color: var(--gold-light); font-weight: 600; text-decoration: underline;">projetoathena.app@gmail.com</a>. Sua solicitação é processada sem burocracia e com prioridade máxima.
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CTA FINAL -->
-  <section style="padding: 3.5rem 0; text-align: center; background: radial-gradient(circle at 50% 50%, rgba(212, 175, 55, 0.1) 0%, transparent 70%);">
-    <div class="container">
-      <div class="section-tag" style="margin-bottom: 0.5rem;">Acesso Prioritário</div>
-      <h2 class="font-serif" style="font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; margin-bottom: 1.25rem;">
-        Pronto para Elevar o Seu Nível de Estudos?
-      </h2>
-      <p style="color: var(--text-muted); font-size: 1.15rem; max-width: 650px; margin: 0 auto 2rem;">
-        Estude em qualquer lugar, na palma da sua mão, sem complicação de planners. Garanta sua vaga na lista de espera e prepare-se com a inteligência da ATHENA.
-      </p>
-      <div style="display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap;">
-        <a href="#lista-espera" class="btn btn-gold" style="font-size: 1.1rem; padding: 1.15rem 2.5rem;">
-          ⏳ Entrar na Lista de Espera Agora
-        </a>
-        <div style="display: inline-flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); padding: 0.9rem 1.5rem; border-radius: 0.75rem; color: #cbd5e1; font-size: 0.95rem;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M3.609 1.814L13.792 12 3.61 22.186a2.02 2.02 0 01-.61-1.442V3.256c0-.547.225-1.06.609-1.442z" fill="#00D3FF"/>
-            <path d="M17.202 8.59L13.792 12l3.41 3.41.096-.055 4.02-2.316c1.148-.66 1.148-1.748 0-2.408l-4.02-2.316-.096.275z" fill="#FFD400"/>
-            <path d="M13.792 12L3.609 1.814c.32-.32.784-.46 1.258-.188l12.335 7.104-3.41 3.27z" fill="#00F076"/>
-            <path d="M13.792 12l3.41 3.41-12.335 7.104c-.474.273-.938.132-1.258-.188L13.792 12z" fill="#F84D4D"/>
-          </svg>
-          <span>Google Play Store <strong style="color: var(--gold-light); font-size: 0.85rem;">(Em breve)</strong></span>
-        </div>
-      </div>
-      <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 1.25rem;">
-        Condições especiais e acesso prioritário para os primeiros inscritos na lista de espera.
-      </p>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer>
-    <div class="footer-grid">
-      <div class="footer-col">
-        <div class="logo-box" style="margin-bottom: 1rem;">
-          <img src="athena-icon.png" alt="ATHENA" class="logo-img">
-          <span class="logo-text">ATHENA</span>
-        </div>
-        <p style="font-size: 0.88rem; line-height: 1.6;">
-          Plataforma de inteligência artificial jurídica de alta performance voltada para carreiras de elite e concursos públicos.
+      <div class="footer-bottom">
+        <p>&copy; 2026 ATHENA Mentoria Jurídica • Domínio Oficial: <strong>projetoathena.app.br</strong></p>
+        <p style="color: #64748b; font-size: 0.82rem;">
+          Todos os direitos reservados.
         </p>
       </div>
+    </footer>
+  </main>
 
-      <div class="footer-col">
-        <h4>Navegação</h4>
-        <ul>
-          <li><a href="#metodologia">Metodologia Pareto</a></li>
-          <li><a href="#mobilidade">Sem Planner</a></li>
-          <li><a href="#blocos">Os 6 Blocos</a></li>
-          <li><a href="#simulador">Simulador Interativo</a></li>
-          <li><a href="#planos">Planos & Preços</a></li>
-          <li><a href="#faq">Perguntas Frequentes</a></li>
-        </ul>
-      </div>
-
-      <div class="footer-col">
-        <h4>Legal e Segurança</h4>
-        <ul>
-          <li><a href="privacidade.html">Política de Privacidade (LGPD)</a></li>
-          <li><a href="termos.html">Termos de Uso e Serviço</a></li>
-          <li><a href="excluir-conta.html">Excluir conta e dados</a></li>
-          <li><a href="mailto:projetoathena.app@gmail.com">Contato do Encarregado (DPO)</a></li>
-        </ul>
-      </div>
-
-      <div class="footer-col">
-        <h4>Aplicativo</h4>
-        <ul>
-          <li><a href="#lista-espera">Lista de Espera Oficial</a></li>
-          <li><span style="color: var(--text-muted); font-size: 0.88rem;">Google Play Store <em style="color: var(--gold-light); font-size: 0.75rem; font-style: normal; margin-left: 4px; background: rgba(212, 175, 55, 0.15); padding: 2px 6px; border-radius: 4px;">(Em breve)</em></span></li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="footer-bottom">
-      <p>&copy; 2026 ATHENA Mentoria Jurídica • Domínio Oficial: <strong>projetoathena.app.br</strong></p>
-      <p style="margin-top: 0.4rem; color: #64748b; font-size: 0.8rem;">
-        Desenvolvido com excelência técnica por Jhonny Garcia. Todos os direitos reservados.
-      </p>
-    </div>
-  </footer>
-    </main>
-  </div>
-
-  <!-- Interatividade JS -->
+  <!-- Interactive Scripts -->
   <script>
     function toggleSidebar() {
-      document.getElementById('app-sidebar').classList.toggle('open');
-      document.getElementById('sidebar-backdrop').classList.toggle('open');
+      const sb = document.getElementById('app-sidebar');
+      const bd = document.getElementById('sidebar-backdrop');
+      if (sb) sb.classList.toggle('open');
+      if (bd) bd.classList.toggle('open');
     }
     function closeSidebar() {
-      document.getElementById('app-sidebar').classList.remove('open');
-      document.getElementById('sidebar-backdrop').classList.remove('open');
+      const sb = document.getElementById('app-sidebar');
+      const bd = document.getElementById('sidebar-backdrop');
+      if (sb) sb.classList.remove('open');
+      if (bd) bd.classList.remove('open');
     }
     function handleSelectOption(element, isCorrect, letter) {
       const options = document.querySelectorAll('.quiz-option');
@@ -1997,403 +1544,17 @@
         element.classList.add('correct');
       } else {
         element.classList.add('wrong');
-        // destaca a correta
-        options[1].classList.add('correct');
+        if (options[1]) options[1].classList.add('correct');
       }
 
       const explanation = document.getElementById('explanation-box');
-      explanation.style.display = 'block';
+      if (explanation) explanation.style.display = 'block';
     }
 
     function toggleFaq(element) {
       const parent = element.parentElement;
-      parent.classList.toggle('active');
+      if (parent) parent.classList.toggle('active');
     }
-
-    function switchPhoneScreenshot(imgSrc, captionText, btnElement) {
-      const img = document.getElementById('phone-active-img');
-      const caption = document.getElementById('phone-caption-text');
-      if (img) {
-        img.style.opacity = '0.3';
-        setTimeout(() => {
-          img.src = imgSrc;
-          img.style.opacity = '1';
-        }, 120);
-      }
-      if (caption && captionText) {
-        caption.innerText = captionText;
-      }
-      const buttons = document.querySelectorAll('.gallery-tab-btn');
-      buttons.forEach(b => b.classList.remove('active'));
-      if (btnElement) {
-        btnElement.classList.add('active');
-      }
-    }
-
-    /* ==========================================================================
-       ATHENA — MÓDULO DE INTEGRAÇÃO DA LISTA DE ESPERA (MODO HOMOLOGAÇÃO)
-       Fail-Closed: TEST_MODE ativo por padrão. Nenhuma requisição de rede real é
-       disparada para o endpoint do Formspree. Botão público permanece desabilitado.
-       ========================================================================== */
-    (function(window) {
-      'use strict';
-
-      const CONFIG = {
-        mode: 'TEST_MODE', // 'TEST_MODE' (padrão seguro) | 'PRODUCTION'
-        endpoint: 'https://formspree.io/f/xppqjeep',
-        policyVersion: 'v1.2-out-2026',
-        campaignSource: 'landing_v2_waitlist',
-        consentTextSnapshot: 'Concordo em receber por e-mail informações sobre o lançamento, convites de acesso e novidades do Projeto ATHENA. Estou ciente de que posso revogar meu consentimento a qualquer momento, conforme a Política de Privacidade.',
-        maxNameLength: 100,
-        maxEmailLength: 120,
-        validCareers: ['magistratura', 'ministerio-publico', 'defensoria', 'ambas']
-      };
-
-      let isSubmitting = false;
-
-      // Validador de formato de e-mail seguro (RFC 5322 simplificado)
-      const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-
-      function sanitizeString(str) {
-        if (typeof str !== 'string') return '';
-        return str.trim();
-      }
-
-      function validate(formData) {
-        const errors = {};
-
-        // 1. Validação de Nome
-        const name = sanitizeString(formData.name);
-        if (!name) {
-          errors.name = 'Por favor, informe seu nome completo.';
-        } else if (name.length > CONFIG.maxNameLength) {
-          errors.name = `O nome deve ter no máximo ${CONFIG.maxNameLength} caracteres.`;
-        }
-
-        // 2. Validação de E-mail
-        const email = sanitizeString(formData.email).toLowerCase();
-        if (!email) {
-          errors.email = 'Por favor, informe seu e-mail profissional.';
-        } else if (email.length > CONFIG.maxEmailLength) {
-          errors.email = `O e-mail deve ter no máximo ${CONFIG.maxEmailLength} caracteres.`;
-        } else if (!EMAIL_REGEX.test(email)) {
-          errors.email = 'Por favor, informe um endereço de e-mail válido (ex.: seu.nome@exemplo.com).';
-        }
-
-        // 3. Validação de Carreira
-        const career = sanitizeString(formData.carreira_interesse);
-        if (!career || !CONFIG.validCareers.includes(career)) {
-          errors.carreira_interesse = 'Por favor, selecione sua carreira jurídica de interesse.';
-        }
-
-        // 4. Validação de Consentimento LGPD
-        const consent = Boolean(formData.consentimento_lgpd);
-        if (!consent) {
-          errors.consentimento_lgpd = 'É necessário concordar com os termos de comunicação para participar da lista de espera.';
-        }
-
-        return {
-          isValid: Object.keys(errors).length === 0,
-          errors
-        };
-      }
-
-      function buildPayload(rawValues) {
-        const nowIso = new Date().toISOString();
-        return {
-          name: sanitizeString(rawValues.name),
-          email: sanitizeString(rawValues.email).toLowerCase(),
-          carreira_interesse: sanitizeString(rawValues.carreira_interesse),
-          consentimento_lgpd: Boolean(rawValues.consentimento_lgpd),
-          _consent_declared: 'true',
-          _consent_timestamp: nowIso,
-          _policy_version: CONFIG.policyVersion,
-          _consent_text_snapshot: CONFIG.consentTextSnapshot,
-          _campaign_source: CONFIG.campaignSource
-        };
-      }
-
-      function mapErrorResponse(status, data) {
-        if (status === 400) {
-          if (data && data.errors && Array.isArray(data.errors)) {
-            const captchaErr = data.errors.find(e => 
-              e.field === '_captcha' || 
-              (e.message && e.message.toLowerCase().includes('captcha'))
-            );
-            if (captchaErr) {
-              return {
-                type: 'CAPTCHA_REJECTED',
-                message: 'Verificação de segurança (CAPTCHA/Formshield) rejeitada ou pendente de desafio interativo. O envio direto não pôde ser completado.'
-              };
-            }
-            return {
-              type: 'VALIDATION_ERROR',
-              message: 'Os dados enviados não puderam ser validados pelo servidor. Verifique os campos e tente novamente.'
-            };
-          }
-          return {
-            type: 'BAD_REQUEST',
-            message: 'Requisição inválida (HTTP 400). Por favor, revise as informações preenchidas.'
-          };
-        }
-
-        if (status === 429) {
-          return {
-            type: 'RATE_LIMIT',
-            message: 'Limite de tentativas excedido (HTTP 429). Por favor, aguarde alguns instantes antes de reenviar.'
-          };
-        }
-
-        if (status >= 500) {
-          return {
-            type: 'SERVER_ERROR',
-            message: 'O servidor de inscrições encontrou uma instabilidade temporária (HTTP 500). Tente novamente mais tarde.'
-          };
-        }
-
-        return {
-          type: 'UNEXPECTED_ERROR',
-          message: 'Ocorreu um erro inesperado no processamento. Em caso de dúvidas, contate projetoathena.app@gmail.com.'
-        };
-      }
-
-      async function submit(rawValues, options = {}) {
-        if (isSubmitting) {
-          return {
-            success: false,
-            duplicate: true,
-            message: 'Existe uma submissão em andamento. Aguarde a finalização para tentar novamente.'
-          };
-        }
-
-        const validation = validate(rawValues);
-        if (!validation.isValid) {
-          return {
-            success: false,
-            validationErrors: validation.errors
-          };
-        }
-
-        const payload = buildPayload(rawValues);
-
-        // Atualiza campo oculto com timestamp no DOM se existir
-        const timestampEl = document.getElementById('lead-consent-timestamp');
-        if (timestampEl) {
-          timestampEl.value = payload._consent_timestamp;
-        }
-
-        // BLOQUEIO ESTRITO DE SEGURANÇA (FAIL-CLOSED)
-        // No modo TEST_MODE padrão, chamadas de rede reais para Formspree são PROIBIDAS.
-        if (CONFIG.mode === 'TEST_MODE') {
-          if (options.mockResponse) {
-            isSubmitting = true;
-            try {
-              if (options.mockDelay) {
-                await new Promise(resolve => setTimeout(resolve, options.mockDelay));
-              }
-
-              const mock = options.mockResponse;
-              if (mock.networkError) {
-                return {
-                  success: false,
-                  networkError: true,
-                  message: 'Falha de conexão com a rede. Verifique seu sinal e tente novamente.'
-                };
-              }
-
-              if (mock.status >= 200 && mock.status < 300) {
-                return {
-                  success: true,
-                  payload,
-                  message: 'Inscrição na lista de espera confirmada com sucesso! Em breve entraremos em contato com você.'
-                };
-              } else {
-                const mapped = mapErrorResponse(mock.status, mock.data);
-                return {
-                  success: false,
-                  status: mock.status,
-                  ...mapped
-                };
-              }
-            } finally {
-              isSubmitting = false;
-            }
-          }
-
-          // Caso chamado diretamente no browser no modo TEST_MODE
-          return {
-            success: false,
-            blocked: true,
-            message: 'O cadastro na lista de espera ainda não está liberado publicamente. O sistema está em homologação técnica e auditoria.'
-          };
-        }
-
-        // MODO PRODUCTION (Apenas quando explicitamente habilitado após aprovação humana formal)
-        isSubmitting = true;
-        try {
-          const response = await fetch(CONFIG.endpoint, {
-            method: 'POST',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-          });
-
-          const responseData = await response.json().catch(() => null);
-
-          if (response.ok) {
-            return {
-              success: true,
-              payload,
-              message: 'Inscrição na lista de espera confirmada com sucesso! Em breve entraremos em contato com você.'
-            };
-          } else {
-            const mapped = mapErrorResponse(response.status, responseData);
-            return {
-              success: false,
-              status: response.status,
-              ...mapped
-            };
-          }
-        } catch (networkErr) {
-          return {
-            success: false,
-            networkError: true,
-            message: 'Falha de conexão com a rede. Verifique sua conexão e tente novamente.'
-          };
-        } finally {
-          isSubmitting = false;
-        }
-      }
-
-      function initForm() {
-        const form = document.getElementById('waitlist-form');
-        if (!form) return;
-
-        const btn = document.getElementById('waitlist-submit-btn');
-        const feedback = document.getElementById('waitlist-feedback');
-        const nameInput = document.getElementById('lead-name');
-        const emailInput = document.getElementById('lead-email');
-        const careerInput = document.getElementById('lead-career');
-        const consentInput = document.getElementById('lead-consent');
-
-        function clearErrors() {
-          ['name-error', 'email-error', 'career-error', 'consent-error'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-              el.textContent = '';
-              el.style.display = 'none';
-            }
-          });
-          [nameInput, emailInput, careerInput].forEach(inp => {
-            if (inp) inp.classList.remove('input-error');
-          });
-          if (feedback) {
-            feedback.textContent = '';
-            feedback.className = 'waitlist-feedback';
-            feedback.style.display = 'none';
-          }
-        }
-
-        function showErrors(errors) {
-          clearErrors();
-          if (errors.name) {
-            const el = document.getElementById('name-error');
-            if (el) { el.textContent = errors.name; el.style.display = 'block'; }
-            if (nameInput) nameInput.classList.add('input-error');
-          }
-          if (errors.email) {
-            const el = document.getElementById('email-error');
-            if (el) { el.textContent = errors.email; el.style.display = 'block'; }
-            if (emailInput) emailInput.classList.add('input-error');
-          }
-          if (errors.carreira_interesse) {
-            const el = document.getElementById('career-error');
-            if (el) { el.textContent = errors.carreira_interesse; el.style.display = 'block'; }
-            if (careerInput) careerInput.classList.add('input-error');
-          }
-          if (errors.consentimento_lgpd) {
-            const el = document.getElementById('consent-error');
-            if (el) { el.textContent = errors.consentimento_lgpd; el.style.display = 'block'; }
-          }
-        }
-
-        function showFeedback(type, message) {
-          if (!feedback) return;
-          feedback.textContent = message;
-          feedback.className = `waitlist-feedback ${type}`;
-          feedback.style.display = 'block';
-        }
-
-        // Listener de envio do formulário (prevenção default + fail-closed)
-        form.addEventListener('submit', async function(e) {
-          e.preventDefault();
-          clearErrors();
-
-          const rawValues = {
-            name: nameInput ? nameInput.value : '',
-            email: emailInput ? emailInput.value : '',
-            carreira_interesse: careerInput ? careerInput.value : '',
-            consentimento_lgpd: consentInput ? consentInput.checked : false
-          };
-
-          const result = await submit(rawValues);
-          if (!result.success) {
-            if (result.validationErrors) {
-              showErrors(result.validationErrors);
-            } else {
-              showFeedback('error', result.message);
-            }
-          } else {
-            showFeedback('success', result.message);
-            form.reset();
-          }
-        });
-
-        // Limpeza de erros ao digitar/interagir
-        if (nameInput) nameInput.addEventListener('input', () => {
-          const el = document.getElementById('name-error');
-          if (el) { el.style.display = 'none'; }
-          nameInput.classList.remove('input-error');
-        });
-        if (emailInput) emailInput.addEventListener('input', () => {
-          const el = document.getElementById('email-error');
-          if (el) { el.style.display = 'none'; }
-          emailInput.classList.remove('input-error');
-        });
-        if (careerInput) careerInput.addEventListener('change', () => {
-          const el = document.getElementById('career-error');
-          if (el) { el.style.display = 'none'; }
-          careerInput.classList.remove('input-error');
-        });
-        if (consentInput) consentInput.addEventListener('change', () => {
-          const el = document.getElementById('consent-error');
-          if (el) { el.style.display = 'none'; }
-        });
-
-        // API pública exposta para inspeção técnica e testes automatizados
-        window.AthenaWaitlist = {
-          config: CONFIG,
-          validate,
-          buildPayload,
-          mapErrorResponse,
-          submit,
-          clearErrors,
-          showErrors,
-          showFeedback,
-          get isSubmitting() { return isSubmitting; },
-          setSubmitting: function(val) { isSubmitting = Boolean(val); }
-        };
-      }
-
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initForm);
-      } else {
-        initForm();
-      }
-    })(window);
   </script>
-
 </body>
 </html>
