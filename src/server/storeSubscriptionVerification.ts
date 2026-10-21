@@ -23,6 +23,15 @@ export interface WebhookNotificationInput {
   rawPayload?: any;
 }
 
+export interface StoreVerificationResult {
+  ok: true;
+  status: SubscriptionStatus;
+  currentPeriodStart: number;
+  currentPeriodEnd: number;
+  orderId?: string;
+  autoRenewing?: boolean;
+}
+
 type Actor = { uid: string; emailVerified: boolean; provider: string };
 
 const digest = (data: string) => createHash('sha256').update(data).digest('hex');
@@ -32,19 +41,64 @@ function requireValue(ok: unknown, code: string): asserts ok {
   if (!ok) throw Error(code);
 }
 
+/** Local emulator / explicit study-progress local only. Never production. */
+export function localSubscriptionSimulationAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.NODE_ENV === 'production') return false;
+  if (env.ATHENA_STUDY_PROGRESS_LOCAL !== 'true') return false;
+  if (!env.GCLOUD_PROJECT?.startsWith('demo-')) return false;
+  const fsHost = env.FIRESTORE_EMULATOR_HOST || '';
+  const authHost = env.FIREBASE_AUTH_EMULATOR_HOST || '';
+  return /^(127\.0\.0\.1|localhost):\d+$/.test(fsHost) && /^(127\.0\.0\.1|localhost):\d+$/.test(authHost);
+}
+
+/**
+ * ITEM 11 HOOK — real store verification.
+ * Wire Google Play Developer API (androidpublisher.purchases.subscriptions.get)
+ * and App Store Server API (Get Transaction Info / verify credentials) here.
+ * Until credentials + implementation exist, this MUST fail closed.
+ */
+export type StoreVerifier = (
+  input: Pick<VerifyPurchaseInput, 'platform' | 'productId' | 'purchaseToken' | 'orderId' | 'signature'>
+) => Promise<StoreVerificationResult>;
+
+export function storeVerificationConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  // ITEM 11: set these when Play / App Store billing credentials are provisioned.
+  const playReady = Boolean(env.ATHENA_PLAY_PACKAGE_NAME && env.ATHENA_PLAY_SERVICE_ACCOUNT_JSON);
+  const appleReady = Boolean(env.ATHENA_APPLE_BUNDLE_ID && env.ATHENA_APPLE_ISSUER_ID && env.ATHENA_APPLE_KEY_ID && env.ATHENA_APPLE_PRIVATE_KEY);
+  return playReady || appleReady;
+}
+
+export function createDefaultStoreVerifier(env: NodeJS.ProcessEnv = process.env): StoreVerifier {
+  return async (input) => {
+    if (!storeVerificationConfigured(env)) {
+      throw Error('STORE_VERIFICATION_UNAVAILABLE');
+    }
+    // ITEM 11: implement platform-specific verification. Do not grant on token shape alone.
+    if (input.platform === 'google_play') {
+      // await androidpublisher.purchases.subscriptions.get({ packageName, subscriptionId: productId, token: purchaseToken })
+      throw Error('STORE_VERIFICATION_UNAVAILABLE');
+    }
+    // await App Store Server API getTransactionInfo(purchaseToken)
+    throw Error('STORE_VERIFICATION_UNAVAILABLE');
+  };
+}
+
 /**
  * Validação e gerenciamento de assinaturas das lojas (Google Play e App Store).
  * O cliente JAMAIS concede benefício por conta própria. Toda concessão ou renovação
  * é efetuada no servidor e gravada em 'access_subscriptions/{uid}'.
+ *
+ * Fail-closed: sem verificação real da loja (ou simulação local explícita no emulador),
+ * nenhuma escrita em access_subscriptions / processed_purchases.
  */
-export function createStoreSubscriptionVerification(db: any, now = Date.now) {
+export function createStoreSubscriptionVerification(
+  db: any,
+  now = Date.now,
+  storeVerifier: StoreVerifier = createDefaultStoreVerifier()
+) {
   const ref = (path: string) => db.doc(path);
   const authenticated = (a: Actor) => requireValue(a && validUid(a.uid), 'AUTHENTICATION_REQUIRED');
 
-  /**
-   * Verifica a compra recebida do aplicativo móvel nativo (ou teste local isolado).
-   * Garante idempotência: compras com o mesmo token/orderId não são duplicadas.
-   */
   const verifyPurchase = async (actor: Actor, input: VerifyPurchaseInput) => {
     authenticated(actor);
     requireValue(input && typeof input === 'object', 'INVALID_ARGUMENT');
@@ -52,13 +106,44 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
     requireValue(typeof input.productId === 'string' && input.productId.length > 0 && input.productId.length <= 100, 'INVALID_PRODUCT_ID');
     requireValue(typeof input.purchaseToken === 'string' && input.purchaseToken.length > 0 && input.purchaseToken.length <= 4096, 'INVALID_PURCHASE_TOKEN');
 
-    const isLocalSimulated = input.isSimulatedLocal === true;
-    if (isLocalSimulated) {
-      // Resultados simulados são estritamente restritos ao ambiente de desenvolvimento/teste local
-      const isProduction = process.env.NODE_ENV === 'production';
-      requireValue(!isProduction, 'SIMULATED_NOT_ALLOWED_IN_PRODUCTION');
+    const wantsSimulation = input.isSimulatedLocal === true;
+    if (wantsSimulation) {
+      requireValue(localSubscriptionSimulationAllowed(), 'SIMULATED_NOT_ALLOWED_IN_PRODUCTION');
+    } else {
+      // Production / non-local: must verify with the real store. No token-trust shortcut.
+      const verified = await storeVerifier({
+        platform: input.platform,
+        productId: input.productId,
+        purchaseToken: input.purchaseToken,
+        orderId: input.orderId,
+        signature: input.signature
+      });
+      requireValue(verified?.ok === true, 'STORE_VERIFICATION_FAILED');
+      return persistVerifiedPurchase(actor, input, verified, /*simulated*/ false);
     }
 
+    // Emulator-only simulation path (ATHENA_STUDY_PROGRESS_LOCAL + demo project + emulators).
+    const periodDurationMs = input.productId.includes('anual')
+      ? 365 * 24 * 60 * 60 * 1000
+      : 30 * 24 * 60 * 60 * 1000;
+    const currentTimestamp = now();
+    const simulated: StoreVerificationResult = {
+      ok: true,
+      status: 'active',
+      currentPeriodStart: currentTimestamp,
+      currentPeriodEnd: currentTimestamp + periodDurationMs,
+      orderId: input.orderId || `GPA.SIMULATED-${digest(input.purchaseToken).slice(0, 12)}`,
+      autoRenewing: true
+    };
+    return persistVerifiedPurchase(actor, input, simulated, /*simulated*/ true);
+  };
+
+  const persistVerifiedPurchase = async (
+    actor: Actor,
+    input: VerifyPurchaseInput,
+    verified: StoreVerificationResult,
+    isLocalSimulated: boolean
+  ) => {
     const tokenFingerprint = digest(`${input.platform}:${input.productId}:${input.purchaseToken}`);
     const receiptRef = ref(`processed_purchases/${tokenFingerprint}`);
     const subRef = ref(`access_subscriptions/${actor.uid}`);
@@ -70,20 +155,16 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
         tx.get(subRef)
       ]);
 
-      const currentTimestamp = now();
-
       if (existingReceipt.exists) {
         const receiptData = existingReceipt.data();
         if (receiptData.uid !== actor.uid) {
-          // Token de compra já vinculado a outra conta ATHENA (prevenção contra compartilhamento fraudulento de recibos)
           throw Error('PURCHASE_BOUND_TO_OTHER_ACCOUNT');
         }
-        // Retorna idempotente o benefício já verificado
         const subData = existingSub.data() || {};
         return {
           uid: actor.uid,
           serverVerified: true,
-          status: subData.status || 'active',
+          status: subData.status || verified.status,
           currentPeriodStart: subData.currentPeriodStart,
           currentPeriodEnd: subData.currentPeriodEnd,
           productId: subData.productId,
@@ -92,27 +173,21 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
         };
       }
 
-      // Cálculo do período de vigência da assinatura (mensal = 30 dias padrão de segurança)
-      const periodDurationMs = input.productId.includes('anual')
-        ? 365 * 24 * 60 * 60 * 1000
-        : 30 * 24 * 60 * 60 * 1000;
-
-      const currentPeriodStart = currentTimestamp;
-      const currentPeriodEnd = currentTimestamp + periodDurationMs;
-
+      const currentTimestamp = now();
       const subscriptionRecord = {
         uid: actor.uid,
         provider: input.platform,
         productId: input.productId,
-        orderId: input.orderId || `order_${tokenFingerprint.slice(0, 16)}`,
+        orderId: verified.orderId || input.orderId || `order_${tokenFingerprint.slice(0, 16)}`,
         purchaseTokenHash: tokenFingerprint,
-        status: 'active' as SubscriptionStatus,
+        status: verified.status,
         serverVerified: true,
-        currentPeriodStart,
-        currentPeriodEnd,
+        currentPeriodStart: verified.currentPeriodStart,
+        currentPeriodEnd: verified.currentPeriodEnd,
         updatedAt: currentTimestamp,
         isSimulatedLocal: isLocalSimulated,
-        autoRenewing: true
+        autoRenewing: verified.autoRenewing ?? true,
+        storeVerifiedAt: currentTimestamp
       };
 
       tx.set(subRef, subscriptionRecord);
@@ -124,7 +199,7 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
         isSimulatedLocal: isLocalSimulated
       });
       tx.set(ref(`subscription_audit/${auditId}`), {
-        event: 'purchase_verified',
+        event: isLocalSimulated ? 'purchase_simulated_local' : 'purchase_verified',
         uid: actor.uid,
         platform: input.platform,
         productId: input.productId,
@@ -136,8 +211,8 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
         uid: actor.uid,
         serverVerified: true,
         status: subscriptionRecord.status,
-        currentPeriodStart,
-        currentPeriodEnd,
+        currentPeriodStart: subscriptionRecord.currentPeriodStart,
+        currentPeriodEnd: subscriptionRecord.currentPeriodEnd,
         productId: input.productId,
         provider: input.platform,
         alreadyProcessed: false
@@ -145,9 +220,6 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
     });
   };
 
-  /**
-   * Consulta o estado consolidado da assinatura do usuário.
-   */
   const getSubscriptionStatus = async (actor: Actor) => {
     authenticated(actor);
     const subSnap = await ref(`access_subscriptions/${actor.uid}`).get();
@@ -180,8 +252,9 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
   };
 
   /**
-   * Processador de notificações do servidor (Webhooks / Real-Time Developer Notifications / App Store Server Notifications).
-   * Lida com renovação, cancelamento, expiração, período de graça e reembolso com idempotência contra notificações repetidas.
+   * Processador de notificações do servidor.
+   * Chamado SOMENTE após autenticação do webhook na camada HTTP (OIDC / JWS).
+   * Não concede assinatura nova sem recibo prévio de compra verificada.
    */
   const processServerNotification = async (input: WebhookNotificationInput) => {
     requireValue(input && typeof input === 'object', 'INVALID_ARGUMENT');
@@ -198,28 +271,29 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
         return { status: 'duplicate_ignored', eventId };
       }
 
-      // Marcar evento como processado para evitar re-execução em notificações repetidas
-      tx.set(eventRef, {
-        platform: input.platform,
-        eventType: input.eventType,
-        receivedAt: currentTimestamp,
-        eventTimestamp: input.eventTimestamp
-      });
+      let uid: string | undefined;
+      let currentSub: any;
+      let subRef: any;
+      let newStatus: SubscriptionStatus | undefined;
+      let newEnd: number | undefined;
+      let autoRenewing: boolean | undefined;
+      let previousStatus: string | undefined;
+      let shouldUpdate = false;
 
-      // Se temos o purchaseToken ou orderId, localizar o titular da assinatura
       if (input.purchaseToken) {
         const tokenFingerprint = digest(`${input.platform}:${input.rawPayload?.productId || 'standard'}:${input.purchaseToken}`);
         const receiptSnap = await tx.get(ref(`processed_purchases/${tokenFingerprint}`));
         if (receiptSnap.exists) {
-          const uid = receiptSnap.data().uid;
+          uid = receiptSnap.data().uid;
           if (uid) {
-            const subRef = ref(`access_subscriptions/${uid}`);
+            subRef = ref(`access_subscriptions/${uid}`);
             const currentSubSnap = await tx.get(subRef);
             if (currentSubSnap.exists) {
-              const currentSub = currentSubSnap.data();
-              let newStatus: SubscriptionStatus = currentSub.status;
-              let newEnd = currentSub.currentPeriodEnd;
-              let autoRenewing = currentSub.autoRenewing;
+              currentSub = currentSubSnap.data();
+              previousStatus = currentSub.status;
+              newStatus = currentSub.status;
+              newEnd = currentSub.currentPeriodEnd;
+              autoRenewing = currentSub.autoRenewing;
 
               switch (input.eventType) {
                 case 'SUBSCRIPTION_RENEWED':
@@ -228,18 +302,20 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
                   autoRenewing = true;
                   const extensionMs = 30 * 24 * 60 * 60 * 1000;
                   newEnd = Math.max(currentSub.currentPeriodEnd, currentTimestamp) + extensionMs;
+                  shouldUpdate = true;
                   break;
                 }
                 case 'SUBSCRIPTION_CANCELED':
                 case 'DID_CANCEL': {
-                  // O cancelamento não revoga o acesso imediatamente; apenas desativa renovação automática
                   newStatus = 'canceled';
                   autoRenewing = false;
+                  shouldUpdate = true;
                   break;
                 }
                 case 'SUBSCRIPTION_IN_GRACE_PERIOD':
                 case 'DID_FAIL_TO_RENEW': {
                   newStatus = 'in_grace_period';
+                  shouldUpdate = true;
                   break;
                 }
                 case 'SUBSCRIPTION_EXPIRED':
@@ -247,39 +323,48 @@ export function createStoreSubscriptionVerification(db: any, now = Date.now) {
                   newStatus = 'expired';
                   autoRenewing = false;
                   newEnd = Math.min(currentSub.currentPeriodEnd, currentTimestamp);
+                  shouldUpdate = true;
                   break;
                 }
                 case 'SUBSCRIPTION_REVOKED':
                 case 'REFUND':
                 case 'REVOKE': {
-                  // Reembolso revoga imediatamente o acesso
                   newStatus = 'refunded';
                   autoRenewing = false;
                   newEnd = currentTimestamp;
+                  shouldUpdate = true;
                   break;
                 }
               }
-
-              tx.update(subRef, {
-                status: newStatus,
-                currentPeriodEnd: newEnd,
-                autoRenewing,
-                updatedAt: currentTimestamp
-              });
-
-              tx.set(ref(`subscription_audit/${randomUUID()}`), {
-                event: `webhook_${input.eventType.toLowerCase()}`,
-                uid,
-                platform: input.platform,
-                at: currentTimestamp,
-                previousStatus: currentSub.status,
-                newStatus
-              });
-
-              return { status: 'processed', uid, eventType: input.eventType, newStatus };
             }
           }
         }
+      }
+
+      // All reads complete before writes (Firestore transaction ordering).
+      tx.set(eventRef, {
+        platform: input.platform,
+        eventType: input.eventType,
+        receivedAt: currentTimestamp,
+        eventTimestamp: input.eventTimestamp
+      });
+
+      if (shouldUpdate && uid && subRef && newStatus !== undefined) {
+        tx.update(subRef, {
+          status: newStatus,
+          currentPeriodEnd: newEnd,
+          autoRenewing,
+          updatedAt: currentTimestamp
+        });
+        tx.set(ref(`subscription_audit/${randomUUID()}`), {
+          event: `webhook_${input.eventType.toLowerCase()}`,
+          uid,
+          platform: input.platform,
+          at: currentTimestamp,
+          previousStatus,
+          newStatus
+        });
+        return { status: 'processed', uid, eventType: input.eventType, newStatus };
       }
 
       return { status: 'recorded_unlinked', eventId };

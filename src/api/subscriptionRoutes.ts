@@ -3,6 +3,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { createStoreSubscriptionVerification } from '../server/storeSubscriptionVerification';
+import { assertAppStoreWebhookAuthorized, assertPlayRtdnAuthorized } from '../server/storeWebhookAuth';
 
 let subscriptionVerifierInstance: ReturnType<typeof createStoreSubscriptionVerification> | null = null;
 let authInstance: ReturnType<typeof getAuth> | null = null;
@@ -36,6 +37,14 @@ function getSubscriptionContext() {
   };
 }
 
+function mapSubscriptionError(raw: string): number {
+  if (raw === 'AUTHENTICATION_REQUIRED' || raw === 'WEBHOOK_AUTH_REQUIRED') return 401;
+  if (raw === 'PURCHASE_BOUND_TO_OTHER_ACCOUNT') return 409;
+  if (raw === 'STORE_VERIFICATION_UNAVAILABLE' || raw === 'WEBHOOK_AUTH_UNAVAILABLE') return 503;
+  if (raw === 'STORE_VERIFICATION_FAILED' || raw === 'SIMULATED_NOT_ALLOWED_IN_PRODUCTION') return 400;
+  return 400;
+}
+
 export function registerSubscriptionRoutes(app: Express) {
   const actor = async (req: Request) => {
     const token = /^Bearer ([^ ]+)$/.exec(req.headers.authorization || '')?.[1];
@@ -56,7 +65,7 @@ export function registerSubscriptionRoutes(app: Express) {
 
   /**
    * Endpoint de verificação de compras nas lojas (Google Play e App Store).
-   * O cliente nativo envia o token recebido da loja; o servidor valida e registra a vigência.
+   * Fail-closed: sem verificação real da loja (ITEM 11) não grava benefício.
    */
   app.post('/api/study/subscription-verify', async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -68,14 +77,10 @@ export function registerSubscriptionRoutes(app: Express) {
     } catch (e: any) {
       const raw = e instanceof Error ? e.message : 'UNAVAILABLE';
       const code = /^[A-Z_]{3,80}$/.test(raw) ? raw : 'UNAVAILABLE';
-      const status = code === 'AUTHENTICATION_REQUIRED' ? 401 : code === 'PURCHASE_BOUND_TO_OTHER_ACCOUNT' ? 409 : 400;
-      res.status(status).json({ error: code });
+      res.status(mapSubscriptionError(code)).json({ error: code });
     }
   });
 
-  /**
-   * Consulta de estado da assinatura da loja para a conta autenticada.
-   */
   app.get('/api/study/subscription-status', async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Vary', 'Authorization');
@@ -92,11 +97,19 @@ export function registerSubscriptionRoutes(app: Express) {
   });
 
   /**
-   * Webhook do Google Play (Cloud Pub/Sub RTDN)
+   * Webhook do Google Play (Cloud Pub/Sub RTDN) — exige OIDC; fail-closed.
    */
   app.post('/api/study/webhooks/google-play', async (req: Request, res: Response) => {
     try {
-      // Mensagem Pub/Sub recebida no formato base64
+      await assertPlayRtdnAuthorized(req);
+    } catch (e: any) {
+      const raw = e instanceof Error ? e.message : 'WEBHOOK_AUTH_REQUIRED';
+      const code = /^[A-Z_]{3,80}$/.test(raw) ? raw : 'WEBHOOK_AUTH_REQUIRED';
+      res.status(mapSubscriptionError(code)).json({ error: code });
+      return;
+    }
+
+    try {
       const message = req.body?.message;
       let payload: any = {};
       if (message?.data) {
@@ -143,17 +156,25 @@ export function registerSubscriptionRoutes(app: Express) {
       res.status(200).json(result);
     } catch (error) {
       console.warn('[Webhook Google Play] Falha no processamento:', error);
-      res.status(200).json({ status: 'error_logged' }); // 200 para evitar retentativas agressivas de payloads malformados
+      res.status(200).json({ status: 'error_logged' });
     }
   });
 
   /**
-   * Webhook da App Store (App Store Server Notifications V2)
+   * Webhook da App Store (App Store Server Notifications V2) — exige JWS; fail-closed.
    */
   app.post('/api/study/webhooks/app-store', async (req: Request, res: Response) => {
     try {
+      await assertAppStoreWebhookAuthorized(req);
+    } catch (e: any) {
+      const raw = e instanceof Error ? e.message : 'WEBHOOK_AUTH_REQUIRED';
+      const code = /^[A-Z_]{3,80}$/.test(raw) ? raw : 'WEBHOOK_AUTH_REQUIRED';
+      res.status(mapSubscriptionError(code)).json({ error: code });
+      return;
+    }
+
+    try {
       const signedPayload = req.body?.signedPayload;
-      // Em produção real, o signedPayload (JWS) é decodificado e verificado com a chave pública da Apple.
       let eventType = req.body?.notificationType || 'APPLE_NOTIFICATION';
       const notificationUUID = req.body?.notificationUUID;
       const subtype = req.body?.subtype;
