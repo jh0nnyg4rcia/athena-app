@@ -1,1560 +1,385 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="scroll-smooth">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ATHENA — Mentoria Jurídica com Inteligência Artificial | Experimente Gratuitamente</title>
-  
-  <!-- SEO & Metatags -->
-  <meta name="description" content="Uma preparação jurídica estruturada em 100 dias com Inteligência Artificial, revisão e questões comentadas para concursos de Magistratura e Ministério Público. Experimente grátis os Dias 1 e 2.">
-  <meta name="keywords" content="Mentoria Jurídica, Concursos Públicos, Magistratura, Ministério Público, Defensoria Pública, Inteligência Artificial, STF, STJ, Jurisprudência, Questões Comentadas">
-  <meta name="author" content="ATHENA Mentoria Jurídica">
-  <link rel="canonical" href="https://projetoathena.app.br/">
-
-  <!-- Open Graph / WhatsApp / Facebook -->
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://projetoathena.app.br/">
-  <meta property="og:title" content="ATHENA — Mentoria Jurídica com Inteligência Artificial">
-  <meta property="og:description" content="Sua jornada rumo à aprovação começa aqui. Preparação estruturada em 100 dias com IA. Experimente grátis os Dias 1 e 2.">
-  <meta property="og:image" content="https://projetoathena.app.br/athena-banner.png">
-
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="ATHENA — Mentoria Jurídica com Inteligência Artificial">
-  <meta name="twitter:description" content="Preparação jurídica de elite para Magistratura e Ministério Público. Experimente gratuitamente os Dias 1 e 2.">
-  <meta name="twitter:image" content="https://projetoathena.app.br/athena-banner.png">
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="athena-icon.png">
-  <link rel="apple-touch-icon" href="athena-icon.png">
-
-  <!-- Typography -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
-
-  <style>
-    :root {
-      --bg-dark: #020617;
-      --bg-card: #0f172a;
-      --bg-card-hover: #131e38;
-      --gold: #d4af37;
-      --gold-light: #e4c56a;
-      --gold-dark: #a6862a;
-      --emerald: #10b981;
-      --emerald-light: #34d399;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --border-card: rgba(212, 175, 55, 0.2);
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at top right, rgba(212, 175, 55, 0.12), transparent 45%),
-        radial-gradient(circle at bottom left, rgba(6, 78, 59, 0.18), transparent 50%),
-        radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.7), transparent 70%);
-      color: var(--text-main);
-      font-family: 'Inter', sans-serif;
-      line-height: 1.6;
-      overflow-x: hidden;
-      min-height: 100vh;
-    }
-
-    .font-serif { font-family: 'Playfair Display', serif; }
-
-    /* Glassmorphism Navbar */
-    .glass-nav {
-      position: sticky;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 50;
-      height: 4.25rem;
-      background: rgba(2, 6, 23, 0.85);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border-bottom: 1px solid rgba(212, 175, 55, 0.18);
-    }
-
-    .nav-container {
-      max-width: 1140px;
-      height: 100%;
-      margin: 0 auto;
-      padding: 0 1.25rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1rem;
-    }
-
-    .header-brand {
-      display: flex;
-      align-items: center;
-      gap: 0.85rem;
-      text-decoration: none;
-    }
-
-    .header-seal-img {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
-      border: 1.5px solid var(--gold);
-      box-shadow: 0 0 15px rgba(212, 175, 55, 0.35);
-      object-fit: cover;
-    }
-
-    .logo-text {
-      font-family: 'Playfair Display', serif;
-      font-weight: 800;
-      font-size: 1.15rem;
-      letter-spacing: 0.05em;
-      color: #f8fafc;
-      display: block;
-      line-height: 1.1;
-    }
-
-    .header-status {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      margin-top: 0.15rem;
-      font-size: 0.65rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--gold-light);
-    }
-
-    .status-dot {
-      width: 0.45rem;
-      height: 0.45rem;
-      border-radius: 999px;
-      background: var(--emerald-light);
-      box-shadow: 0 0 8px rgba(16, 185, 129, 0.7);
-    }
-
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 1.75rem;
-      list-style: none;
-    }
-
-    .nav-link {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.92rem;
-      font-weight: 500;
-      transition: color 0.2s;
-    }
-
-    .nav-link:hover { color: var(--gold-light); }
-
-    .menu-btn {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      width: 2.5rem;
-      height: 2.5rem;
-      border-radius: 0.75rem;
-      border: 1px solid rgba(212, 175, 55, 0.25);
-      background: rgba(15, 23, 42, 0.85);
-      color: #f8fafc;
-      cursor: pointer;
-    }
-
-    /* Buttons */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.6rem;
-      border-radius: 0.85rem;
-      font-size: 0.92rem;
-      font-weight: 700;
-      text-decoration: none;
-      cursor: pointer;
-      transition: all 0.22s ease;
-      text-align: center;
-    }
-
-    .btn-gold {
-      background: linear-gradient(135deg, #d4af37 0%, #b8972e 100%);
-      color: #020617;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      font-size: 0.85rem;
-      box-shadow: 0 8px 24px rgba(212, 175, 55, 0.28);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-    }
-
-    .btn-gold:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 14px 30px rgba(212, 175, 55, 0.4);
-      filter: brightness(1.08);
-    }
-
-    .btn-outline {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(212, 175, 55, 0.35);
-      color: #f8fafc;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      font-size: 0.85rem;
-    }
-
-    .btn-outline:hover {
-      background: rgba(212, 175, 55, 0.12);
-      border-color: var(--gold);
-      transform: translateY(-2px);
-      color: #fff;
-    }
-
-    .btn-large {
-      padding: 1.15rem 2.25rem;
-      font-size: 0.98rem;
-    }
-
-    .container {
-      max-width: 1140px;
-      margin: 0 auto;
-      padding: 0 1.25rem;
-    }
-
-    .section-head {
-      text-align: center;
-      max-width: 780px;
-      margin: 0 auto 3rem;
-    }
-
-    .section-tag {
-      display: inline-block;
-      font-size: 0.76rem;
-      font-weight: 800;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--gold-light);
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.35);
-      padding: 0.4rem 1.1rem;
-      border-radius: 9999px;
-      margin-bottom: 0.9rem;
-    }
-
-    .section-title {
-      font-size: clamp(2rem, 3.8vw, 2.85rem);
-      font-weight: 800;
-      line-height: 1.2;
-      color: #f8fafc;
-      margin-bottom: 1rem;
-    }
-
-    .section-desc {
-      font-size: 1.1rem;
-      color: var(--text-muted);
-      line-height: 1.6;
-    }
-
-    /* Cards */
-    .card {
-      background: rgba(15, 23, 42, 0.82);
-      border: 1px solid var(--border-card);
-      border-radius: 1.25rem;
-      padding: 2rem;
-      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(10px);
-      transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-    }
-
-    .card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(212, 175, 55, 0.45);
-      box-shadow: 0 24px 55px rgba(0, 0, 0, 0.65), 0 0 20px rgba(212, 175, 55, 0.15);
-    }
-
-    /* 6 Blocks Grid */
-    .blocks-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 1.75rem;
-    }
-
-    .block-number {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 36px;
-      height: 36px;
-      background: rgba(212, 175, 55, 0.12);
-      color: var(--gold);
-      border: 1px solid rgba(212, 175, 55, 0.28);
-      border-radius: 0.75rem;
-      font-weight: 800;
-      font-size: 0.9rem;
-      margin-bottom: 1.25rem;
-    }
-
-    /* 2-Column Showcase Layouts */
-    .showcase-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 3.5rem;
-      align-items: center;
-    }
-
-    .showcase-row.reversed {
-      direction: rtl;
-    }
-
-    .showcase-row.reversed > * {
-      direction: ltr;
-    }
-
-    .showcase-phone-wrap {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-
-    .showcase-phone-wrap img {
-      max-width: 380px;
-      width: 100%;
-      height: auto;
-      border-radius: 1.75rem;
-      border: 1.5px solid rgba(212, 175, 55, 0.3);
-      box-shadow: 0 25px 65px -15px rgba(0, 0, 0, 0.8), 0 0 35px rgba(212, 175, 55, 0.22);
-      transition: transform 0.3s ease;
-    }
-
-    .showcase-phone-wrap img:hover {
-      transform: scale(1.02);
-    }
-
-    .feature-list {
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-
-    .feature-item-card {
-      background: rgba(15, 23, 42, 0.85);
-      border: 1px solid rgba(212, 175, 55, 0.22);
-      border-radius: 1.15rem;
-      padding: 1.4rem 1.6rem;
-      transition: all 0.22s ease;
-    }
-
-    .feature-item-card:hover {
-      border-color: var(--gold);
-      background: rgba(17, 28, 51, 0.95);
-      transform: translateX(4px);
-    }
-
-    .feature-item-card h4 {
-      font-size: 1.15rem;
-      color: var(--gold-light);
-      margin-bottom: 0.45rem;
-      font-family: 'Playfair Display', serif;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-    }
-
-    .feature-item-card p {
-      font-size: 0.95rem;
-      color: #cbd5e1;
-      line-height: 1.55;
-    }
-
-    /* Hero Section */
-    .hero-section {
-      padding: 3.5rem 0 4.5rem;
-      position: relative;
-    }
-
-    .hero-grid {
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 3.5rem;
-      align-items: center;
-    }
-
-    .hero-brand-line {
-      display: flex;
-      align-items: center;
-      gap: 0.85rem;
-      margin-bottom: 1.25rem;
-      flex-wrap: wrap;
-    }
-
-    .hero-emblem-img {
-      width: 54px;
-      height: 54px;
-      border-radius: 14px;
-      border: 1.5px solid var(--gold);
-      box-shadow: 0 0 18px rgba(212, 175, 55, 0.35);
-      object-fit: cover;
-    }
-
-    .badge-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.32);
-      color: var(--gold-light);
-      padding: 0.45rem 1.2rem;
-      border-radius: 9999px;
-      font-size: 0.8rem;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-
-    .hero-title {
-      font-size: clamp(2.3rem, 4.2vw, 3.4rem);
-      font-weight: 800;
-      line-height: 1.15;
-      margin-bottom: 1.25rem;
-      color: #f8fafc;
-      letter-spacing: -0.02em;
-    }
-
-    .hero-title span { color: var(--gold); }
-
-    .hero-subtitle {
-      font-size: clamp(1.1rem, 1.8vw, 1.25rem);
-      color: #cbd5e1;
-      font-weight: 400;
-      line-height: 1.6;
-      margin-bottom: 2rem;
-      max-width: 600px;
-    }
-
-    .hero-cta-group {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      flex-wrap: wrap;
-      margin-bottom: 1.25rem;
-    }
-
-    .hero-cta-hint {
-      color: var(--text-muted);
-      font-size: 0.94rem;
-      line-height: 1.5;
-    }
-
-    .hero-cta-hint strong {
-      color: var(--gold-light);
-    }
-
-    /* Metrics Section */
-    .metrics-section {
-      padding: 2.5rem 0;
-      background: rgba(15, 23, 42, 0.6);
-      border-top: 1px solid rgba(212, 175, 55, 0.15);
-      border-bottom: 1px solid rgba(212, 175, 55, 0.15);
-    }
-
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1.5rem;
-      text-align: center;
-    }
-
-    .metric-number {
-      font-family: 'Playfair Display', serif;
-      font-size: clamp(1.9rem, 3.2vw, 2.6rem);
-      font-weight: 800;
-      color: var(--gold-light);
-      line-height: 1.1;
-      margin-bottom: 0.35rem;
-    }
-
-    .metric-label {
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: #94a3b8;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-
-    /* Interactive Simulator */
-    .simulator-wrap {
-      max-width: 820px;
-      margin: 0 auto;
-      background: rgba(15, 23, 42, 0.9);
-      border: 1px solid rgba(212, 175, 55, 0.3);
-      border-radius: 1.5rem;
-      padding: 2.25rem;
-      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);
-    }
-
-    .quiz-option {
-      background: rgba(2, 6, 23, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 0.85rem;
-      padding: 1.15rem 1.4rem;
-      margin-bottom: 0.85rem;
-      cursor: pointer;
-      display: flex;
-      align-items: flex-start;
-      gap: 1rem;
-      transition: all 0.18s ease;
-      font-size: 0.96rem;
-      line-height: 1.5;
-    }
-
-    .quiz-option:hover {
-      border-color: var(--gold);
-      background: rgba(212, 175, 55, 0.08);
-    }
-
-    .quiz-option.correct {
-      border-color: #10b981 !important;
-      background: rgba(16, 185, 129, 0.15) !important;
-      color: #34d399;
-    }
-
-    .quiz-option.wrong {
-      border-color: #ef4444 !important;
-      background: rgba(239, 68, 68, 0.15) !important;
-      color: #fca5a5;
-    }
-
-    .opt-letter {
-      width: 2rem;
-      height: 2rem;
-      border-radius: 0.5rem;
-      background: rgba(212, 175, 55, 0.18);
-      border: 1px solid var(--gold);
-      color: var(--gold-light);
-      font-weight: 800;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      font-size: 0.9rem;
-    }
-
-    .explanation-box {
-      margin-top: 1.5rem;
-      padding: 1.5rem;
-      border-radius: 0.85rem;
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.35);
-      display: none;
-    }
-
-    /* Free Access Section */
-    .access-section {
-      padding: 5rem 0;
-      background: radial-gradient(circle at 50% 40%, rgba(212, 175, 55, 0.14) 0%, rgba(15, 23, 42, 0.9) 70%);
-      border-top: 1px solid rgba(212, 175, 55, 0.25);
-      border-bottom: 1px solid rgba(212, 175, 55, 0.25);
-    }
-
-    .access-card {
-      background: rgba(15, 23, 42, 0.92);
-      border: 1px solid rgba(212, 175, 55, 0.35);
-      border-radius: 2rem;
-      padding: 3rem 2.5rem;
-      box-shadow: 0 30px 70px rgba(0, 0, 0, 0.7);
-      backdrop-filter: blur(14px);
-    }
-
-    .access-grid {
-      display: grid;
-      grid-template-columns: 0.85fr 1.15fr;
-      gap: 3.5rem;
-      align-items: center;
-    }
-
-    .access-perks-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      margin: 1.75rem 0 2.25rem;
-    }
-
-    .access-perk-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.85rem;
-      font-size: 1.02rem;
-      color: #e2e8f0;
-    }
-
-    .access-perk-item svg {
-      width: 22px;
-      height: 22px;
-      stroke: var(--emerald-light);
-      flex-shrink: 0;
-      margin-top: 0.15rem;
-    }
-
-    /* FAQ */
-    .faq-list {
-      max-width: 820px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .faq-item {
-      background: rgba(15, 23, 42, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 1rem;
-      overflow: hidden;
-      transition: border-color 0.2s;
-    }
-
-    .faq-item.active {
-      border-color: rgba(212, 175, 55, 0.35);
-    }
-
-    .faq-question {
-      padding: 1.25rem 1.6rem;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-weight: 700;
-      color: #f1f5f9;
-      font-size: 1.02rem;
-    }
-
-    .faq-question:hover { color: var(--gold-light); }
-
-    .faq-answer {
-      padding: 0 1.6rem 1.4rem;
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      line-height: 1.6;
-      display: none;
-    }
-
-    .faq-item.active .faq-answer { display: block; }
-    .faq-item.active .faq-icon { transform: rotate(180deg); color: var(--gold); }
-
-    /* Footer */
-    footer {
-      background: #020617;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      padding: 4rem 1.25rem 2.5rem;
-    }
-
-    .footer-grid {
-      max-width: 1140px;
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: 1.4fr 1fr 1fr 1fr;
-      gap: 3rem;
-      margin-bottom: 3rem;
-    }
-
-    .footer-col h4 {
-      color: var(--gold-light);
-      font-size: 0.88rem;
-      font-weight: 800;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      margin-bottom: 1.25rem;
-    }
-
-    .footer-col ul {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.65rem;
-    }
-
-    .footer-col a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.9rem;
-      transition: color 0.2s;
-    }
-
-    .footer-col a:hover { color: #f8fafc; }
-
-    .footer-bottom {
-      max-width: 1140px;
-      margin: 0 auto;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-      font-size: 0.85rem;
-      color: #64748b;
-    }
-
-    /* Mobile Sidebar & Responsiveness */
-    .app-sidebar { display: none; }
-    .sidebar-backdrop { display: none; }
-
-    @media (max-width: 900px) {
-      .nav-links { display: none; }
-      .menu-btn { display: inline-flex; }
-
-      .app-sidebar {
-        display: block;
-        position: fixed;
-        z-index: 55;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        width: min(85vw, 21rem);
-        background: #0b1120;
-        border-right: 1px solid rgba(212, 175, 55, 0.25);
-        padding: 1.5rem 1.25rem;
-        transform: translateX(-105%);
-        transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
-        overflow-y: auto;
-      }
-
-      .app-sidebar.open { transform: translateX(0); }
-
-      .sidebar-backdrop {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(2, 6, 23, 0.7);
-        backdrop-filter: blur(4px);
-        z-index: 52;
-      }
-
-      .sidebar-backdrop.open { display: block; }
-
-      .side-brand {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding-bottom: 1.25rem;
-        margin-bottom: 1.25rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      }
-
-      .side-nav {
-        list-style: none;
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        margin: 1.25rem 0;
-      }
-
-      .side-nav a {
-        display: block;
-        padding: 0.65rem 0.85rem;
-        color: #cbd5e1;
-        text-decoration: none;
-        font-weight: 500;
-        border-radius: 0.6rem;
-        transition: background 0.18s;
-      }
-
-      .side-nav a:hover {
-        background: rgba(212, 175, 55, 0.12);
-        color: var(--gold-light);
-      }
-
-      /* Single column on mobile */
-      .hero-grid,
-      .showcase-row,
-      .showcase-row.reversed,
-      .access-grid {
-        grid-template-columns: 1fr;
-        gap: 2.5rem;
-        text-align: center;
-        direction: ltr;
-      }
-
-      /* Reduced vertical spacing on tablet/mobile */
-      .hero-section {
-        padding: 2.75rem 0 3.25rem;
-      }
-
-      section[style*="padding: 4.5rem 0"] {
-        padding: 3.25rem 0 !important;
-      }
-
-      .access-section {
-        padding: 3.5rem 0;
-      }
-
-      .section-head {
-        margin-bottom: 2rem;
-      }
-
-      #blocos {
-        margin-top: 2.75rem !important;
-      }
-
-      /* Card text legibility & contrast */
-      .feature-item-card {
-        padding: 1.25rem 1.4rem;
-        text-align: left;
-      }
-
-      .feature-item-card h4 {
-        font-size: 1.12rem;
-      }
-
-      .feature-item-card p {
-        font-size: 1rem;
-        color: #e2e8f0;
-        line-height: 1.6;
-      }
-
-      .card {
-        padding: 1.6rem 1.35rem;
-      }
-
-      .card p {
-        font-size: 0.98rem !important;
-        color: #e2e8f0 !important;
-        line-height: 1.6 !important;
-      }
-
-      .blocks-grid {
-        grid-template-columns: 1fr;
-        gap: 1.25rem;
-      }
-
-      .hero-brand-line,
-      .hero-cta-group {
-        justify-content: center;
-      }
-
-      .hero-subtitle {
-        margin: 0 auto 2rem;
-      }
-
-      .metrics-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1.5rem;
-      }
-
-      .footer-grid {
-        grid-template-columns: 1fr 1fr;
-        gap: 2rem;
-      }
-    }
-
-    @media (max-width: 600px) {
-      .hero-section { padding: 2rem 0 2.5rem; }
-      section[style*="padding: 4.5rem 0"] { padding: 2.5rem 0 !important; }
-      .access-section { padding: 2.75rem 0; }
-      .section-head { margin-bottom: 1.75rem; }
-      .showcase-row,
-      .showcase-row.reversed,
-      .access-grid {
-        gap: 2rem;
-      }
-      .feature-list { gap: 1rem; }
-      .feature-item-card { padding: 1.15rem 1.2rem; }
-      .card { padding: 1.35rem 1.15rem; }
-      .simulator-wrap { padding: 1.5rem 1.15rem; }
-      .footer-grid { grid-template-columns: 1fr; }
-      .metrics-grid { grid-template-columns: 1fr; }
-      .hero-cta-group { flex-direction: column; width: 100%; }
-      .hero-cta-group .btn { width: 100%; }
-      .access-card { padding: 2rem 1.25rem; }
-      .header-status { display: none; }
-      .nav-cta-btn { padding: 0.45rem 0.75rem; font-size: 0.76rem; }
-    }
-
-    @media (max-width: 360px) {
-      .nav-cta-btn { display: none; }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATHENA — Mentoria Jurídica com Inteligência Artificial | Experimente os Dias 1 e 2 grátis</title>
+<meta name="description" content="Uma preparação jurídica estruturada em 100 dias com Inteligência Artificial, revisão e questões comentadas para concursos de Magistratura e Ministério Público. Experimente grátis os Dias 1 e 2.">
+<meta name="keywords" content="Mentoria Jurídica, Concursos Públicos, Magistratura, Ministério Público, Defensoria Pública, Inteligência Artificial, STF, STJ, Jurisprudência, Questões Comentadas">
+<meta name="author" content="ATHENA Mentoria Jurídica">
+<meta name="theme-color" content="#0A0A0C">
+<link rel="canonical" href="https://projetoathena.app.br/">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="pt_BR">
+<meta property="og:url" content="https://projetoathena.app.br/">
+<meta property="og:title" content="ATHENA — Mentoria Jurídica com Inteligência Artificial">
+<meta property="og:description" content="Preparação estruturada em 100 dias com IA. Experimente grátis os Dias 1 e 2.">
+<meta property="og:image" content="https://projetoathena.app.br/assets/og-image.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ATHENA — Mentoria Jurídica com Inteligência Artificial">
+<meta name="twitter:description" content="Preparação jurídica para Magistratura e Ministério Público. Experimente gratuitamente os Dias 1 e 2.">
+<meta name="twitter:image" content="https://projetoathena.app.br/assets/og-image.jpg">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/favicon-192.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="preload" as="image" href="assets/logo.webp" type="image/webp">
+<link rel="stylesheet" href="assets/style.css">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","name":"ATHENA — Mentoria Jurídica com IA","url":"https://projetoathena.app.br/","sameAs":["https://instagram.com/projetoathena.app"]}
+</script>
 </head>
 <body>
+<a class="skip" href="#conteudo">Pular para o conteúdo</a>
+<canvas id="particles" aria-hidden="true"></canvas>
+<div class="bg-glow" aria-hidden="true"></div>
+<div class="grid-lines" aria-hidden="true"></div>
 
-  <!-- NAVBAR -->
-  <header class="glass-nav">
-    <div class="nav-container">
-      <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <button class="menu-btn" type="button" aria-label="Abrir menu" onclick="toggleSidebar()">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-        </button>
-        <a href="#topo" class="header-brand">
-          <img src="athena-icon.png" alt="Medalhão Oficial ATHENA" class="header-seal-img" width="44" height="44">
-          <span>
-            <span class="logo-text">ATHENA</span>
-            <span class="header-status"><span class="status-dot"></span> Mentoria Jurídica com IA</span>
-          </span>
-        </a>
-      </div>
-
-      <nav>
-        <ul class="nav-links">
-          <li><a href="#jornada" class="nav-link">Jornada 100 Dias</a></li>
-          <li><a href="#recursos" class="nav-link">Recursos</a></li>
-          <li><a href="#personalizacao" class="nav-link">Metodologia</a></li>
-          <li><a href="#simulador" class="nav-link">Simulador</a></li>
-          <li><a href="#faq" class="nav-link">Dúvidas</a></li>
-        </ul>
-      </nav>
-
-      <div>
-        <a href="https://athena-mentoria.web.app/" class="btn btn-gold nav-cta-btn" target="_blank" rel="noopener noreferrer">
-          Experimentar Grátis
-        </a>
-      </div>
-    </div>
-  </header>
-
-  <!-- MOBILE SIDEBAR -->
-  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
-  <aside class="app-sidebar" id="app-sidebar">
-    <div class="side-brand">
-      <img src="athena-icon.png" alt="Medalhão Oficial ATHENA" class="header-seal-img" width="44" height="44">
-      <div>
-        <div class="logo-text">ATHENA</div>
-        <span class="header-status">Mentoria com IA</span>
-      </div>
-    </div>
-    <a href="https://athena-mentoria.web.app/" class="btn btn-gold" style="width: 100%;" target="_blank" rel="noopener noreferrer" onclick="closeSidebar()">
-      Experimentar Gratuitamente
+<header class="nav">
+  <div class="wrap">
+    <a href="#topo" class="brand" aria-label="ATHENA — início">
+      <picture><source srcset="assets/logo-sm.webp" type="image/webp"><img src="assets/logo-sm.png" alt="" width="44" height="44"></picture>
+      <span><b>ATHENA</b><small>Mentoria Jurídica com IA</small></span>
     </a>
-    <ul class="side-nav">
-      <li><a href="#topo" onclick="closeSidebar()">Início</a></li>
-      <li><a href="#jornada" onclick="closeSidebar()">Jornada 100 Dias</a></li>
-      <li><a href="#recursos" onclick="closeSidebar()">Recursos da Plataforma</a></li>
-      <li><a href="#personalizacao" onclick="closeSidebar()">Preparação Adaptada</a></li>
-      <li><a href="#simulador" onclick="closeSidebar()">Simulador de Questões</a></li>
-      <li><a href="#trilha" onclick="closeSidebar()">Carreiras Atendidas</a></li>
-      <li><a href="#experimente" onclick="closeSidebar()">Acesso Gratuito (Dias 1 e 2)</a></li>
-      <li><a href="#faq" onclick="closeSidebar()">Perguntas Frequentes</a></li>
-      <li><a href="privacidade.html">Política de Privacidade</a></li>
-      <li><a href="termos.html">Termos de Uso</a></li>
-      <li><a href="excluir-conta.html">Excluir Conta</a></li>
-    </ul>
-  </aside>
+    <nav aria-label="Principal">
+      <ul>
+        <li><a href="#jornada">Jornada 100 Dias</a></li>
+        <li><a href="#recursos">Recursos</a></li>
+        <li><a href="#personalizacao">Metodologia</a></li>
+        <li><a href="#simulador">Simulador</a></li>
+        <li><a href="#trilha">Carreiras</a></li>
+        <li><a href="#faq">Dúvidas</a></li>
+      </ul>
+    </nav>
+    <div style="display:flex;gap:.6rem;align-items:center">
+      <a href="https://athena-mentoria.web.app/" class="btn btn-gold btn-sm" target="_blank" rel="noopener">Experimentar grátis</a>
+      <button class="menu-btn" id="menuBtn" aria-label="Abrir menu" aria-expanded="false" aria-controls="drawer">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="drawer" id="drawer">
+    <a href="#jornada">Jornada 100 Dias</a>
+    <a href="#recursos">Recursos da plataforma</a>
+    <a href="#personalizacao">Preparação adaptada</a>
+    <a href="#simulador">Simulador de questões</a>
+    <a href="#trilha">Carreiras atendidas</a>
+    <a href="#experimente">Acesso gratuito (Dias 1 e 2)</a>
+    <a href="#faq">Perguntas frequentes</a>
+    <a href="https://athena-mentoria.web.app/" class="btn btn-gold" target="_blank" rel="noopener">Experimentar gratuitamente</a>
+  </div>
+</header>
 
-  <main class="app-main" id="topo">
-
-    <!-- SEÇÃO 1 — HERO -->
-    <section class="hero-section">
-      <div class="container">
-        <div class="hero-grid">
-          
-          <div>
-            <div class="hero-brand-line">
-              <img src="athena-icon.png" alt="Medalhão ATHENA" class="hero-emblem-img" width="54" height="54">
-              <div class="badge-pill">Mentoria Jurídica com Inteligência Artificial</div>
-            </div>
-
-            <h1 class="hero-title font-serif">
-              Sua jornada rumo à aprovação <span>começa aqui.</span>
-            </h1>
-
-            <p class="hero-subtitle">
-              Uma preparação jurídica estruturada em 100 dias, com recursos de inteligência artificial, revisão e questões para concursos de Magistratura e Ministério Público.
-            </p>
-
-            <div class="hero-cta-group">
-              <a href="https://athena-mentoria.web.app/" class="btn btn-gold btn-large" target="_blank" rel="noopener noreferrer">
-                EXPERIMENTAR GRATUITAMENTE
-              </a>
-              <a href="https://athena-mentoria.web.app/" class="btn btn-outline btn-large" target="_blank" rel="noopener noreferrer">
-                JÁ TENHO CONTA — ENTRAR
-              </a>
-            </div>
-
-            <p class="hero-cta-hint">
-              ✨ <strong>Experimente gratuitamente os Dias 1 e 2</strong> da mentoria ATHENA. Basta criar sua conta para começar.
-            </p>
-          </div>
-
-          <div class="showcase-phone-wrap">
-            <picture>
-              <source srcset="images/athena-real/hero.webp" type="image/webp">
-              <img 
-                src="images/athena-real/hero.jpg" 
-                alt="ATHENA — Sua jornada começa aqui. Aplicativo oficial em smartphones com Trilha de Elite e Mapa de Estudos" 
-                width="819" 
-                height="1024" 
-                loading="eager" 
-                fetchpriority="high" 
-                decoding="async"
-              >
-            </picture>
-          </div>
-
+<main id="topo">
+  <!-- HERO -->
+  <section class="hero" id="conteudo">
+    <div class="wrap">
+      <div>
+        <span class="tag reveal">Mentoria jurídica com inteligência artificial</span>
+        <h1 class="reveal d1">Sua jornada nas carreiras jurídicas <span class="gold-text">começa aqui.</span></h1>
+        <p class="sub reveal d2">Uma preparação jurídica estruturada em 100 dias, com recursos de inteligência artificial, revisão e questões para concursos de Magistratura e Ministério Público.</p>
+        <div class="cta-row reveal d3">
+          <a href="https://athena-mentoria.web.app/" class="btn btn-gold" target="_blank" rel="noopener">Experimentar gratuitamente</a>
+          <a href="https://athena-mentoria.web.app/" class="btn btn-ghost" target="_blank" rel="noopener">Já tenho conta — Entrar</a>
+        </div>
+        <p class="hint reveal d3">✦ <b>Dias 1 e 2 grátis</b> · basta criar sua conta · sem cartão de crédito</p>
+        <div class="hud term hero-term reveal d3" aria-label="Exemplo do plano do Dia 1">
+          <div class="term-bar"><i></i><i></i><i></i><span>athena://trilha-de-elite</span></div>
+          <div class="term-body" data-type='[["p","&gt; athena.iniciar(dia: 1)"],["c","// Semana 1 · Sua meta de hoje"],["","✓ Constituição Federal — art. 1º ao 4º"],["","✓ Código Penal — art. 1º ao 12"],["","✓ Código de Processo Civil — art. 1º ao 15"],["k","&gt; acesso: Dias 1 e 2 liberados"]]'></div>
         </div>
       </div>
-    </section>
 
-    <!-- METRICS STRIP -->
-    <section class="metrics-section">
-      <div class="container">
-        <div class="metrics-grid">
-          <div>
-            <div class="metric-number">100</div>
-            <div class="metric-label">Dias de Trilha Estruturada</div>
-          </div>
-          <div>
-            <div class="metric-number">80/20</div>
-            <div class="metric-label">Método de Pareto Focado</div>
-          </div>
-          <div>
-            <div class="metric-number">STF & STJ</div>
-            <div class="metric-label">Jurisprudência Vinculante</div>
-          </div>
-          <div>
-            <div class="metric-number">DIAS 1 E 2</div>
-            <div class="metric-label">Acesso Gratuito Liberado</div>
-          </div>
+      <div class="graph reveal d2" aria-hidden="true">
+        <svg class="lines" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C8A951" stop-opacity=".15"/><stop offset=".5" stop-color="#E6D8B8" stop-opacity=".8"/><stop offset="1" stop-color="#C8A951" stop-opacity=".15"/></linearGradient></defs>
+          <g id="glines"></g>
+        </svg>
+        <div class="ring r3"></div><div class="ring r2"></div><div class="ring r1"></div>
+        <div class="ring pulse"></div><div class="ring pulse d2"></div>
+        <div class="core"><picture><source srcset="assets/logo.webp" type="image/webp"><img src="assets/logo.png" alt="" width="400" height="400" fetchpriority="high"></picture></div>
+        <div class="node" style="left:22%;top:13%"><i></i><span>Plano diário</span></div>
+        <div class="node" style="left:80%;top:22%"><i></i><span>Revisão</span></div>
+        <div class="node" style="left:76%;top:86%"><i></i><span>Jurisprudência</span></div>
+        <div class="node" style="left:18%;top:76%"><i></i><span>Estratégia</span></div>
+        <div class="node" style="left:92%;top:55%"><i></i><span>Questões</span></div>
+        <div class="node" style="left:7%;top:45%"><i></i><span>Lei seca</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- METRICS -->
+  <section class="metrics">
+    <div class="wrap">
+      <div class="hud grid reveal">
+        <div class="metric"><b class="gold-text">100</b><span>Dias de trilha estruturada</span></div>
+        <div class="metric"><b class="gold-text">80/20</b><span>Método de Pareto focado</span></div>
+        <div class="metric"><b class="gold-text">STF &amp; STJ</b><span>Jurisprudência vinculante</span></div>
+        <div class="metric"><b class="gold-text">Dias 1 e 2</b><span>Acesso gratuito liberado</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROBLEMA -->
+  <section id="problema">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="tag">O desafio</span>
+        <h2>Estudar sozinho para concurso jurídico <span class="gold-text">cansa.</span></h2>
+        <p class="lead">E não é falta de esforço. É falta de direção.</p>
+      </div>
+      <div class="problem-grid">
+        <div class="hud pcard reveal"><div class="ico">📚</div><h3>Material demais</h3><p>Leis, súmulas, informativos e doutrina sem uma ordem clara do que estudar primeiro.</p></div>
+        <div class="hud pcard reveal d1"><div class="ico">🔁</div><h3>Nenhum plano de revisão</h3><p>O conteúdo estudado na semana passada some quando você mais precisa dele.</p></div>
+        <div class="hud pcard reveal d2"><div class="ico">⚖️</div><h3>Jurisprudência que muda</h3><p>Teses dos tribunais superiores são atualizadas e é fácil perder o que está sendo cobrado.</p></div>
+      </div>
+      <p class="answer reveal">A <b>ATHENA</b> organiza sua preparação <b>um dia de cada vez</b>: o que estudar hoje, o que revisar e o que os tribunais estão decidindo.</p>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- JORNADA -->
+  <section id="jornada">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="tag">Metodologia sequencial</span>
+        <h2>100 dias. <span class="gold-text">Uma jornada estruturada.</span></h2>
+        <p class="lead">Apresentamos o método ATHENA como uma experiência organizada, permitindo que você acompanhe sua evolução um dia de cada vez.</p>
+      </div>
+      <div class="split">
+        <figure class="hud shot reveal">
+          <div class="cap"><span>// mapa da jornada</span><span>app</span></div>
+          <picture><source srcset="assets/app-jornada.webp" type="image/webp"><img src="assets/app-jornada.jpg" alt="ATHENA — Mapa da Jornada de 100 Dias. Um dia de cada vez" width="819" height="1024" loading="lazy" decoding="async"></picture>
+        </figure>
+        <div class="feat">
+          <div class="hud fitem reveal"><h3>🗓️ Um dia de cada vez</h3><p>Cada bloco possui metas claras e delimitadas: legislação, súmulas, teses dos tribunais superiores, doutrina e questões de fixação. Avance sem sobrecarga de cronogramas estáticos.</p></div>
+          <div class="hud fitem reveal d1"><h3>⚡ Método Pareto 80/20</h3><p>Foco cirúrgico nos 20% das matérias e teses jurídicas que respondem por 80% das questões das bancas de Magistratura e Ministério Público.</p></div>
+          <div class="hud fitem reveal d2"><h3>📊 Acompanhamento de evolução</h3><p>O mapa da jornada de 1 a 100 dias registra visualmente cada conquista, orientando sua rotina e recomendando os próximos passos de forma clara.</p></div>
+          <div class="reveal d3"><a href="https://athena-mentoria.web.app/" class="btn btn-gold" target="_blank" rel="noopener">Ver trilha no aplicativo</a></div>
         </div>
       </div>
-    </section>
 
-    <!-- SEÇÃO 2 — JORNADA DE 100 DIAS -->
-    <section id="jornada" style="padding: 4.5rem 0;">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-tag">Metodologia Sequencial</div>
-          <h2 class="section-title font-serif">100 dias. Uma jornada estruturada.</h2>
-          <p class="section-desc">
-            Apresentamos o método ATHENA como uma experiência organizada, permitindo que você acompanhe sua evolução um dia de cada vez.
-          </p>
+      <div class="hud map reveal" aria-label="Mapa ilustrativo dos 100 dias da jornada, com os Dias 1 e 2 liberados gratuitamente">
+        <div class="map-top"><span>// MAPA_DA_JORNADA · 100 DIAS</span><span><b>DIAS 1–2</b> liberados grátis</span></div>
+        <div class="cells" id="cells"></div>
+        <div class="legend"><span><i style="background:var(--gold);box-shadow:0 0 8px var(--gold)"></i>Grátis para experimentar</span><span><i style="border:1px solid rgba(200,169,81,.4)"></i>Dias 3 a 100 · assinatura da mentoria completa</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- RECURSOS -->
+  <section id="recursos">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="tag">Recursos de estudo</span>
+        <h2>Tudo o que você precisa para uma <span class="gold-text">preparação completa</span></h2>
+        <p class="lead">Lei seca, jurisprudência, questões comentadas, revisão ativa e preparação completa por fases do concurso.</p>
+      </div>
+      <div class="split rev">
+        <div class="feat">
+          <div class="hud fitem reveal"><h3>⚖️ Lei seca &amp; doutrina dirigida</h3><p>Artigos e conceitos estruturados com os dispositivos mais cobrados na CF/88, Código Penal, Código de Processo Civil e legislação especial.</p></div>
+          <div class="hud fitem reveal d1"><h3>🏛️ Jurisprudência com ratio decidendi</h3><p>Teses vinculantes, súmulas e recursos repetitivos do STF e STJ analisados com fundamentação precisa e contexto prático forense.</p></div>
+          <div class="hud fitem reveal d2"><h3>🎯 Questões objetivas com justificativa</h3><p>Simulados diários com gabarito fundamentado item por item, explicando por que cada assertiva está correta ou errada.</p></div>
+          <div class="hud fitem reveal d3"><h3>🔄 Revisão comprimida &amp; treino por fases</h3><p>Repetição espaçada com caderno de erros, além de módulos dedicados para Treino de 2ª Fase (subjetiva) e Treino Oral.</p></div>
         </div>
+        <figure class="hud shot reveal">
+          <div class="cap"><span>// interface de estudo</span><span>app</span></div>
+          <picture><source srcset="assets/app-recursos.webp" type="image/webp"><img src="assets/app-recursos.jpg" alt="ATHENA — Interface de estudo com botão Estudar Dia 1, Treino 2ª Fase, Treino Oral e Mapa da Jornada" width="738" height="1024" loading="lazy" decoding="async"></picture>
+        </figure>
+      </div>
 
-        <div class="showcase-row">
-          
-          <div class="showcase-phone-wrap">
-            <picture>
-              <source srcset="images/athena-real/jornada.webp" type="image/webp">
-              <img 
-                src="images/athena-real/jornada.jpg" 
-                alt="ATHENA — Mapa da Jornada de 100 Dias. Um dia de cada vez" 
-                width="819" 
-                height="1024" 
-                loading="lazy" 
-                decoding="async"
-              >
-            </picture>
-          </div>
+      <div class="sub-head reveal" id="blocos">
+        <span class="tag">Metodologia diária</span>
+        <h3>Os 6 blocos da rotina de estudos</h3>
+        <p class="lead">Cada dia na plataforma é estruturado em 6 etapas complementares para fixação progressiva e retenção duradoura:</p>
+      </div>
+      <div class="blocks">
+        <div class="hud block reveal"><div class="n">BLOCO 01</div><h3>Jurisprudência em teses</h3><p>Análise de julgados paradigmáticos do STF e STJ com <em>ratio decidendi</em> clara e contexto forense.</p></div>
+        <div class="hud block reveal d1"><div class="n">BLOCO 02</div><h3>Fundamentação constitucional</h3><p>Articulação direta com os dispositivos da Constituição Federal de 1988 e a legislação correlata.</p></div>
+        <div class="hud block reveal d2"><div class="n">BLOCO 03</div><h3>Doutrina majoritária</h3><p>Síntese das correntes dominantes e distinções conceituais cobradas pelas bancas examinadoras.</p></div>
+        <div class="hud block reveal"><div class="n">BLOCO 04</div><h3>Casos práticos forenses</h3><p>Aplicação da matéria a cenários práticos da atuação judicial e ministerial.</p></div>
+        <div class="hud block reveal d1"><div class="n">BLOCO 05</div><h3>Questões comentadas</h3><p>Simulados diários de fixação com justificativa jurídica detalhada assertiva por assertiva.</p></div>
+        <div class="hud block reveal d2"><div class="n">BLOCO 06</div><h3>Desafio discursivo &amp; oral</h3><p>Treinamento de argumentação técnica e resposta oral com critérios de precisão terminológica.</p></div>
+      </div>
+    </div>
+  </section>
 
-          <div class="feature-list">
-            <div class="feature-item-card">
-              <h4>🗓️ Um Dia de Cada Vez</h4>
-              <p>Cada bloco possui metas claras e delimitadas: legislação, súmulas, teses dos tribunais superiores, doutrina e questões de fixação. Avance sem sobrecarga de cronogramas estáticos.</p>
-            </div>
+  <div class="divider"></div>
 
-            <div class="feature-item-card">
-              <h4>⚡ Método Pareto 80/20</h4>
-              <p>Foco cirúrgico nos 20% das matérias e teses jurídicas que respondem por 80% das questões das bancas de Magistratura e Ministério Público.</p>
-            </div>
-
-            <div class="feature-item-card">
-              <h4>📊 Acompanhamento de Evolução</h4>
-              <p>O mapa da jornada de 1 a 100 dias registra visualmente cada conquista, orientando sua rotina e recomendando os próximos passos de forma clara.</p>
-            </div>
-
-            <div style="margin-top: 0.5rem;">
-              <a href="https://athena-mentoria.web.app/" class="btn btn-gold" target="_blank" rel="noopener noreferrer">
-                Ver Trilha no Aplicativo
-              </a>
-            </div>
-          </div>
-
+  <!-- PERSONALIZAÇÃO -->
+  <section id="personalizacao">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="tag">Personalização estratégica</span>
+        <h2>Uma preparação <span class="gold-text">adaptada à sua jornada.</span></h2>
+        <p class="lead">Organize seus estudos de acordo com o seu nível de maturidade e as exigências específicas de cada fase do concurso.</p>
+      </div>
+      <div class="split">
+        <figure class="hud shot reveal">
+          <div class="cap"><span>// perfil &amp; fases</span><span>app</span></div>
+          <picture><source srcset="assets/app-personalizacao.webp" type="image/webp"><img src="assets/app-personalizacao.jpg" alt="ATHENA — Perfil Automático e Fases do Concurso: Provas Objetivas, Provas Subjetivas e Provas Orais" width="753" height="1024" loading="lazy" decoding="async"></picture>
+        </figure>
+        <div class="feat">
+          <div class="hud fitem reveal"><h3>⚙️ Perfil automático ativo</h3><p>A ATHENA calibra de forma inteligente a proporção entre texto de lei, doutrina e precedentes jurisprudenciais conforme a relevância temática de cada rodada.</p></div>
+          <div class="hud fitem reveal d1"><h3>⚡ Provas objetivas · 1ª fase</h3><p>Treinamento intensivo de múltipla escolha com foco na literalidade das normas e na jurisprudência pacificada dos tribunais de cúpula.</p></div>
+          <div class="hud fitem reveal d2"><h3>📝 Provas subjetivas · 2ª fase</h3><p>Estruturação de casos discursivos e peças forenses, desenvolvendo a capacidade de fundamentação técnica exigida pelos examinadores.</p></div>
+          <div class="hud fitem reveal d3"><h3>🎙️ Provas orais · 3ª fase</h3><p>Simulação de arguições com checagem de postura, vocabulário e domínio dogmático dos institutos jurídicos.</p></div>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- SEÇÃO 3 — RECURSOS DA PLATAFORMA -->
-    <section id="recursos" style="padding: 4.5rem 0; background: rgba(15, 22, 38, 0.45); border-top: 1px solid rgba(212, 175, 55, 0.15); border-bottom: 1px solid rgba(212, 175, 55, 0.15);">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-tag">Recursos de Estudo</div>
-          <h2 class="section-title font-serif">Tudo o Que Você Precisa para Ser Aprovado</h2>
-          <p class="section-desc">
-            Lei seca, jurisprudência, questões comentadas, revisão ativa e preparação completa por fases do concurso.
-          </p>
+  <div class="divider"></div>
+
+  <!-- SIMULADOR -->
+  <section id="simulador">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="tag">Demonstração interativa · questão autoral</span>
+        <h2>Experimente a <span class="gold-text">metodologia agora</span></h2>
+        <p class="lead">Resolva a questão autoral elaborada pela equipe ATHENA com base no Tema 855/STF e veja o padrão de correção fundamentada:</p>
+      </div>
+      <div class="hud quiz reveal">
+        <div class="quiz-top"><span>⚖️ Direito Constitucional · Tema 855/STF</span><span>Padrão Magistratura &amp; MP</span></div>
+        <p class="quiz-q">Com base na Constituição Federal de 1988 e na jurisprudência vinculante do Supremo Tribunal Federal (STF) sobre Direitos Fundamentais, assinale a opção <strong>CORRETA</strong>:</p>
+        <div id="quiz" role="group" aria-label="Alternativas">
+          <button class="opt" data-ok="0"><span class="l">A</span><span>A liberdade de associação para fins lícitos é plena, admitindo-se a interferência estatal no seu funcionamento administrativo para garantia preventiva da ordem pública.</span></button>
+          <button class="opt" data-ok="1"><span class="l">B</span><span>A exigência de aviso prévio para reuniões pacíficas não constitui condição para a legitimidade da manifestação, sendo prescindível a notificação formal se não houver frustração de reunião simultânea no mesmo local.</span></button>
+          <button class="opt" data-ok="0"><span class="l">C</span><span>O mandado de segurança coletivo pode ser impetrado por qualquer partido político registrado, independentemente de representação no Congresso Nacional.</span></button>
+          <button class="opt" data-ok="0"><span class="l">D</span><span>A garantia da inviolabilidade do domicílio é absoluta durante o período noturno, vedando o ingresso policial mesmo na hipótese de consentimento do morador.</span></button>
         </div>
-
-        <div class="showcase-row reversed">
-          
-          <div class="showcase-phone-wrap">
-            <picture>
-              <source srcset="images/athena-real/recursos.webp" type="image/webp">
-              <img 
-                src="images/athena-real/recursos.jpg" 
-                alt="ATHENA — Interface de estudo com botão Estudar Dia 1, Treino 2ª Fase, Treino Oral e Mapa da Jornada" 
-                width="738" 
-                height="1024" 
-                loading="lazy" 
-                decoding="async"
-              >
-            </picture>
-          </div>
-
-          <div class="feature-list">
-            <div class="feature-item-card">
-              <h4>⚖️ Lei Seca & Doutrina Dirigida</h4>
-              <p>Artigos e conceitos estruturados com os dispositivos mais cobrados na CF/88, Código Penal, Código de Processo Civil e legislação especial.</p>
-            </div>
-
-            <div class="feature-item-card">
-              <h4>🏛️ Jurisprudência com Ratio Decidendi</h4>
-              <p>Teses vinculantes, súmulas e recursos repetitivos do STF e STJ analisados com fundamentação precisa e contexto prático forense.</p>
-            </div>
-
-            <div class="feature-item-card">
-              <h4>🎯 Questões Objetivas com Justificativa</h4>
-              <p>Simulados diários com gabarito fundamentado item por item, explicando por que cada assertiva está correta ou errada.</p>
-            </div>
-
-            <div class="feature-item-card">
-              <h4>🔄 Revisão Comprimida & Treino por Fases</h4>
-              <p>Repetição espaçada com caderno de erros, além de módulos dedicados para Treino de 2ª Fase (subjetiva) e Treino Oral.</p>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- OS 6 BLOCOS PEDAGÓGICOS DA MENTORIA DIÁRIA -->
-        <div id="blocos" style="margin-top: 4rem;">
-          <div style="text-align: center; margin-bottom: 2.25rem;">
-            <div class="section-tag">Metodologia Diária</div>
-            <h3 class="font-serif" style="font-size: clamp(1.6rem, 2.8vw, 2.1rem); color: #f8fafc; margin-bottom: 0.5rem;">
-              Os 6 Blocos da Rotina de Estudos
-            </h3>
-            <p style="color: var(--text-muted); font-size: 1rem; max-width: 680px; margin: 0 auto;">
-              Cada dia na plataforma é estruturado em 6 etapas complementares para fixação progressiva e retenção duradoura:
-            </p>
-          </div>
-
-          <div class="blocks-grid">
-            <div class="card">
-              <div class="block-number">01</div>
-              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Jurisprudência em Teses</h4>
-              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Análise de julgados paradigmáticos do STF e STJ com <em>ratio decidendi</em> clara e contexto forense.</p>
-            </div>
-
-            <div class="card">
-              <div class="block-number">02</div>
-              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Fundamentação Constitucional</h4>
-              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Articulação direta com os dispositivos da Constituição Federal de 1988 e a legislação correlata.</p>
-            </div>
-
-            <div class="card">
-              <div class="block-number">03</div>
-              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Doutrina Majoritária</h4>
-              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Síntese das correntes dominantes e distinções conceituais cobradas pelas bancas examinadoras.</p>
-            </div>
-
-            <div class="card">
-              <div class="block-number">04</div>
-              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Casos Práticos Forenses</h4>
-              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Aplicação da matéria a cenários práticos da atuação judicial e ministerial.</p>
-            </div>
-
-            <div class="card">
-              <div class="block-number">05</div>
-              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Questões Comentadas</h4>
-              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Simulados diários de fixação com justificativa jurídica detalhada assertiva por assertiva.</p>
-            </div>
-
-            <div class="card">
-              <div class="block-number">06</div>
-              <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.15rem; margin-bottom: 0.5rem;">Desafio Discursivo & Oral</h4>
-              <p style="color: var(--text-muted); font-size: 0.92rem; line-height: 1.55;">Treinamento de argumentação técnica e resposta oral com critérios de precisão terminológica.</p>
-            </div>
-          </div>
+        <div class="explain" id="explain" aria-live="polite">
+          <h3>✓ Gabarito: alternativa B (STF · Tema 855)</h3>
+          <p><strong>Fundamentação (RE 806.339/SE, Tema 855 da repercussão geral, julgado em 15/12/2020):</strong> o STF afastou a interpretação que condiciona o exercício do direito de reunião (art. 5º, XVI, da CF) ao aviso prévio: a falta de notificação não torna, por si só, ilegal a manifestação, e a notificação não precisa ser pessoal ou formal. Tese fixada: “A exigência constitucional de aviso prévio relativamente ao direito de reunião é satisfeita com a veiculação de informação que permita ao poder público zelar para que seu exercício se dê de forma pacífica ou para que não frustre outra reunião no mesmo local.”</p>
+          <a href="https://athena-mentoria.web.app/" class="btn btn-gold btn-sm" target="_blank" rel="noopener">Resolver mais questões no app →</a>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- SEÇÃO 4 — PREPARAÇÃO PERSONALIZADA -->
-    <section id="personalizacao" style="padding: 4.5rem 0;">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-tag">Personalização Estratégica</div>
-          <h2 class="section-title font-serif">Uma preparação adaptada à sua jornada.</h2>
-          <p class="section-desc">
-            Organize seus estudos de acordo com o seu nível de maturidade e as exigências específicas de cada fase do concurso.
-          </p>
-        </div>
+  <div class="divider"></div>
 
-        <div class="showcase-row">
-          
-          <div class="showcase-phone-wrap">
-            <picture>
-              <source srcset="images/athena-real/personalizacao.webp" type="image/webp">
-              <img 
-                src="images/athena-real/personalizacao.jpg" 
-                alt="ATHENA — Perfil Automático e Fases do Concurso: Provas Objetivas, Provas Subjetivas e Provas Orais" 
-                width="753" 
-                height="1024" 
-                loading="lazy" 
-                decoding="async"
-              >
-            </picture>
-          </div>
-
-          <div class="feature-list">
-            <div class="feature-item-card">
-              <h4>⚙️ Perfil Automático Ativo</h4>
-              <p>A ATHENA calibra de forma inteligente a proporção entre texto de lei, doutrina e precedentes jurisprudenciais conforme a relevância temática de cada rodada.</p>
-            </div>
-
-            <div class="feature-item-card">
-              <h4>⚡ Provas Objetivas (1ª Fase)</h4>
-              <p>Treinamento intensivo de múltipla escolha com foco na literalidade das normas e na jurisprudência pacificada dos tribunais de cúpula.</p>
-            </div>
-
-            <div class="feature-item-card">
-              <h4>📝 Provas Subjetivas (2ª Fase)</h4>
-              <p>Estruturação de casos discursivos e peças forenses, desenvolvendo a capacidade de fundamentação técnica exigida pelos examinadores.</p>
-            </div>
-
-            <div class="feature-item-card">
-              <h4>🎙️ Provas Orais (3ª Fase)</h4>
-              <p>Simulação de arguições com checagem de postura, vocabulário e domínio dogmático dos institutos jurídicos.</p>
-            </div>
-          </div>
-
-        </div>
+  <!-- CARREIRAS -->
+  <section id="trilha">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="tag">Carreiras de elite</span>
+        <h2>Preparação para os <span class="gold-text">concursos mais exigentes</span></h2>
+        <p class="lead">A mentoria é calibrada nas matrizes curriculares e no nível de profundidade das carreiras jurídicas de ponta:</p>
       </div>
-    </section>
-
-    <!-- SIMULADOR INTERATIVO AO VIVO -->
-    <section id="simulador" style="padding: 4.5rem 0; background: rgba(15, 22, 38, 0.45); border-top: 1px solid rgba(212, 175, 55, 0.15); border-bottom: 1px solid rgba(212, 175, 55, 0.15);">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-tag">Demonstração Interativa • Questão Autoral Inédita</div>
-          <h2 class="section-title font-serif">Experimente a Metodologia Agora</h2>
-          <p class="section-desc">Resolva a questão autoral inédita elaborada pela equipe ATHENA com base no Tema 855/STF e veja o padrão de correção fundamentada:</p>
-        </div>
-
-        <div class="simulator-wrap">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-            <span style="color: var(--gold-light); font-weight: 700; font-size: 0.9rem; text-transform: uppercase;">
-              ⚖️ Direito Constitucional • Simulado Autoral ATHENA (Tema 855/STF)
-            </span>
-            <span style="background: rgba(212, 175, 55, 0.16); color: var(--gold-light); padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 700;">
-              Padrão Magistratura & MP
-            </span>
-          </div>
-
-          <p style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1.75rem; line-height: 1.6;">
-            Com base na Constituição Federal de 1988 e na jurisprudência vinculante do Supremo Tribunal Federal (STF) sobre Direitos Fundamentais, assinale a opção <strong>CORRETA</strong>:
-          </p>
-
-          <div id="quiz-options">
-            <div class="quiz-option" onclick="handleSelectOption(this, false, 'A')">
-              <div class="opt-letter">A</div>
-              <div>A liberdade de associação para fins lícitos é plena, admitindo-se a interferência estatal no seu funcionamento administrativo para garantia preventiva da ordem pública.</div>
-            </div>
-
-            <div class="quiz-option" onclick="handleSelectOption(this, true, 'B')">
-              <div class="opt-letter">B</div>
-              <div>A exigência de aviso prévio para reuniões pacíficas não constitui condição para a legitimidade da manifestação, sendo prescindível a notificação formal se não houver frustração de reunião simultânea no mesmo local.</div>
-            </div>
-
-            <div class="quiz-option" onclick="handleSelectOption(this, false, 'C')">
-              <div class="opt-letter">C</div>
-              <div>O mandado de segurança coletivo pode ser impetrado por qualquer partido político registrado, independentemente de representação no Congresso Nacional.</div>
-            </div>
-
-            <div class="quiz-option" onclick="handleSelectOption(this, false, 'D')">
-              <div class="opt-letter">D</div>
-              <div>A garantia da inviolabilidade do domicílio é absoluta durante o período noturno, vedando o ingresso policial mesmo na hipótese de consentimento do morador.</div>
-            </div>
-          </div>
-
-          <div id="explanation-box" class="explanation-box">
-            <h4 style="color: #34d399; font-weight: 800; font-size: 1.1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-              ✓ Gabarito: Alternativa B (STF • Tema 855)
-            </h4>
-            <p style="color: #e2e8f0; font-size: 0.95rem; line-height: 1.6;">
-              <strong>Fundamentação STF (RE 806.339/SE - Tema 855/STF):</strong> O Plenário do STF fixou a tese de que a exigência constitucional de aviso prévio relativamente ao direito de reunião (art. 5º, XVI, da CF) não é condição para a legitimidade do ato. A ausência de notificação formal não torna ilícita a manifestação, salvo para evitar a realização de reuniões simultâneas e conflitantes no mesmo local e horário.
-            </p>
-            <div style="margin-top: 1.25rem;">
-              <a href="https://athena-mentoria.web.app/" class="btn btn-gold" style="padding: 0.6rem 1.25rem; font-size: 0.82rem;" target="_blank" rel="noopener noreferrer">
-                Resolver Mais Questões no App →
-              </a>
-            </div>
-          </div>
-        </div>
+      <div class="careers">
+        <div class="hud career reveal"><div class="ico">⚖️</div><h3>Magistratura</h3><p>Juiz de Direito Estadual e Juiz Federal.</p></div>
+        <div class="hud career reveal d1"><div class="ico">🏛️</div><h3>Ministério Público</h3><p>Promotor de Justiça (MPE) e Procurador da República (MPF).</p></div>
+        <div class="hud career reveal d2"><div class="ico">🛡️</div><h3>Defensoria Pública</h3><p>Defensor Público Estadual (DPE) e Federal (DPU).</p></div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- CARREIRAS ATENDIDAS -->
-    <section id="trilha" style="padding: 4.5rem 0;">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-tag">Carreiras de Elite</div>
-          <h2 class="section-title font-serif">Preparação para os Concursos Mais Exigentes</h2>
-          <p class="section-desc">A mentoria é calibrada nas matrizes curriculares e no nível de profundidade das carreiras jurídicas de ponta:</p>
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.75rem;">
-          <div class="card" style="text-align: center;">
-            <div style="font-size: 2.4rem; margin-bottom: 0.75rem;">⚖️</div>
-            <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.3rem; margin-bottom: 0.5rem;">Magistratura</h4>
-            <p style="color: var(--text-muted); font-size: 0.95rem;">Juiz de Direito Estadual e Juiz Federal.</p>
-          </div>
-
-          <div class="card" style="text-align: center;">
-            <div style="font-size: 2.4rem; margin-bottom: 0.75rem;">🏛️</div>
-            <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.3rem; margin-bottom: 0.5rem;">Ministério Público</h4>
-            <p style="color: var(--text-muted); font-size: 0.95rem;">Promotor de Justiça (MPE) e Procurador da República (MPF).</p>
-          </div>
-
-          <div class="card" style="text-align: center;">
-            <div style="font-size: 2.4rem; margin-bottom: 0.75rem;">🛡️</div>
-            <h4 class="font-serif" style="color: var(--gold-light); font-size: 1.3rem; margin-bottom: 0.5rem;">Defensoria Pública</h4>
-            <p style="color: var(--text-muted); font-size: 0.95rem;">Defensor Público Estadual (DPE) e Federal (DPU).</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- SEÇÃO 5 — EXPERIMENTE GRATUITAMENTE -->
-    <section id="experimente" class="access-section">
-      <div class="container">
-        <div class="access-card">
-          <div class="access-grid">
-            
-            <div class="showcase-phone-wrap">
-              <picture>
-                <source srcset="images/athena-real/acesso.webp" type="image/webp">
-                <img 
-                  src="images/athena-real/acesso.jpg" 
-                  alt="ATHENA — Tela de login e cadastro gratuito no aplicativo web" 
-                  width="824" 
-                  height="1024" 
-                  loading="lazy" 
-                  decoding="async"
-                >
-              </picture>
-            </div>
-
-            <div>
-              <div class="section-tag">Acesso Imediato • Sem Cartão de Crédito</div>
-              <h2 class="font-serif" style="font-size: clamp(2rem, 3.5vw, 2.75rem); color: #f8fafc; line-height: 1.2; margin-bottom: 1rem;">
-                Conheça o ATHENA gratuitamente.
-              </h2>
-              <p style="font-size: 1.12rem; color: #cbd5e1; line-height: 1.6;">
-                Crie sua conta, explore os <strong>Dias 1 e 2</strong> e descubra uma nova experiência de preparação jurídica de alta performance.
-              </p>
-
-              <ul class="access-perks-list">
-                <li class="access-perk-item">
-                  <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  <span><strong>Acesso total aos Dias 1 e 2</strong> da mentoria diária para conhecer toda a metodologia.</span>
-                </li>
-                <li class="access-perk-item">
-                  <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  <span><strong>6 Blocos pedagógicos completos:</strong> lei seca, jurisprudência do STF/STJ, doutrina e questões.</span>
-                </li>
-                <li class="access-perk-item">
-                  <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  <span><strong>Simulado com correção item a item</strong> e justificativa detalhada de cada assertiva.</span>
-                </li>
-                <li class="access-perk-item">
-                  <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  <span><strong>Cadastro simplificado:</strong> entre com sua conta Google ou e-mail sem precisar de cartão de crédito.</span>
-                </li>
-              </ul>
-
-              <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-                <a href="https://athena-mentoria.web.app/" class="btn btn-gold btn-large" style="width: 100%;" target="_blank" rel="noopener noreferrer">
-                  COMEÇAR AGORA — EXPERIMENTAR GRÁTIS
-                </a>
-                <a href="https://athena-mentoria.web.app/" class="btn btn-outline" style="width: 100%;" target="_blank" rel="noopener noreferrer">
-                  JÁ TENHO CONTA — ENTRAR
-                </a>
-              </div>
-
-              <p style="font-size: 0.84rem; color: #94a3b8; margin-top: 1.25rem; line-height: 1.5; text-align: center;">
-                Experimente gratuitamente os Dias 1 e 2 da mentoria ATHENA. Os Dias 3 a 100 integram a assinatura da mentoria completa.
-              </p>
-            </div>
-
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- FAQ -->
-    <section id="faq" style="padding: 4.5rem 0;">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-tag">Tire Suas Dúvidas</div>
-          <h2 class="section-title font-serif">Perguntas Frequentes</h2>
-        </div>
-
-        <div class="faq-list">
-          <div class="faq-item active">
-            <div class="faq-question" onclick="toggleFaq(this)">
-              <span>Como funciona o período de testes gratuito?</span>
-              <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-            </div>
-            <div class="faq-answer">
-              Você pode experimentar gratuitamente os <strong>Dias 1 e 2</strong> da mentoria ATHENA diretamente no aplicativo web (<a href="https://athena-mentoria.web.app/" target="_blank" rel="noopener noreferrer" style="color: var(--gold-light); font-weight: 600;">athena-mentoria.web.app</a>). Não é necessário cadastrar cartão de crédito para iniciar seus estudos. Os Dias 3 a 100 integram o plano por assinatura da mentoria completa.
-            </div>
-          </div>
-
-          <div class="faq-item">
-            <div class="faq-question" onclick="toggleFaq(this)">
-              <span>A jurisprudência do STF e STJ é realmente atualizada?</span>
-              <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-            </div>
-            <div class="faq-answer">
-              Sim. A ATHENA conta com curadoria jurídica especializada que valida todas as teses de Repercussão Geral, Recursos Repetitivos e Enunciados Sumulares com parâmetros estritos, eliminando números fictícios ou teses superadas.
-            </div>
-          </div>
-
-          <div class="faq-item">
-            <div class="faq-question" onclick="toggleFaq(this)">
-              <span>O aplicativo funciona em celulares e tablets?</span>
-              <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-            </div>
-            <div class="faq-answer">
-              Sim. O ATHENA é uma aplicação web moderna (PWA), desenhada especificamente para funcionar de maneira fluida em qualquer smartphone, tablet ou computador, sem necessidade de downloads pesados. Basta abrir o navegador e estudar.
-            </div>
-          </div>
-
-          <div class="faq-item">
-            <div class="faq-question" onclick="toggleFaq(this)">
-              <span>Como posso solicitar o cancelamento ou a exclusão dos meus dados?</span>
-              <span class="faq-icon" style="transition: transform 0.2s;">▼</span>
-            </div>
-            <div class="faq-answer">
-              Em conformidade com a LGPD e o Código de Defesa do Consumidor, você tem total autonomia para gerenciar seus dados e sua assinatura. Você pode solicitar a exclusão pela página <a href="excluir-conta.html" style="color: var(--gold-light); text-decoration: underline;">Excluir Conta</a> ou enviando e-mail para <a href="mailto:contato@projetoathena.app.br" style="color: var(--gold-light); font-weight: 600;">contato@projetoathena.app.br</a> com o assunto <em>"Cancelamento / Exclusão de Dados"</em>.
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- CTA FINAL PRÉ-RODAPÉ -->
-    <section style="padding: 4.5rem 0; text-align: center; background: radial-gradient(circle at 50% 50%, rgba(212, 175, 55, 0.12) 0%, transparent 70%);">
-      <div class="container">
-        <div class="section-tag" style="margin-bottom: 0.75rem;">Acesso Imediato</div>
-        <h2 class="font-serif" style="font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; margin-bottom: 1.25rem;">
-          Pronto para Elevar o Seu Nível de Estudos?
-        </h2>
-        <p style="color: var(--text-muted); font-size: 1.15rem; max-width: 650px; margin: 0 auto 2.25rem;">
-          Estude em qualquer lugar, na palma da sua mão. Crie sua conta gratuitamente e comece hoje mesmo os Dias 1 e 2 da mentoria ATHENA.
-        </p>
-        <div style="display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap;">
-          <a href="https://athena-mentoria.web.app/" class="btn btn-gold btn-large" target="_blank" rel="noopener noreferrer">
-            EXPERIMENTAR GRATUITAMENTE
-          </a>
-          <a href="https://athena-mentoria.web.app/" class="btn btn-outline btn-large" target="_blank" rel="noopener noreferrer">
-            JÁ TENHO CONTA — ENTRAR
-          </a>
-        </div>
-      </div>
-    </section>
-
-    <!-- FOOTER -->
-    <footer>
-      <div class="footer-grid">
-        <div class="footer-col">
-          <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-            <img src="athena-icon.png" alt="ATHENA" class="header-seal-img" width="40" height="40">
-            <span class="logo-text">ATHENA</span>
-          </div>
-          <p style="font-size: 0.9rem; line-height: 1.6; color: var(--text-muted);">
-            Mentoria jurídica de alta performance potencializada por inteligência artificial para concursos de Magistratura e Ministério Público.
-          </p>
-        </div>
-
-        <div class="footer-col">
-          <h4>Navegação</h4>
-          <ul>
-            <li><a href="#jornada">Jornada 100 Dias</a></li>
-            <li><a href="#recursos">Recursos de Estudo</a></li>
-            <li><a href="#personalizacao">Metodologia</a></li>
-            <li><a href="#simulador">Simulador Interativo</a></li>
-            <li><a href="#faq">Perguntas Frequentes</a></li>
+  <!-- TRIAL -->
+  <section id="experimente">
+    <div class="wrap">
+      <div class="hud trial reveal">
+        <figure class="shot" style="padding:0;max-width:360px">
+          <picture><source srcset="assets/app-acesso.webp" type="image/webp"><img src="assets/app-acesso.jpg" alt="ATHENA — Tela de login e cadastro gratuito no aplicativo web" width="824" height="1024" loading="lazy" decoding="async" style="border-radius:12px;box-shadow:0 0 40px rgba(200,169,81,.25)"></picture>
+        </figure>
+        <div>
+          <span class="tag">Acesso imediato · sem cartão de crédito</span>
+          <h2 style="margin-top:1rem">Conheça a ATHENA <span class="gold-text">gratuitamente.</span></h2>
+          <p class="lead">Crie sua conta, explore os <strong style="color:var(--gold2)">Dias 1 e 2</strong> e descubra uma nova experiência de preparação jurídica de alta performance.</p>
+          <ul class="perks">
+            <li><span><b>Acesso total aos Dias 1 e 2</b> da mentoria diária para conhecer toda a metodologia.</span></li>
+            <li><span><b>6 blocos pedagógicos completos:</b> lei seca, jurisprudência do STF/STJ, doutrina e questões.</span></li>
+            <li><span><b>Simulado com correção item a item</b> e justificativa detalhada de cada assertiva.</span></li>
+            <li><span><b>Cadastro simplificado:</b> entre com sua conta Google ou e-mail sem precisar de cartão de crédito.</span></li>
           </ul>
-        </div>
-
-        <div class="footer-col">
-          <h4>Legal e Segurança</h4>
-          <ul>
-            <li><a href="privacidade.html">Política de Privacidade (LGPD)</a></li>
-            <li><a href="termos.html">Termos de Uso e Serviço</a></li>
-            <li><a href="excluir-conta.html">Excluir Conta e Dados</a></li>
-            <li><a href="mailto:contato@projetoathena.app.br">Contato Institucional</a></li>
-          </ul>
-        </div>
-
-        <div class="footer-col">
-          <h4>Acesso</h4>
-          <ul>
-            <li><a href="https://athena-mentoria.web.app/" target="_blank" rel="noopener noreferrer" style="color: var(--gold-light); font-weight: 600;">Aplicativo Oficial Web ↗</a></li>
-            <li><a href="https://instagram.com/projetoathena.app" target="_blank" rel="noopener noreferrer">Instagram Oficial ↗</a></li>
-            <li><span style="color: var(--text-muted); font-size: 0.88rem;">Dias 1 e 2 Liberados</span></li>
-          </ul>
+          <div class="stack">
+            <a href="https://athena-mentoria.web.app/" class="btn btn-gold" target="_blank" rel="noopener">Começar agora — experimentar grátis</a>
+            <a href="https://athena-mentoria.web.app/" class="btn btn-ghost" target="_blank" rel="noopener">Já tenho conta — Entrar</a>
+          </div>
+          <p class="fine">Experimente gratuitamente os Dias 1 e 2 da mentoria ATHENA. Os Dias 3 a 100 integram a assinatura da mentoria completa.</p>
         </div>
       </div>
+    </div>
+  </section>
 
-      <div class="footer-bottom">
-        <p>&copy; 2026 ATHENA Mentoria Jurídica • Domínio Oficial: <strong>projetoathena.app.br</strong></p>
-        <p style="color: #64748b; font-size: 0.82rem;">
-          Todos os direitos reservados.
-        </p>
+  <!-- FAQ -->
+  <section id="faq">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="tag">Tire suas dúvidas</span>
+        <h2>Perguntas <span class="gold-text">frequentes</span></h2>
       </div>
-    </footer>
-  </main>
+      <div class="faq">
+        <details class="hud reveal" open><summary>Como funciona o período de testes gratuito?</summary><div class="ans">Você pode experimentar gratuitamente os <strong>Dias 1 e 2</strong> da mentoria ATHENA diretamente no aplicativo web (<a href="https://athena-mentoria.web.app/" target="_blank" rel="noopener">athena-mentoria.web.app</a>). Não é necessário cadastrar cartão de crédito para iniciar seus estudos. Os Dias 3 a 100 integram o plano por assinatura da mentoria completa.</div></details>
+        <details class="hud reveal"><summary>A jurisprudência do STF e STJ é realmente atualizada?</summary><div class="ans">Sim. A ATHENA conta com curadoria jurídica especializada que valida todas as teses de Repercussão Geral, Recursos Repetitivos e Enunciados Sumulares com parâmetros estritos, eliminando números fictícios ou teses superadas.</div></details>
+        <details class="hud reveal"><summary>O aplicativo funciona em celulares e tablets?</summary><div class="ans">Sim. A ATHENA é uma aplicação web moderna (PWA), desenhada especificamente para funcionar de maneira fluida em qualquer smartphone, tablet ou computador, sem necessidade de downloads pesados. Basta abrir o navegador e estudar.</div></details>
+        <details class="hud reveal"><summary>A ATHENA garante aprovação?</summary><div class="ans">Não. Nenhuma preparação garante aprovação em concurso público. A ATHENA organiza seus estudos com um plano diário, revisão e jurisprudência, para que o seu esforço tenha direção. O resultado depende da sua dedicação e de cada certame.</div></details>
+        <details class="hud reveal"><summary>Como posso solicitar o cancelamento ou a exclusão dos meus dados?</summary><div class="ans">Em conformidade com a LGPD e o Código de Defesa do Consumidor, você tem total autonomia para gerenciar seus dados e sua assinatura. Você pode solicitar a exclusão pela página <a href="excluir-conta.html">Excluir Conta</a> ou enviando e-mail para <a href="mailto:projetoathena.app@gmail.com">projetoathena.app@gmail.com</a> com o assunto <em>“Cancelamento / Exclusão de Dados”</em>.</div></details>
+      </div>
+    </div>
+  </section>
 
-  <!-- Interactive Scripts -->
-  <script>
-    function toggleSidebar() {
-      const sb = document.getElementById('app-sidebar');
-      const bd = document.getElementById('sidebar-backdrop');
-      if (sb) sb.classList.toggle('open');
-      if (bd) bd.classList.toggle('open');
-    }
-    function closeSidebar() {
-      const sb = document.getElementById('app-sidebar');
-      const bd = document.getElementById('sidebar-backdrop');
-      if (sb) sb.classList.remove('open');
-      if (bd) bd.classList.remove('open');
-    }
-    function handleSelectOption(element, isCorrect, letter) {
-      const options = document.querySelectorAll('.quiz-option');
-      options.forEach(opt => {
-        opt.style.pointerEvents = 'none';
-      });
+  <!-- FINAL CTA -->
+  <section class="final">
+    <div class="wrap reveal">
+      <span class="tag">Acesso imediato</span>
+      <h2>Pronto para elevar o <span class="gold-text">seu nível de estudos?</span></h2>
+      <p>Estude em qualquer lugar, na palma da sua mão. Crie sua conta gratuitamente e comece hoje mesmo os Dias 1 e 2 da mentoria ATHENA.</p>
+      <div class="cta-row">
+        <a href="https://athena-mentoria.web.app/" class="btn btn-gold" target="_blank" rel="noopener">Experimentar gratuitamente</a>
+        <a href="https://athena-mentoria.web.app/" class="btn btn-ghost" target="_blank" rel="noopener">Já tenho conta — Entrar</a>
+      </div>
+    </div>
+  </section>
+</main>
 
-      if (isCorrect) {
-        element.classList.add('correct');
-      } else {
-        element.classList.add('wrong');
-        if (options[1]) options[1].classList.add('correct');
-      }
-
-      const explanation = document.getElementById('explanation-box');
-      if (explanation) explanation.style.display = 'block';
-    }
-
-    function toggleFaq(element) {
-      const parent = element.parentElement;
-      if (parent) parent.classList.toggle('active');
-    }
-  </script>
+<footer>
+  <div class="wrap">
+    <div class="fgrid">
+      <div>
+        <a href="#topo" class="brand"><picture><source srcset="assets/logo-sm.webp" type="image/webp"><img src="assets/logo-sm.png" alt="" width="44" height="44" loading="lazy"></picture><span><b>ATHENA</b><small>Mentoria Jurídica com IA</small></span></a>
+        <p class="about">Mentoria jurídica de alta performance potencializada por inteligência artificial para concursos de Magistratura e Ministério Público.</p>
+      </div>
+      <div>
+        <h4>Navegação</h4>
+        <ul>
+          <li><a href="#jornada">Jornada 100 Dias</a></li>
+          <li><a href="#recursos">Recursos de estudo</a></li>
+          <li><a href="#personalizacao">Metodologia</a></li>
+          <li><a href="#simulador">Simulador interativo</a></li>
+          <li><a href="#faq">Perguntas frequentes</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal e segurança</h4>
+        <ul>
+          <li><a href="privacidade.html">Política de Privacidade (LGPD)</a></li>
+          <li><a href="termos.html">Termos de Uso e Serviço</a></li>
+          <li><a href="excluir-conta.html">Excluir Conta e Dados</a></li>
+          <li><a href="mailto:projetoathena.app@gmail.com">projetoathena.app@gmail.com</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Acesso</h4>
+        <ul>
+          <li><a href="https://athena-mentoria.web.app/" target="_blank" rel="noopener" style="color:var(--gold2);font-weight:600">Aplicativo oficial web ↗</a></li>
+          <li><a href="https://instagram.com/projetoathena.app" target="_blank" rel="noopener" class="insta"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>@projetoathena.app ↗</a></li>
+          <li><a href="#experimente">Dias 1 e 2 liberados</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbottom">
+      <p>© 2026 ATHENA Mentoria Jurídica · Domínio oficial: projetoathena.app.br</p>
+      <p>Todos os direitos reservados.</p>
+    </div>
+  </div>
+</footer>
+<script src="assets/main.js" defer></script>
 </body>
 </html>
