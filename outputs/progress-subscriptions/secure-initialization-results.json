@@ -1,0 +1,30 @@
+{
+  "passed": 5,
+  "results": [
+    {
+      "test": "ausência de auth-public.pem quando MCP exigido",
+      "status": "PASS",
+      "diagnostic": "MCP_INITIALIZATION_FAILED: auth-public.pem missing while MCP publication or approval is required by configuration."
+    },
+    {
+      "test": "ausência de ceo-publication-runtime.mjs quando publicação chat exigida",
+      "status": "PASS",
+      "diagnostic": "MCP_INITIALIZATION_FAILED: ceo-publication-runtime.mjs missing while MCP publication is required."
+    },
+    {
+      "test": "ausência de auth-only-receiver.mjs em modo auth-only",
+      "status": "PASS",
+      "diagnostic": "MCP_INITIALIZATION_FAILED: auth-only-receiver.mjs missing while MCP auth-only mode is required."
+    },
+    {
+      "test": "conflito bloqueando publicação pelo chat silenciada",
+      "status": "PASS",
+      "diagnostic": "MCP_INITIALIZATION_FAILED: conflicting configuration - ATHENA_CATALOG_GENERALIZED is true but ATHENA_MCP_AUTH_ONLY is true, preventing chat publication."
+    },
+    {
+      "test": "modo de desenvolvimento puro sem MCP",
+      "status": "PASS",
+      "diagnostic": "Express base app retornado normalmente sem MCP"
+    }
+  ]
+}

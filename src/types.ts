@@ -52,6 +52,15 @@ export interface Review {
   article: number;
   content: string;
   timestamp: number;
+  day?: number;
+  part?: number;
+}
+
+export interface ReviewCounterEntry {
+  reviewId: string;
+  count: number;
+  lastUpdatedAt: number;
+  lastMutationId?: string;
 }
 
 export interface UserStat {
@@ -60,6 +69,12 @@ export interface UserStat {
   totalQuestions: number;
   progress: number;
   xp: number;
+  uniqueQuestions?: number;
+  totalAttempts?: number;
+  evolution?: {
+    firstAttemptAccuracy?: number;
+    resolvedErrors?: number;
+  };
 }
 
 export interface GamificationData {
@@ -79,14 +94,27 @@ export interface Mentee {
   gamification?: GamificationData;
 }
 
+export interface FailedQuestionAttempt {
+  timestamp: number;
+  selectedOption: number;
+  correct: boolean;
+}
+
 export interface FailedQuestion extends Question {
   id: string;
   userId: string;
   timestamp: number;
   originalArticle?: number;
+  trilhaDay?: number;
+  trilhaMaterialIndex?: number;
+  resolved?: boolean;
+  resolvedAt?: number;
+  attempts?: FailedQuestionAttempt[];
+  studyBaseline?: { version: number; sha256: string };
 }
 
 export interface Message {
+  studyBaseline?: {version:number;sha256:string};
   role: 'user' | 'model';
   content: string;
   challenge?: ChallengeData;
@@ -104,6 +132,9 @@ export interface Message {
   }>;
   sourceType?: 'gemini' | 'offline_pareto';
   modelName?: string;
+  /** Markdown approved manually; preserve its exact wording during publication. */
+  ceoEdited?: boolean;
+  trilhaDay?: number;
   trilhaMaterialIndex?: number;
 }
 
@@ -152,14 +183,33 @@ export interface HomologatedLesson {
   approvedAt: number;
   modelUsed?: string;
   version?: number;
+  review?: string;
+  /** Só no aparelho: o texto novo já está no cofre, mas o catálogo oficial ainda não. */
+  pendingCloud?: boolean;
 }
 
 export interface RegisteredStudent {
   uid: string;
   fullName: string;
-  cpf: string;
   email: string;
-  accessCode: string;
   createdAt: number;
-  trialExpiresAt: number;
 }
+
+export type HighlightColor = 'yellow' | 'red' | 'green' | 'pink' | 'blue';
+
+export interface PersonalHighlight {
+  id: string;
+  uid: string;
+  lessonId: string;
+  blockIndex: number;
+  selectedText: string;
+  prefix: string;
+  suffix: string;
+  color: HighlightColor;
+  lessonVersion?: number;
+  lessonSha256?: string;
+  createdAt: number;
+  updatedAt: number;
+  status: 'active' | 'pending_match';
+}
+

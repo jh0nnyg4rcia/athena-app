@@ -1,0 +1,126 @@
+{
+  "meta": {
+    "schema_version": "1.0.0",
+    "editorial_id": "ATHENA-BOL-2026-10-14-CONST-01",
+    "data_boletim": "2026-10-14",
+    "disciplina": "Direito Constitucional",
+    "carreiras": "Magistratura & MP",
+    "tema": "Inviolabilidade de Domicílio e Flagrante Delito Noturno",
+    "origem": {
+      "sistema": "Boletim Jurídico Diário 7h",
+      "gerador": "ChatGPT",
+      "curadoria": "Administrador ATHENA"
+    },
+    "estado_editorial": "LEGAL_APPROVED",
+    "fontes_oficiais_verificadas": [
+      {
+        "tipo": "constituicao",
+        "referencia": "Art. 5º, XI da Constituição Federal de 1988",
+        "link_oficial": "https://www.planalto.gov.br/ccivil_03/constituicao/constituicao.htm",
+        "auditado": true
+      },
+      {
+        "tipo": "tema_repercussao_geral",
+        "referencia": "STF - Tema 280 da Repercussão Geral (RE 603.616)",
+        "link_oficial": "https://portal.stf.jus.br/jurisprudencia/repercussao/tema.asp?num=280",
+        "auditado": true
+      }
+    ],
+    "pontos_pendentes": []
+  },
+  "slides": [
+    {
+      "numero": 1,
+      "tipo": "capa",
+      "titulo": "Capa do Carrossel ATHENA",
+      "pergunta_provocativa": "A polícia pode ingressar em domicílio à noite sem mandado?",
+      "titulo_principal": "Inviolabilidade de Domicílio e o Critério Vinculante do Tema 280/STF",
+      "destaque_titulo": "Tema 280/STF",
+      "cta_deslize": "Deslize para aprender"
+    },
+    {
+      "numero": 2,
+      "tipo": "lei_seca",
+      "tag": "Dispositivo Constitucional",
+      "titulo": "A Regra Geral do Art. 5º, XI da CF/88",
+      "dispositivo_legal": "Art. 5º, XI da CF/88",
+      "citacao": "A casa é asilo inviolável do indivíduo, ninguém nela podendo penetrar sem consentimento do morador, salvo em caso de flagrante delito ou desastre, ou para prestar socorro, ou, durante o dia, por determinação judicial.",
+      "explicacao": "A inviolabilidade domiciliar é garantia fundamental de primeira dimensão. Durante a noite, a única exceção investigatória para ingresso coercitivo sem autorização é a ocorrência de <strong>flagrante delito</strong> comprovável.",
+      "regra_chave": "Sem mandado judicial, a autoridade não pode entrar à noite por mera suspeita subjetiva, denúncia anônima isolada ou intuição policial."
+    },
+    {
+      "numero": 3,
+      "tipo": "jurisprudencia",
+      "tag": "Precedente Vinculante",
+      "titulo": "Tema 280/STF (RE 603.616)",
+      "tribunal": "STF",
+      "paradigma": "Tema 280 (RE 603.616)",
+      "tese": "A entrada forçada em domicílio sem mandado judicial só é lícita, mesmo em período noturno, quando amparada em fundadas razões, devidamente justificadas a posteriori, que indiquem que dentro da casa ocorre situação de flagrante delito.",
+      "consequencia_pratica": "A justa causa (fundadas razões) deve existir <strong>antes</strong> do ingresso. O encontro fortuito de drogas após a invasão ilegal não convalida a nulidade probatória (teoria dos frutos da árvore envenenada)."
+    },
+    {
+      "numero": 4,
+      "tipo": "excecao_pegadinha",
+      "tag": "Alerta de Concurso",
+      "titulo": "A Pegadinha Clássica do Crime Permanente",
+      "excecao": "O tráfico de drogas é crime permanente (o estado de flagrância se protrai no tempo). Contudo, a permanência por si só NÃO dispensa as fundadas razões prévias.",
+      "distincao": "Bancas adoram afirmar que 'por se tratar de crime permanente, a polícia tem salvo-conduto irrestrito para entrar'. <strong>FALSO!</strong>",
+      "regra_chave": "Exigem-se elementos concretos prévios (ex.: campana prévia, monitoramento com movimentação típica, apreensão anterior de comprador saindo do imóvel)."
+    },
+    {
+      "numero": 5,
+      "tipo": "questao",
+      "tag": "Desafio de Fixação",
+      "origem_questao": "autoral",
+      "banca_ou_orgao": "ATHENA Simulado Inédito",
+      "titulo": "Simulado ATHENA • Magistratura & MP",
+      "enunciado": "Com base na jurisprudência vinculante do STF sobre inviolabilidade domiciliar, assinale a opção CORRETA:",
+      "alternativas": [
+        {
+          "letra": "A",
+          "texto": "A inviolabilidade domiciliar é absoluta durante o período noturno, vedando qualquer ingresso forçado."
+        },
+        {
+          "letra": "B",
+          "texto": "A entrada forçada sem mandado só é lícita quando amparada em fundadas razões justificadas a posteriori."
+        },
+        {
+          "letra": "C",
+          "texto": "A apreensão superveniente de ilícitos convalida a entrada forçada lastreada em denúncia anônima genérica."
+        },
+        {
+          "letra": "D",
+          "texto": "O consentimento do morador para busca domiciliar dispensa registro em áudio e vídeo pelas autoridades."
+        }
+      ],
+      "aviso_gabarito": "Pense na tese fixada pelo Tema 280. Deslize para ver o gabarito fundamentado →"
+    },
+    {
+      "numero": 6,
+      "tipo": "gabarito",
+      "tag": "Gabarito Comentado ATHENA",
+      "alternativa_correta": "B",
+      "titulo": "GABARITO: ALTERNATIVA B",
+      "fundamentacao": "A alternativa B reproduz com fidelidade a tese vinculante do STF no Tema 280 (RE 603.616).",
+      "analise_erros": [
+        "A está incorreta: admite ingresso noturno em flagrante delito, desastre ou socorro.",
+        "C está incorreta: a ilicitude prévia contamina todas as provas derivadas (Art. 157, § 1º, CPP).",
+        "D está incorreta: o STJ (HC 598.051/SP) exige declaração assinada ou registro audiovisual do consentimento."
+      ],
+      "referencia_normativa": "Tema 280/STF c/c Art. 5º, XI, CF/88"
+    },
+    {
+      "numero": 7,
+      "tipo": "revisao",
+      "tag": "Síntese Estratégica",
+      "titulo": "Revisão ATHENA em 3 Pontos",
+      "pontos_chave": [
+        "Fundadas razões prévias obrigatórias: a suspeita deve estar demonstrada antes de cruzar o portão.",
+        "Justificação a posteriori formal: os policiais devem formalizar por escrito os motivos da urgência.",
+        "Frutos da árvore envenenada: achar drogas depois não salva invasão ilícita."
+      ],
+      "cta": "Salve este carrossel para revisar na véspera da sua prova.",
+      "rodape_institucional": "ATHENA • Mentoria Jurídica de Elite com Inteligência Artificial"
+    }
+  ]
+}

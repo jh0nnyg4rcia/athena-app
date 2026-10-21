@@ -1,0 +1,11 @@
+import fs from'node:fs';import assert from'node:assert/strict';import {createRequire}from'node:module';
+const require=createRequire(new URL('../../athena-integration/package.json',import.meta.url)),{transformSync}=require('esbuild'),{code}=transformSync(fs.readFileSync('work/athena-progress-subscriptions/src/lib/studyBaseline.ts','utf8'),{loader:'ts',format:'esm'});
+const {assertStudyBaseline,hashStudyContent}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
+const sha=await hashStudyContent('Synthetic literal\r\ncontent'),current={lessonVersion:1,lessonSha256:sha},results=[];
+assert.doesNotThrow(()=>assertStudyBaseline(current,{version:1,sha256:sha}));results.push('exact displayed baseline accepted');
+assert.throws(()=>assertStudyBaseline(current));results.push('legacy displayed message without binding cannot finalize');
+assert.throws(()=>assertStudyBaseline(current,{version:2,sha256:sha}));results.push('stale displayed version rejected');
+assert.throws(()=>assertStudyBaseline(current,{version:1,sha256:'0'.repeat(64)}));results.push('different displayed content rejected');
+assert.notEqual(sha,await hashStudyContent('Synthetic literal\ncontent'));results.push('line breaks are hashed literally');
+assert.throws(()=>assertStudyBaseline(current,{version:1,sha256:'invalid'}));results.push('malformed displayed binding rejected');
+fs.writeFileSync('outputs/progress-subscriptions/baseline-tests.json',JSON.stringify({passed:results.length,results,realCalls:0},null,2));console.log(JSON.stringify({passed:results.length,results}));

@@ -14,6 +14,7 @@ coverage/
 !.env*.example
 *.key
 *.pem
+!functions/src/mcp-assets/auth-public.pem
 *.p12
 *.pfx
 *.crt
@@ -40,8 +41,14 @@ android/captures/
 *.keystore
 docs/download/*.apk
 
+# iOS Capacitor artifacts and pods
+ios/App/Pods/
+ios/App/Podfile.lock
+ios/App/App/public/
+ios/App/.build/
+ios/DerivedData/
+
 # Firebase / Google client files (inject via CI or local copy)
-**/google-services.json
 **/GoogleService-Info.plist
 
 # Firebase Cloud Functions build output
@@ -52,3 +59,12 @@ functions/node_modules/
 .vscode/
 .idea/
 .firebase/
+outputs/backups/
+
+# Pastas locais e credenciais que nunca devem ir para o git
+tmp/
+scratch/
+backup-*/
+*adminsdk*.json
+gen-lang-client-*.json
+android/key.properties

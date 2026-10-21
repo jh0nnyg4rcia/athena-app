@@ -1,0 +1,28 @@
+{
+  "passed": 20,
+  "results": [
+    "emulator canonical fixture setup",
+    "student direct lesson read denied",
+    "anonymous visitor lesson read denied",
+    "student full catalog listing denied",
+    "student homologated_parts read denied",
+    "CEO email alone cannot bypass source authorization",
+    "server-only CEO authorization fixture setup",
+    "server-authorized Google CEO retains canonical read",
+    "student cannot write a paid entitlement",
+    "student cannot create CEO grant",
+    "student cannot self-assign verified progress",
+    "legacy manual completion writer denied",
+    "legacy session fixture setup",
+    "old client cannot redownload protected session body directly",
+    "anonymous cannot read student session",
+    "tester_invites private and denied to student",
+    "tester_access private and cannot be self-assigned",
+    "legal_reviews explicitly denied to read",
+    "arbitrary unmapped collection default denied",
+    "student cannot alter lesson version"
+  ],
+  "emulatorOnly": true,
+  "activeRulesNotChanged": true,
+  "verifiedAt": "2026-10-17T03:28:59.795Z"
+}

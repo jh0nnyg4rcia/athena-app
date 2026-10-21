@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "records": {
+    "ATHENA-BOL-2026-10-14-CONST-01": {
+      "editorial_id": "ATHENA-BOL-2026-10-14-CONST-01",
+      "data_boletim": "2026-10-14",
+      "content_sha256": "74a8eaf80f16b45461e4c951e90312d4c736c7a31df26546718e404fb1962f07",
+      "aprovado_por": "Jhonny Garcia (Auditoria de Carrossel ATHENA)",
+      "data_aprovacao": "2026-10-13T15:22:42.215Z",
+      "confirmacao_explicita": true,
+      "schema_version": "1.0.0",
+      "observacoes": "Auditoria jurídica e conformidade pedagógica confirmadas."
+    }
+  }
+}

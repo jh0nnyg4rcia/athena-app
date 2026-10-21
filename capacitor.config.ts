@@ -12,9 +12,10 @@ const config: CapacitorConfig = {
   },
   plugins: {
     FirebaseAuthentication: {
-      skipNativeAuth: false,
+      // true: o plugin devolve o idToken do Google para o Firebase JS SDK (WebView Capacitor).
+      skipNativeAuth: true,
       providers: ['google.com'],
-      authDomain: 'athena-mentoria.firebaseapp.com'
+      authDomain: 'gen-lang-client-0822763072.firebaseapp.com'
     }
   }
 };

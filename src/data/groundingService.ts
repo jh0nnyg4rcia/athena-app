@@ -5,9 +5,11 @@
  * ao gerador de lições da Trilha Jurídica dos 100 Dias.
  */
 
-import { LITERAL_ARTICLES } from "./literalLegislation";
+import { LITERAL_ARTICLES, LegalArticle } from "./literalLegislation";
 import { DOCTRINAL_REPOSITORY, DoctrinalModule } from "./doctrinalRepository";
 import { TRILHA_JURIDICA_DATA } from "./trilhaData";
+import { normativeOverridePrompt } from "./trilhaNormativeOverrides";
+import { containsDiploma, diplomaConfinementPrompt, formatDiploma, namedStatuteDigits } from "../lib/statuteMatch";
 
 export interface TrilhaGroundingResult {
   hasGrounding: boolean;
@@ -153,11 +155,107 @@ function findDoctrinalContext(subject: string, content: string): DoctrinalModule
 /**
  * Retorna o bloco de Grounding Soberano completo para uma parte da Trilha
  */
+function namedResolutionNumber(subject: string): string | null {
+  const folded = normalizeStr(subject);
+  const match = folded.match(/resolucao\s+(\d{2,4})/);
+  return match ? match[1] : null;
+}
+
+function sourceMatchesNamedResolution(subject: string, source: string): boolean {
+  if (!normalizeStr(subject).includes('conama')) return true;
+  const number = namedResolutionNumber(subject);
+  if (!number) return true;
+  return normalizeStr(source).includes(number);
+}
+
+function diplomaNumbersIn(text: string): Set<string> {
+  const compact = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/(\d)\.(\d{3})(?!\d)/g, "$1$2");
+  return new Set(
+    [...compact.matchAll(/(?<!\d)(\d{3,6})(?!\d)/g)]
+      .map((match) => match[1])
+      .filter((digits) => !/^(19|20)\d{2}$/.test(digits))
+  );
+}
+
+function excerptForNamedDiploma(item: LegalArticle, digits: string): string {
+  const numbers = diplomaNumbersIn(item.statute);
+  if (numbers.size <= 1) return item.literalText.trim();
+  return item.literalText
+    .split("\n")
+    .filter((line) => containsDiploma(line, digits))
+    .join("\n")
+    .trim();
+}
+
+function groundingForNamedDiploma(
+  subject: string,
+  content: string,
+  digits: string
+): TrilhaGroundingResult {
+  const confine = diplomaConfinementPrompt(subject, content);
+  const literalParts: string[] = [];
+
+  for (const item of LITERAL_ARTICLES) {
+    if (!containsDiploma(`${item.statute} ${item.article}`, digits)) continue;
+    const excerpt = excerptForNamedDiploma(item, digits);
+    if (!excerpt) continue;
+    literalParts.push(`### 📜 Lei nº ${formatDiploma(digits)}\n${excerpt}`);
+    if (literalParts.length >= 2) break;
+  }
+
+  const doctrine = DOCTRINAL_REPOSITORY.find((mod) => containsDiploma(mod.title, digits)) || null;
+  if (literalParts.length === 0 && !doctrine) {
+    return {
+      hasGrounding: true,
+      statuteText: "",
+      doctrinalCore: "",
+      formattedGroundingPrompt: confine
+    };
+  }
+
+  const sections: string[] = [];
+  if (literalParts.length > 0) {
+    sections.push(`### ⚖️ LEGISLAÇÃO DE REGÊNCIA (SOMENTE O DIPLOMA PROGRAMADO):\n${literalParts.join("\n\n---\n\n")}`);
+  }
+  if (doctrine) {
+    sections.push(`### 📚 DOUTRINA DE REFERÊNCIA (${doctrine.title}):\n${doctrine.coreDoctrine}`);
+  }
+
+  const prompt = `\n[FONTES MINERADAS DE REFERÊNCIA OFICIAL - GROUNDING SOBERANO]:\n${sections.join("\n\n---\n\n")}\n${confine}\n\nDIRETRIZES DE USO DO GROUNDING:\n- O diploma nomeado no recorte prevalece sobre qualquer outro número que apareça no mesmo arquivo.\n- Não complete a aula com os arts. 337-E a 337-P do Código Penal nem com a Lei nº 14.133/2021, salvo se o recorte desta parte for expressamente esse tema.\n- Decodifique com palavras analíticas. Não invente número de processo nem de súmula.`;
+
+  return {
+    hasGrounding: true,
+    statuteText: literalParts.join("\n\n"),
+    doctrinalCore: doctrine?.coreDoctrine || "",
+    formattedGroundingPrompt: prompt
+  };
+}
+
 export function getGroundingForTrilhaPart(
   dayNum: number,
   subject: string,
   content: string
 ): TrilhaGroundingResult {
+  const lock = normativeOverridePrompt(subject, content);
+  if (lock) {
+    const prompt = `\n${lock}\nDIRETRIZES DESTA TRAVA:\n- Esta trava prevalece sobre qualquer texto recuperado por semelhança de palavras (em especial Resolução do CNJ).\n- Os seis blocos, as questões e a revisão comprimida esgotam-se neste diploma.\n- Cada tópico, instituto, prazo, competência, exceção e ponto principal abre em **negrito**.\n- Não invente número de processo nem de súmula.`;
+    return {
+      hasGrounding: true,
+      statuteText: lock,
+      doctrinalCore: lock,
+      formattedGroundingPrompt: prompt
+    };
+  }
+
+  const diploma = namedStatuteDigits(subject) || namedStatuteDigits(content);
+  if (diploma) {
+    return groundingForNamedDiploma(subject, content, diploma);
+  }
+
   // 1. Tentar fonte direta do dia se existir
   const directSource = extractFromDayFullSource(dayNum, subject);
   if (directSource && directSource.length > 100) {
@@ -175,7 +273,7 @@ export function getGroundingForTrilhaPart(
   const literal = findLiteralArticles(subject, content);
   const doctrine = findDoctrinalContext(subject, content);
 
-  if (!literal && !doctrine) {
+  if ((!literal && !doctrine) || !sourceMatchesNamedResolution(subject, `${literal}\n${doctrine?.coreDoctrine || ''}\n${doctrine?.title || ''}`)) {
     return {
       hasGrounding: false,
       statuteText: "",
@@ -203,7 +301,7 @@ export function getGroundingForTrilhaPart(
   }
 
   const fullText = sections.join("\n\n---\n\n");
-  const prompt = `\n[FONTES MINERADAS DE REFERÊNCIA OFICIAL - GROUNDING SOBERANO]:\n${fullText}\n\nDIRETRIZES DE USO DO GROUNDING:\n- Utilize os artigos de regência e a dogmática acima como fundamento soberano para os 6 blocos pedagógicos.\n- Decodifique e esquematize com suas próprias palavras analíticas para evitar qualquer filtro de recitação literal de apostilas comerciais.\n- As questões do [BLOCK_5] e os precedentes do [BLOCK_3] devem ser 100% ancorados neste recorte delimitado.\n- BLINDAGEM ANTI-ALUCINAÇÃO NUMÉRICA: É expressamente proibido inventar números de processos judiciais (REsp, RE, HC). Apresente cada precedente pelo Tribunal, Colegiado e Ratio Decidendi vinculada ao artigo estudado. Só mencione o número de súmula se for notória e incontroversa ou constar nesta base minerada; caso contrário, enuncie o conteúdo sem arriscar números.`;
+  const prompt = `\n[FONTES MINERADAS DE REFERÊNCIA OFICIAL - GROUNDING SOBERANO]:\n${fullText}\n\nDIRETRIZES DE USO DO GROUNDING:\n- Utilize os artigos de regência e a dogmática acima como fundamento soberano para as 6 partes pedagógicas.\n- Decodifique e esquematize com suas próprias palavras analíticas para evitar qualquer filtro de recitação literal de apostilas comerciais.\n- As questões do [BLOCK_5] e os precedentes do [BLOCK_3] devem ser 100% ancorados neste recorte delimitado.\n- BLINDAGEM ANTI-ALUCINAÇÃO NUMÉRICA: É expressamente proibido inventar números de processos judiciais (REsp, RE, HC). Apresente cada precedente pelo Tribunal, Colegiado e Ratio Decidendi vinculada ao artigo estudado. Só mencione o número de súmula se for notória e incontroversa ou constar nesta base minerada; caso contrário, enuncie o conteúdo sem arriscar números.`;
 
   return {
     hasGrounding: true,

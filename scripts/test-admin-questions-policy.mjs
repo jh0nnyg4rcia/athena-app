@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {checkConstitutionalScope,confirmationText,createAdminOperations} from './admin-reviewed-questions-core.mjs';
+import {requireAdminMode,ADMIN_PRODUCTION_ENABLED,createAdminAdapter} from './admin-question-adapter.mjs';
+const fixture=()=>({lessonId:'day_1_part_0',questions:Array.from({length:10},(_,index)=>({index,original:{text:'synthetic',correctIndex:0},revised:{text:'synthetic',correctIndex:0},approvedChanges:({1:['explanation'],3:['options[1]','explanation'],4:['explanation'],5:['explanation'],6:['text','explanation'],8:['explanation']}[index]??[]).map(field=>({field}))}))});
+test('política Constitucional aceita exclusivamente os oito campos aprovados',()=>assert.doesNotThrow(()=>checkConstitutionalScope(fixture())));
+for(const kind of ['gabarito','preservada','campo','quantidade'])test(`política Constitucional rejeita ${kind}`,()=>{const f=fixture();if(kind==='gabarito')f.questions[1].revised.correctIndex=1;if(kind==='preservada')f.questions[0].revised.text='alterada';if(kind==='campo')f.questions[3].approvedChanges[0].field='options[0]';if(kind==='quantidade')f.questions.pop();assert.throws(()=>checkConstitutionalScope(f));});
+test('produção bloqueia antes de acessar SDK ou credenciais',()=>{assert.equal(ADMIN_PRODUCTION_ENABLED,false);const fake=new Proxy({},{get(){throw Error('SDK não deve ser acessado');}});assert.throws(()=>createAdminAdapter(fake,'day_1_part_0','production'),/Produção bloqueada/);assert.throws(()=>requireAdminMode('production'));});
+test('adaptador externo não pode declarar autorização sintética',()=>assert.throws(()=>createAdminOperations({adapter:{mode:'emulator'},authenticate:async()=>({authorized:true}),confirm:async()=>''}),/não reconhecido/));
+test('confirmação inclui operação, aula e hash exatos',()=>{assert.equal(confirmationText('publish','day_1_part_0','abc'),'PUBLICAR day_1_part_0 abc');assert.equal(confirmationText('restore','day_1_part_0','def'),'RESTAURAR day_1_part_0 def');});

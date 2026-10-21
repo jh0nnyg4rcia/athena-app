@@ -1,0 +1,1592 @@
+[
+  {
+    "h2Id": "H2-021",
+    "candidateId": "H21C-00340",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_153",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "O incidente da insanidade mental processar-se-á em auto apartado, que só depois da apresentação do laudo, será apenso ao processo principal.",
+    "officialSourceExcerpt": "O incidente da insanidade mental processar-se-á em auto apartado, que só depois da apresentação do laudo, será apenso ao processo principal.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-153",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-153-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "O incidente da insanidade mental processar-se-á em auto apartado, que só depois da apresentação do laudo, será apenso ao processo principal."
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "O incidente de insanidade mental deve ser processado em autos apartados.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o incidente de insanidade mental",
+        "predicate": "processar-se em autos apartados",
+        "qualifiers": [
+          {
+            "qualifierType": "PROCEDURAL_STAGE",
+            "text": "em auto apartado",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-153-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural command in Art. 153 caput first clause."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O processamento do incidente de insanidade mental far-se-á em autos apartados.",
+            "acceptableEquivalenceReason": "Equivalent procedural statement."
+          }
+        ]
+      },
+      {
+        "claimId": "C02",
+        "claimText": "Os autos apartados do incidente de insanidade mental só devem ser apensados ao processo principal após a apresentação do laudo pericial.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "os autos apartados do incidente de insanidade mental",
+        "predicate": "ser apensos ao processo principal só depois da apresentação do laudo",
+        "qualifiers": [
+          {
+            "qualifierType": "TEMPORAL",
+            "text": "só depois da apresentação do laudo",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "ao processo principal",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-153-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural command in Art. 153 caput second clause."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O apenso do auto apartado ao processo principal fica condicionado à prévia apresentação do laudo.",
+            "acceptableEquivalenceReason": "Equivalent procedural sequence representation."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Procedimento das demais fases periciais (CPP, Arts. 149 a 152)",
+        "rationale": "Provisions on medical examination, suspension of proceedings, and appointment of curator reside in preceding articles and are unasserted in Art. 153.",
+        "statutoryOrigin": "CPP_ARTS_149_A_152"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-022",
+    "candidateId": "H21C-00442",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_195",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Se o interrogado não souber escrever, não puder ou não quiser assinar, tal fato será consignado no termo.",
+    "officialSourceExcerpt": "Se o interrogado não souber escrever, não puder ou não quiser assinar, tal fato será consignado no termo.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-195",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-195-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "Se o interrogado não souber escrever, não puder ou não quiser assinar, tal fato será consignado no termo."
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "Se o interrogado não souber escrever, não puder ou não quiser assinar, tal fato deve ser consignado no termo do interrogatório.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o fato de o interrogado não saber escrever, não poder ou não querer assinar",
+        "predicate": "ser consignado no termo",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "se o interrogado não souber escrever, não puder ou não quiser assinar",
+            "essential": true
+          },
+          {
+            "qualifierType": "PROCEDURAL_STAGE",
+            "text": "no termo",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-195-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural recording duty in Art. 195 caput."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "A impossibilidade, recusa ou incapacidade de assinar do interrogado constará obrigatoriamente do respectivo termo.",
+            "acceptableEquivalenceReason": "Equivalent dogmatic formulation."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Assinatura do termo por testemunhas de leitura (CPP, Art. 195 parte histórica / regras gerais de termos)",
+        "rationale": "The requirement of reading or witness signatures when interrogation terms cannot be signed resides elsewhere; Art. 195 caput focuses strictly on consigning the fact in the term.",
+        "statutoryOrigin": "CPP_ART_195"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-023",
+    "candidateId": "H21C-00563",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_271",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Ao assistente será permitido propor meios de prova, requerer perguntas às testemunhas, aditar o libelo e os articulados, participar do debate oral e arrazoar os recursos interpostos pelo Ministério Público, ou por ele próprio, nos casos dos arts. 584, § 1º, e 598.",
+    "officialSourceExcerpt": "Ao assistente será permitido propor meios de prova, requerer perguntas às testemunhas, aditar o libelo e os articulados, participar do debate oral e arrazoar os recursos interpostos pelo Ministério Público, ou por ele próprio, nos casos dos arts. 584, § 1º, e 598.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-271",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-271-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "Ao assistente será permitido propor meios de prova, requerer perguntas às testemunhas, aditar o libelo e os articulados, participar do debate oral e arrazoar os recursos interpostos pelo Ministério Público, ou por ele próprio, nos casos dos arts. 584, § 1º, e 598."
+        },
+        {
+          "nodeId": "CPP-ART-584-PAR-1",
+          "nodeType": "PARAGRAPH",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "PARAGRAPH"
+          ],
+          "isAutonomous": false,
+          "text": "Ao recurso interposto de sentença de impronúncia ou no caso do no VIII do art. 581, aplicar-se-á o disposto nos arts. 583, 589, parágrafo único, e 590 a 592."
+        },
+        {
+          "nodeId": "CPP-ART-598",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false,
+          "text": "Nos crimes de competência do Tribunal do Júri, ou do juiz singular, se da sentença não for interposta apelação pelo Ministério Público no prazo legal, o ofendido ou qualquer das pessoas mencionadas no art. 31, ainda que não se tenha habilitado como assistente, poderá interpor apelação, que não terá, porém, efeito suspensivo."
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "É permitido ao assistente da acusação propor meios de prova.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "PERMISSION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o assistente da acusação",
+        "predicate": "propor meios de prova",
+        "qualifiers": [
+          {
+            "qualifierType": "ACTOR_SCOPE",
+            "text": "ao assistente",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "meios de prova",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-271-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural entitlement of the assistant in Art. 271 caput."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O assistente pode propor meios probatórios no curso da ação penal.",
+            "acceptableEquivalenceReason": "Equivalent procedural permission statement."
+          }
+        ]
+      },
+      {
+        "claimId": "C02",
+        "claimText": "É permitido ao assistente da acusação requerer perguntas às testemunhas.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "PERMISSION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o assistente da acusação",
+        "predicate": "requerer perguntas às testemunhas",
+        "qualifiers": [
+          {
+            "qualifierType": "ACTOR_SCOPE",
+            "text": "ao assistente",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "perguntas às testemunhas",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-271-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural entitlement to question witnesses in Art. 271 caput."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O assistente tem a faculdade de formular perguntas às testemunhas.",
+            "acceptableEquivalenceReason": "Equivalent dogmatic formulation."
+          }
+        ]
+      },
+      {
+        "claimId": "C03",
+        "claimText": "É permitido ao assistente da acusação aditar o libelo e os articulados.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "PERMISSION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o assistente da acusação",
+        "predicate": "aditar o libelo e os articulados",
+        "qualifiers": [
+          {
+            "qualifierType": "ACTOR_SCOPE",
+            "text": "ao assistente",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "o libelo e os articulados",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-271-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural entitlement in Art. 271 caput."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O assistente pode promover aditamento ao libelo e às peças articuladas.",
+            "acceptableEquivalenceReason": "Equivalent statement."
+          }
+        ]
+      },
+      {
+        "claimId": "C04",
+        "claimText": "É permitido ao assistente da acusação participar do debate oral.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "PERMISSION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o assistente da acusação",
+        "predicate": "participar do debate oral",
+        "qualifiers": [
+          {
+            "qualifierType": "ACTOR_SCOPE",
+            "text": "ao assistente",
+            "essential": true
+          },
+          {
+            "qualifierType": "PROCEDURAL_STAGE",
+            "text": "no debate oral",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-271-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural permission in Art. 271 caput."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O assistente tem direito de manifestação nos debates orais.",
+            "acceptableEquivalenceReason": "Equivalent procedural statement."
+          }
+        ]
+      },
+      {
+        "claimId": "C05",
+        "claimText": "É permitido ao assistente da acusação arrazoar os recursos interpostos pelo Ministério Público, ou por ele próprio nos casos dos arts. 584, § 1º, e 598.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "PERMISSION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o assistente da acusação",
+        "predicate": "arrazoar os recursos interpostos pelo Ministério Público ou por ele próprio nos casos dos arts. 584, § 1º, e 598",
+        "qualifiers": [
+          {
+            "qualifierType": "ACTOR_SCOPE",
+            "text": "ao assistente",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "recursos interpostos pelo Ministério Público ou por ele próprio nos casos dos arts. 584, § 1º, e 598",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-271-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [
+            {
+              "nodeId": "CPP-ART-584-PAR-1",
+              "path": [
+                "CPP",
+                "ARTICLE",
+                "PARAGRAPH"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            },
+            {
+              "nodeId": "CPP-ART-598",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            }
+          ],
+          "confidence": "DIRECT",
+          "rationale": "Operative appellate prerogative in Art. 271 caput; Arts. 584, § 1º, and 598 cited as CROSS_REFERENCE supporting targets defining statutory scope."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O assistente pode oferecer razões aos recursos ministeriais e aos recursos por ele próprio interpostos nas hipóteses legais especificadas.",
+            "acceptableEquivalenceReason": "Equivalent representation of appellate assistance."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Ordem e tempo dos debates no júri (CPP, Art. 477)",
+        "rationale": "Regulation of debate time and sequence between prosecutor and assistant resides in specific jury provisions and is unasserted in Art. 271.",
+        "statutoryOrigin": "CPP_ART_477"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-024",
+    "candidateId": "H21C-00685",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_321",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Ausentes os requisitos que autorizam a decretação da prisão preventiva, o juiz deverá conceder liberdade provisória, impondo, se for o caso, as medidas cautelares previstas no art. 319 deste Código e observados os critérios constantes do art. 282 deste Código.",
+    "officialSourceExcerpt": "Ausentes os requisitos que autorizam a decretação da prisão preventiva, o juiz deverá conceder liberdade provisória, impondo, se for o caso, as medidas cautelares previstas no art. 319 deste Código e observados os critérios constantes do art. 282 deste Código.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-321",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-321-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "Ausentes os requisitos que autorizam a decretação da prisão preventiva, o juiz deverá conceder liberdade provisória, impondo, se for o caso, as medidas cautelares previstas no art. 319 deste Código e observados os critérios constantes do art. 282 deste Código."
+        },
+        {
+          "nodeId": "CPP-ART-319",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false,
+          "text": "São medidas cautelares diversas da prisão:"
+        },
+        {
+          "nodeId": "CPP-ART-282",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false,
+          "text": "As medidas cautelares previstas neste Título deverão ser aplicadas observando-se a:"
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "Ausentes os requisitos que autorizam a decretação da prisão preventiva, o juiz deve conceder liberdade provisória.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o juiz",
+        "predicate": "conceder liberdade provisória",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "ausentes os requisitos que autorizam a decretação da prisão preventiva",
+            "essential": true
+          },
+          {
+            "qualifierType": "ACTOR_SCOPE",
+            "text": "o juiz",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-321-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous obligation of the judge to grant provisional liberty when preventive detention requirements are absent."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O juiz tem o dever de conceder liberdade provisória na ausência dos requisitos da prisão preventiva.",
+            "acceptableEquivalenceReason": "Equivalent dogmatic representation of mandatory provisional release."
+          }
+        ]
+      },
+      {
+        "claimId": "C02",
+        "claimText": "Ao conceder a liberdade provisória por ausência dos requisitos da prisão preventiva, o juiz pode impor as medidas cautelares previstas no art. 319, observados os critérios do art. 282.",
+        "normativeFunction": "COMPETENCE_RULE",
+        "modality": "DISCRETION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o juiz",
+        "predicate": "impor as medidas cautelares previstas no art. 319, observados os critérios do art. 282",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "ausentes os requisitos que autorizam a decretação da prisão preventiva",
+            "essential": true
+          },
+          {
+            "qualifierType": "CONDITION",
+            "text": "se for o caso",
+            "essential": true
+          },
+          {
+            "qualifierType": "DEPENDENCY",
+            "text": "observados os critérios constantes do art. 282 deste Código",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-321-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [
+            {
+              "nodeId": "CPP-ART-319",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            },
+            {
+              "nodeId": "CPP-ART-282",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            }
+          ],
+          "confidence": "DIRECT",
+          "rationale": "Discretionary competence to impose alternative cautelar measures; Arts. 319 and 282 are referenced as CROSS_REFERENCE supporting targets."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Na concessão de liberdade provisória, cabe ao juiz cumular, se necessário, medidas cautelares diversas da prisão conforme os critérios legais.",
+            "acceptableEquivalenceReason": "Equivalent representation of discretionary cautelar imposition."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Hipóteses de fiança e quebramento (CPP, Arts. 322 a 341)",
+        "rationale": "Provisions specifying bail amounts, conditions, and forfeiture reside in subsequent sections and are unasserted in Art. 321.",
+        "statutoryOrigin": "CPP_ARTS_322_A_341"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-025",
+    "candidateId": "H21C-00904",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_431",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Estando o processo em ordem, o juiz presidente mandará intimar as partes, o ofendido, se for possível, as testemunhas e os peritos, quando houver requerimento, para a sessão de instrução e julgamento, observando, no que couber, o disposto no art. 420 deste Código.",
+    "officialSourceExcerpt": "Estando o processo em ordem, o juiz presidente mandará intimar as partes, o ofendido, se for possível, as testemunhas e os peritos, quando houver requerimento, para a sessão de instrução e julgamento, observando, no que couber, o disposto no art. 420 deste Código.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-431",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-431-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "Estando o processo em ordem, o juiz presidente mandará intimar as partes, o ofendido, se for possível, as testemunhas e os peritos, quando houver requerimento, para a sessão de instrução e julgamento, observando, no que couber, o disposto no art. 420 deste Código."
+        },
+        {
+          "nodeId": "CPP-ART-420",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false,
+          "text": "A intimação da decisão de pronúncia será feita:"
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "Estando o processo em ordem, o juiz presidente deve mandar intimar as partes para a sessão de instrução e julgamento, observando, no que couber, o disposto no art. 420.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o juiz presidente",
+        "predicate": "mandar intimar as partes para a sessão de instrução e julgamento",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "estando o processo em ordem",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "as partes",
+            "essential": true
+          },
+          {
+            "qualifierType": "PURPOSE",
+            "text": "para a sessão de instrução e julgamento",
+            "essential": true
+          },
+          {
+            "qualifierType": "DEPENDENCY",
+            "text": "observando, no que couber, o disposto no art. 420 deste Código",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-431-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [
+            {
+              "nodeId": "CPP-ART-420",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            }
+          ],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural duty to summon parties for trial session; Art. 420 is cross-referenced for modality of summons."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Regular o feito, incumbe ao juiz presidente determinar a intimação das partes para a sessão de julgamento.",
+            "acceptableEquivalenceReason": "Equivalent procedural statement."
+          }
+        ]
+      },
+      {
+        "claimId": "C02",
+        "claimText": "Estando o processo em ordem, o juiz presidente deve mandar intimar o ofendido, se for possível, para a sessão de instrução e julgamento.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o juiz presidente",
+        "predicate": "mandar intimar o ofendido para a sessão de instrução e julgamento",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "estando o processo em ordem",
+            "essential": true
+          },
+          {
+            "qualifierType": "CONDITION",
+            "text": "se for possível",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "o ofendido",
+            "essential": true
+          },
+          {
+            "qualifierType": "PURPOSE",
+            "text": "para a sessão de instrução e julgamento",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-431-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [
+            {
+              "nodeId": "CPP-ART-420",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            }
+          ],
+          "confidence": "DIRECT",
+          "rationale": "Procedural duty to summon the victim if possible, with shared antecedent propagation."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Havendo viabilidade, o ofendido será intimado para a sessão de instrução e julgamento do Tribunal do Júri.",
+            "acceptableEquivalenceReason": "Equivalent dogmatic statement."
+          }
+        ]
+      },
+      {
+        "claimId": "C03",
+        "claimText": "Estando o processo em ordem, o juiz presidente deve mandar intimar as testemunhas e os peritos, quando houver requerimento, para a sessão de instrução e julgamento.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "o juiz presidente",
+        "predicate": "mandar intimar as testemunhas e os peritos para a sessão de instrução e julgamento",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "estando o processo em ordem",
+            "essential": true
+          },
+          {
+            "qualifierType": "CONDITION",
+            "text": "quando houver requerimento",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "as testemunhas e os peritos",
+            "essential": true
+          },
+          {
+            "qualifierType": "PURPOSE",
+            "text": "para a sessão de instrução e julgamento",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-431-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [
+            {
+              "nodeId": "CPP-ART-420",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            }
+          ],
+          "confidence": "DIRECT",
+          "rationale": "Procedural duty to summon witnesses and experts upon request, with shared antecedent propagation."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Mediante prévio requerimento das partes, testemunhas e peritos serão intimados pelo juiz presidente para a sessão do Júri.",
+            "acceptableEquivalenceReason": "Equivalent procedural statement."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Sorteio e convocação dos jurados (CPP, Arts. 432 a 435)",
+        "rationale": "The drawing and convocation of the 25 jurors are governed by succeeding articles and are unasserted in Art. 431.",
+        "statutoryOrigin": "CPP_ARTS_432_A_435"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-026",
+    "candidateId": "H21C-01055",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_518",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Na instrução criminal e nos demais termos do processo, observar-se-á o disposto nos Capítulos I e III, Título I, deste Livro.",
+    "officialSourceExcerpt": "Na instrução criminal e nos demais termos do processo, observar-se-á o disposto nos Capítulos I e III, Título I, deste Livro.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-518",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-518-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "Na instrução criminal e nos demais termos do processo, observar-se-á o disposto nos Capítulos I e III, Título I, deste Livro."
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "Na instrução criminal e nos demais termos do processo por crimes de responsabilidade dos funcionários públicos, deve ser observado o disposto nos Capítulos I e III do Título I deste Livro.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "a instrução criminal e os demais termos do processo",
+        "predicate": "observar o disposto nos Capítulos I e III, Título I, deste Livro",
+        "qualifiers": [
+          {
+            "qualifierType": "PROCEDURAL_STAGE",
+            "text": "na instrução criminal e nos demais termos do processo",
+            "essential": true
+          },
+          {
+            "qualifierType": "DEPENDENCY",
+            "text": "o disposto nos Capítulos I e III, Título I, deste Livro",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-518-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural reference norm governing the rite of public official crimes."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Aplica-se o procedimento comum ordinário e sumário à instrução e aos termos do processo de crimes funcionais.",
+            "acceptableEquivalenceReason": "Equivalent systematic representation."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Defesa preliminar e resposta escrita do funcionário público (CPP, Arts. 514 a 517)",
+        "rationale": "The preceding special preliminary phase rules reside in Arts. 514–517 and are unasserted in Art. 518.",
+        "statutoryOrigin": "CPP_ARTS_514_A_517"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-027",
+    "candidateId": "H21C-01136",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_573",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Os atos, cuja nulidade não tiver sido sanada, na forma dos artigos anteriores, serão renovados ou retificados.",
+    "officialSourceExcerpt": "Os atos, cuja nulidade não tiver sido sanada, na forma dos artigos anteriores, serão renovados ou retificados.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-573",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-573-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "Os atos, cuja nulidade não tiver sido sanada, na forma dos artigos anteriores, serão renovados ou retificados."
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "Os atos processuais cuja nulidade não tiver sido sanada na forma dos artigos anteriores devem ser renovados ou retificados.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "os atos cuja nulidade não tiver sido sanada",
+        "predicate": "ser renovados ou retificados",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "cuja nulidade não tiver sido sanada, na forma dos artigos anteriores",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "os atos",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-573-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural remedial duty in Art. 573 caput."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Impõe-se a renovação ou retificação dos atos processuais eivados de nulidade não convalidada.",
+            "acceptableEquivalenceReason": "Equivalent dogmatic statement of procedural sanitation."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Efeito extensivo da nulidade a atos dependentes (§ 1º) e delimitação dos atos atingidos (§ 2º)",
+        "rationale": "Rules governing contamination of subsequent dependent acts and judicial delimitation reside in §§ 1º and 2º and are unasserted in the caput.",
+        "statutoryOrigin": "CPP_ART_573_PARS_1_E_2"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-028",
+    "candidateId": "H21C-00098",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_20_PAR_UNICO",
+    "subdivisionType": "PARAGRAPH",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Nos atestados de antecedentes que lhe forem solicitados, a autoridade policial não poderá mencionar quaisquer anotações referentes a instauração de inquérito contra os requerentes.",
+    "officialSourceExcerpt": "Nos atestados de antecedentes que lhe forem solicitados, a autoridade policial não poderá mencionar quaisquer anotações referentes a instauração de inquérito contra os requerentes.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-20",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-20-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": false,
+          "text": "A autoridade assegurará no inquérito o sigilo necessário à elucidação do fato ou exigido pelo interesse da sociedade."
+        },
+        {
+          "nodeId": "CPP-ART-20-PAR-UNICO",
+          "nodeType": "PARAGRAPH",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "PARAGRAPH"
+          ],
+          "isAutonomous": true,
+          "text": "Nos atestados de antecedentes que lhe forem solicitados, a autoridade policial não poderá mencionar quaisquer anotações referentes a instauração de inquérito contra os requerentes."
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "A autoridade policial é proibida de mencionar quaisquer anotações referentes a instauração de inquérito contra os requerentes nos atestados de antecedentes que lhe forem solicitados.",
+        "normativeFunction": "CONDUCT_RULE",
+        "modality": "PROHIBITION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "a autoridade policial",
+        "predicate": "mencionar quaisquer anotações referentes a instauração de inquérito contra os requerentes nos atestados de antecedentes",
+        "qualifiers": [
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "nos atestados de antecedentes que lhe forem solicitados",
+            "essential": true
+          },
+          {
+            "qualifierType": "ACTOR_SCOPE",
+            "text": "a autoridade policial",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-20-PAR-UNICO",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "PARAGRAPH"
+            ],
+            "nodeType": "PARAGRAPH",
+            "granularity": "PARAGRAPH"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous conduct prohibition in Art. 20, parágrafo único."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "É vedado à autoridade policial registrar instauração de inquérito contra os requerentes em certidões ou atestados de antecedentes.",
+            "acceptableEquivalenceReason": "Equivalent dogmatic prohibitive formulation."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Dever de sigilo geral do inquérito policial (CPP, Art. 20 caput)",
+        "rationale": "The general rule of police investigation confidentiality resides in the caput and is unasserted in the parágrafo único.",
+        "statutoryOrigin": "CPP_ART_20_CAPUT"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-029",
+    "candidateId": "H21C-01359",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_705",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Se, intimado pessoalmente ou por edital com prazo de 20 dias, o réu não comparecer à audiência a que se refere o art. 703, a suspensão ficará sem efeito e será executada imediatamente a pena, salvo prova de justo impedimento, caso em que será marcada nova audiência.",
+    "officialSourceExcerpt": "Se, intimado pessoalmente ou por edital com prazo de 20 dias, o réu não comparecer à audiência a que se refere o art. 703, a suspensão ficará sem efeito e será executada imediatamente a pena, salvo prova de justo impedimento, caso em que será marcada nova audiência.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-705",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-705-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "Se, intimado pessoalmente ou por edital com prazo de 20 dias, o réu não comparecer à audiência a que se refere o art. 703, a suspensão ficará sem efeito e será executada imediatamente a pena, salvo prova de justo impedimento, caso em que será marcada nova audiência."
+        },
+        {
+          "nodeId": "CPP-ART-703",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false,
+          "text": "O juiz que conceder a suspensão lerá ao réu, em audiência, a sentença respectiva, e o advertirá das conseqüências de nova infração penal e do descumprimento das condições impostas."
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "Se o réu, intimado pessoalmente ou por edital com prazo de vinte dias, não comparecer à audiência de advertência do art. 703 sem justo impedimento, a suspensão condicional da pena ficará sem efeito.",
+        "normativeFunction": "LEGAL_EFFECT_RULE",
+        "modality": "LEGAL_CONSEQUENCE",
+        "polarity": "NEGATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "a suspensão condicional da pena",
+        "predicate": "ficar sem efeito",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "se, intimado pessoalmente ou por edital com prazo de 20 dias, o réu não comparecer à audiência a que se refere o art. 703",
+            "essential": true
+          },
+          {
+            "qualifierType": "EXCEPTION",
+            "text": "salvo prova de justo impedimento",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-705-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [
+            {
+              "nodeId": "CPP-ART-703",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            }
+          ],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous legal consequence of revocation of sursis; Art. 703 cross-referenced as warning audience source."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "O não comparecimento injustificado do réu intimado à audiência admonitória torna ineficaz o sursis.",
+            "acceptableEquivalenceReason": "Equivalent dogmatic representation."
+          }
+        ]
+      },
+      {
+        "claimId": "C02",
+        "claimText": "Se o réu, intimado pessoalmente ou por edital com prazo de vinte dias, não comparecer à audiência de advertência do art. 703 sem justo impedimento, a pena será executada imediatamente.",
+        "normativeFunction": "SANCTION_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "a pena",
+        "predicate": "ser executada imediatamente",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "se, intimado pessoalmente ou por edital com prazo de 20 dias, o réu não comparecer à audiência a que se refere o art. 703",
+            "essential": true
+          },
+          {
+            "qualifierType": "EXCEPTION",
+            "text": "salvo prova de justo impedimento",
+            "essential": true
+          },
+          {
+            "qualifierType": "TEMPORAL",
+            "text": "imediatamente",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-705-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [
+            {
+              "nodeId": "CPP-ART-703",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            }
+          ],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural execution sanction rule, sharing antecedent with C01."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "A ausência injustificada à audiência de advertência determina a imediata execução da pena privativa de liberdade.",
+            "acceptableEquivalenceReason": "Equivalent procedural sanction statement."
+          }
+        ]
+      },
+      {
+        "claimId": "C03",
+        "claimText": "Se houver prova de justo impedimento para o não comparecimento do réu à audiência, será designada nova audiência.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "nova audiência",
+        "predicate": "ser marcada",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "em caso de prova de justo impedimento",
+            "essential": true
+          },
+          {
+            "qualifierType": "OBJECT_SCOPE",
+            "text": "nova audiência",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-705-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [
+            {
+              "nodeId": "CPP-ART-703",
+              "path": [
+                "CPP",
+                "ARTICLE"
+              ],
+              "dependencyType": "CROSS_REFERENCE"
+            }
+          ],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous exception consequence designating a new hearing upon proven legitimate impediment."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Comprovado justo impedimento, nova data para a audiência admonitória deverá ser designada.",
+            "acceptableEquivalenceReason": "Equivalent procedural statement."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Condições e audiência admonitória (CPP, Arts. 703 e 704)",
+        "rationale": "The terms of sentence reading and sursis conditions reside in Arts. 703 and 704; Art. 705 focuses on consequences of non-appearance.",
+        "statutoryOrigin": "CPP_ARTS_703_E_704"
+      }
+    ]
+  },
+  {
+    "h2Id": "H2-030",
+    "candidateId": "H21C-00501",
+    "domain": "PROCESSO_PENAL",
+    "diploma": "CPP",
+    "canonicalLocator": "CPP_ART_230",
+    "subdivisionType": "ARTICLE_CAPUT",
+    "status": "PENDING_PROJECT_GOLDEN_REVIEW",
+    "goldenCandidateVersion": 1,
+    "propositionText": "Se ausente alguma testemunha, cujas declarações divirjam das de outra, que esteja presente, a esta se darão a conhecer os pontos da divergência, consignando-se no auto o que explicar ou observar. Se subsistir a discordância, expedir-se-á precatória à autoridade do lugar onde resida a testemunha ausente, transcrevendo-se as declarações desta e as da testemunha presente, nos pontos em que divergirem, bem como o texto do referido auto, a fim de que se complete a diligência, ouvindo-se a testemunha ausente, pela mesma forma estabelecida para a testemunha presente. Esta diligência só se realizará quando não importe demora prejudicial ao processo e o juiz a entenda conveniente.",
+    "officialSourceExcerpt": "Se ausente alguma testemunha, cujas declarações divirjam das de outra, que esteja presente, a esta se darão a conhecer os pontos da divergência, consignando-se no auto o que explicar ou observar. Se subsistir a discordância, expedir-se-á precatória à autoridade do lugar onde resida a testemunha ausente, transcrevendo-se as declarações desta e as da testemunha presente, nos pontos em que divergirem, bem como o texto do referido auto, a fim de que se complete a diligência, ouvindo-se a testemunha ausente, pela mesma forma estabelecida para a testemunha presente. Esta diligência só se realizará quando não importe demora prejudicial ao processo e o juiz a entenda conveniente.",
+    "syntheticSourceTree": {
+      "root": "CPP",
+      "nodes": [
+        {
+          "nodeId": "CPP-ART-230",
+          "nodeType": "ARTICLE",
+          "path": [
+            "CPP",
+            "ARTICLE"
+          ],
+          "isAutonomous": false
+        },
+        {
+          "nodeId": "CPP-ART-230-CAPUT",
+          "nodeType": "CAPUT",
+          "path": [
+            "CPP",
+            "ARTICLE",
+            "CAPUT"
+          ],
+          "isAutonomous": true,
+          "text": "Se ausente alguma testemunha, cujas declarações divirjam das de outra, que esteja presente, a esta se darão a conhecer os pontos da divergência, consignando-se no auto o que explicar ou observar. Se subsistir a discordância, expedir-se-á precatória à autoridade do lugar onde resida a testemunha ausente, transcrevendo-se as declarações desta e as da testemunha presente, nos pontos em que divergirem, bem como o texto do referido auto, a fim de que se complete a diligência, ouvindo-se a testemunha ausente, pela mesma forma estabelecida para a testemunha presente. Esta diligência só se realizará quando não importe demora prejudicial ao processo e o juiz a entenda conveniente."
+        }
+      ]
+    },
+    "goldenClaims": [
+      {
+        "claimId": "C01",
+        "claimText": "Se ausente alguma testemunha cujas declarações divirjam das de outra que esteja presente, devem ser dados a conhecer a esta os pontos da divergência, consignando-se no auto o que explicar ou observar.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "os pontos da divergência",
+        "predicate": "dar-se a conhecer à testemunha presente e consignar-se no auto",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "se ausente alguma testemunha, cujas declarações divirjam das de outra, que esteja presente",
+            "essential": true
+          },
+          {
+            "qualifierType": "ACTOR_SCOPE",
+            "text": "à testemunha presente",
+            "essential": true
+          },
+          {
+            "qualifierType": "PROCEDURAL_STAGE",
+            "text": "no auto",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-230-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural confrontation rule with present witness in Art. 230 first sentence."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Na hipótese de divergência com testemunha ausente, cientifica-se a presente sobre os pontos discordantes e reduz-se a termo suas explicações.",
+            "acceptableEquivalenceReason": "Equivalent procedural statement."
+          }
+        ]
+      },
+      {
+        "claimId": "C02",
+        "claimText": "Se subsistir a discordância, deve ser expedida carta precatória à autoridade do lugar onde resida a testemunha ausente para ouvi-la sobre os pontos divergentes, transcrevendo-se as declarações e o auto.",
+        "normativeFunction": "PROCEDURAL_RULE",
+        "modality": "OBLIGATION",
+        "polarity": "AFFIRMATIVE",
+        "permissionDiscretionInterchangeable": false,
+        "subject": "carta precatória",
+        "predicate": "expedir-se à autoridade do lugar onde resida a testemunha ausente",
+        "qualifiers": [
+          {
+            "qualifierType": "CONDITION",
+            "text": "se subsistir a discordância",
+            "essential": true
+          },
+          {
+            "qualifierType": "PURPOSE",
+            "text": "a fim de que se complete a diligência, ouvindo-se a testemunha ausente pela mesma forma",
+            "essential": true
+          },
+          {
+            "qualifierType": "CONDITION",
+            "text": "quando não importe demora prejudicial ao processo e o juiz a entenda conveniente",
+            "essential": true
+          }
+        ],
+        "sourceAttribution": {
+          "attributionType": "SINGLE_NODE",
+          "primaryTarget": {
+            "nodeId": "CPP-ART-230-CAPUT",
+            "path": [
+              "CPP",
+              "ARTICLE",
+              "CAPUT"
+            ],
+            "nodeType": "CAPUT",
+            "granularity": "CAPUT"
+          },
+          "supportingTargets": [],
+          "confidence": "DIRECT",
+          "rationale": "Autonomous procedural duty to issue precatory letter in Art. 230 second and third sentences."
+        },
+        "alternativeFormulations": [
+          {
+            "variantClaimText": "Persistindo a divergência e sendo conveniente e célere a diligência, expede-se precatória para inquirição da testemunha ausente.",
+            "acceptableEquivalenceReason": "Equivalent procedural representation."
+          }
+        ]
+      }
+    ],
+    "exclusionRules": [
+      {
+        "excludedElement": "Acareação presencial comum (CPP, Art. 229)",
+        "rationale": "General confrontation between present persons resides in Art. 229; Art. 230 governs the specific case where one witness is absent.",
+        "statutoryOrigin": "CPP_ART_229"
+      }
+    ]
+  }
+]

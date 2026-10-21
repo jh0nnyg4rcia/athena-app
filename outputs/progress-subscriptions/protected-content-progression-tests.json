@@ -1,0 +1,17 @@
+{
+  "passed": 11,
+  "results": [
+    "progressiveDayAccess strictly requires Day 1 completed before Day 2 is accessible",
+    "homologatedSeeds.json contains ONLY Day 1 lessons (day >= 2 removed from bundle)",
+    "readVaultLesson blocks day >= 2 for students without server authorization",
+    "purgeSessionVaultCache clears in-memory lessons",
+    "sanitizeLegacyProtectedCaches purges day >= 2 keys while preserving student history",
+    "studyProgressCore.materials returns student answers without lesson text",
+    "registerStudyProgressRoutes mounts routes on express app",
+    "clearStudySession discards in-progress queues and resets session",
+    "account content session clears on account change or expiration without retaining access",
+    "firestore.candidate.rules denies direct client get/list on sessions and catalog for students",
+    "internalCatalogRoutes and persistCeoCatalogLesson contracts are preserved"
+  ],
+  "verifiedAt": "2026-10-18T02:59:08.205Z"
+}

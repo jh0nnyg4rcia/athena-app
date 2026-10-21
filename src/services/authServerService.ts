@@ -1,0 +1,379 @@
+import firebaseConfig from '../../firebase-applet-config.json';
+import { normalizeEmail, sanitizeDisplayName, validatePassword } from '../lib/authPolicy';
+import { generateTemporaryPassword, hashPassword, verifyPassword } from './passwordHash';
+
+const API_KEY = (process.env.FIREBASE_WEB_API_KEY || firebaseConfig.apiKey || '').trim();
+const DATABASE_ID = firebaseConfig.firestoreDatabaseId;
+
+export class AuthFlowError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthFlowError';
+  }
+}
+
+type AdminAuth = {
+  createUser: (props: Record<string, unknown>) => Promise<{ uid: string }>;
+  updateUser: (uid: string, props: Record<string, unknown>) => Promise<unknown>;
+  deleteUser: (uid: string) => Promise<void>;
+  getUserByEmail: (email: string) => Promise<{ uid: string; displayName?: string }>;
+  verifyIdToken: (token: string) => Promise<{
+    uid: string;
+    email?: string;
+    name?: string;
+    email_verified?: boolean;
+    firebase?: { sign_in_provider?: string };
+  }>;
+};
+
+type AdminDb = {
+  collection: (name: string) => {
+    doc: (id: string) => {
+      set: (data: Record<string, unknown>, opts?: { merge?: boolean }) => Promise<unknown>;
+      get: () => Promise<{ exists: boolean; data: () => Record<string, unknown> | undefined }>;
+    };
+  };
+};
+
+let adminReady: Promise<{ auth: AdminAuth; db: AdminDb } | null> | null = null;
+
+async function loadAdmin(): Promise<{ auth: AdminAuth; db: AdminDb } | null> {
+  if (!adminReady) {
+    adminReady = (async () => {
+      try {
+        const appMod = await import('firebase-admin/app');
+        const authMod = await import('firebase-admin/auth');
+        const dbMod = await import('firebase-admin/firestore');
+        const isLocal = process.env.ATHENA_STUDY_PROGRESS_LOCAL === 'true' || Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+        const app = isLocal
+          ? (appMod.getApps().find(a => a.name === 'study-local') || appMod.initializeApp({ projectId: process.env.GCLOUD_PROJECT || 'demo-athena-client-safe' }, 'study-local'))
+          : (appMod.getApps().length ? appMod.getApp() : appMod.initializeApp());
+        const db = isLocal
+          ? dbMod.getFirestore(app)
+          : dbMod.getFirestore(app, DATABASE_ID);
+        return {
+          auth: authMod.getAuth(app) as unknown as AdminAuth,
+          db: db as unknown as AdminDb
+        };
+      } catch (error) {
+        console.warn('[ATHENA Auth] Admin SDK indisponível neste processo.');
+        return null;
+      }
+    })();
+  }
+  return adminReady;
+}
+
+async function identityPost(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!API_KEY) throw new AuthFlowError('Não foi possível concluir a autenticação.');
+  const host = process.env.FIREBASE_AUTH_EMULATOR_HOST
+    ? `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1`
+    : `https://identitytoolkit.googleapis.com/v1`;
+  const response = await fetch(`${host}/${path}?key=${API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    const message = String((data.error as { message?: string } | undefined)?.message || '');
+    if (message.includes('EMAIL_EXISTS')) throw new AuthFlowError('EMAIL_EXISTS');
+    if (message.includes('INVALID_LOGIN_CREDENTIALS') || message.includes('EMAIL_NOT_FOUND') || message.includes('INVALID_PASSWORD')) {
+      throw new AuthFlowError('INVALID_LOGIN');
+    }
+    if (message.includes('TOO_MANY_ATTEMPTS')) throw new AuthFlowError('TOO_MANY');
+    throw new AuthFlowError('AUTH_FAILED');
+  }
+  return data;
+}
+
+async function storePasswordHash(uid: string, email: string, password: string): Promise<void> {
+  const admin = await loadAdmin();
+  if (!admin) return;
+  const passwordHash = await hashPassword(password);
+  await admin.db.collection('auth_secrets').doc(uid).set({
+    passwordHash,
+    email,
+    updatedAt: Date.now()
+  }, { merge: true });
+}
+
+async function assertStoredHash(uid: string, email: string, password: string): Promise<void> {
+  const admin = await loadAdmin();
+  if (!admin) return;
+  const snap = await admin.db.collection('auth_secrets').doc(uid).get();
+  const hash = snap.exists ? String(snap.data()?.passwordHash || '') : '';
+  if (!hash) {
+    await storePasswordHash(uid, email, password);
+    return;
+  }
+  const ok = await verifyPassword(password, hash);
+  if (!ok) throw new AuthFlowError('INVALID_LOGIN');
+}
+
+async function clearPasswordHash(uid: string): Promise<void> {
+  const admin = await loadAdmin();
+  if (!admin) return;
+  await admin.db.collection('auth_secrets').doc(uid).set({
+    passwordHash: '',
+    updatedAt: Date.now()
+  }, { merge: true });
+}
+
+async function createAccount(email: string, password: string, name: string): Promise<{ uid: string; idToken?: string }> {
+  const admin = await loadAdmin();
+  if (admin) {
+    try {
+      const user = await admin.auth.createUser({
+        email,
+        password,
+        displayName: name,
+        emailVerified: false,
+        disabled: false
+      });
+      return { uid: user.uid };
+    } catch (error) {
+      const code = String((error as { code?: string })?.code || '');
+      if (code.includes('email-already-exists')) throw new AuthFlowError('EMAIL_EXISTS');
+      throw new AuthFlowError('AUTH_FAILED');
+    }
+  }
+
+  const created = await identityPost('accounts:signUp', {
+    email,
+    password,
+    returnSecureToken: true
+  });
+  const idToken = String(created.idToken || '');
+  const uid = String(created.localId || '');
+  if (!uid || !idToken) throw new AuthFlowError('AUTH_FAILED');
+  await identityPost('accounts:update', { idToken, displayName: name }).catch(() => undefined);
+  return { uid, idToken };
+}
+
+async function deleteAccount(uid: string, idToken?: string): Promise<void> {
+  const admin = await loadAdmin();
+  if (admin) {
+    await admin.auth.deleteUser(uid).catch(() => undefined);
+    return;
+  }
+  if (idToken) {
+    await identityPost('accounts:delete', { idToken }).catch(() => undefined);
+  }
+}
+
+export async function registerEmailAccount(input: {
+  name: unknown;
+  email: unknown;
+  password?: unknown;
+}): Promise<{ emailSent: boolean; delivery: 'password' | 'link' | 'none' }> {
+  const email = normalizeEmail(input.email);
+  const name = sanitizeDisplayName(input.name);
+  if (!email || !name) throw new AuthFlowError('Dados de cadastro inválidos.');
+
+  const provided = typeof input.password === 'string' && input.password.length > 0;
+  if (provided) {
+    const problem = validatePassword(input.password, email);
+    if (problem) throw new AuthFlowError(problem);
+  }
+  const password = provided ? String(input.password) : generateTemporaryPassword();
+  const created = await createAccount(email, password, name);
+
+  try {
+    if (!provided) {
+      await identityPost('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email });
+      return { emailSent: true, delivery: 'link' };
+    }
+    await storePasswordHash(created.uid, email, password);
+    return { emailSent: false, delivery: 'none' };
+  } catch (error) {
+    if (!provided) await deleteAccount(created.uid, created.idToken);
+    if (error instanceof AuthFlowError && provided) throw error;
+    if (!provided) throw new AuthFlowError('Não foi possível enviar a senha por e-mail. Tente de novo mais tarde.');
+    return { emailSent: false, delivery: 'none' };
+  }
+}
+
+export async function loginEmailAccount(input: { email: unknown; password: unknown }): Promise<void> {
+  const email = normalizeEmail(input.email);
+  const password = typeof input.password === 'string' ? input.password : '';
+  if (!email || !password) throw new AuthFlowError('INVALID_LOGIN');
+
+  const signed = await identityPost('accounts:signInWithPassword', {
+    email,
+    password,
+    returnSecureToken: true
+  });
+  const uid = String(signed.localId || '');
+  if (uid) await assertStoredHash(uid, email, password);
+}
+
+const USER_DATA_COLLECTIONS = [
+  'sessions',
+  'stats',
+  'failed_questions',
+  'schedules',
+  'trilha',
+  'gamification'
+] as const;
+
+const DELETE_UNAVAILABLE = 'Não foi possível excluir a conta agora. Tente de novo mais tarde.';
+
+type PurgeDoc = {
+  delete: () => Promise<unknown>;
+  collection: (name: string) => {
+    limit: (count: number) => {
+      get: () => Promise<{ empty: boolean; docs: Array<{ ref: { delete: () => Promise<unknown> } }> }>;
+    };
+  };
+};
+
+async function purgeOwnedUserData(uid: string): Promise<void> {
+  const admin = await loadAdmin();
+  if (!admin) throw new AuthFlowError(DELETE_UNAVAILABLE);
+  const db = admin.db as unknown as {
+    collection: (name: string) => { doc: (id: string) => PurgeDoc };
+  };
+  const userDoc = db.collection('users').doc(uid);
+  for (const name of USER_DATA_COLLECTIONS) {
+    const page = userDoc.collection(name);
+    for (;;) {
+      const snap = await page.limit(200).get();
+      if (snap.empty) break;
+      await Promise.all(snap.docs.map((item) => item.ref.delete()));
+    }
+  }
+  await userDoc.delete();
+  await db.collection('auth_secrets').doc(uid).delete();
+  try {
+    await admin.auth.deleteUser(uid);
+  } catch (error) {
+    const code = String((error as { code?: string })?.code || '');
+    if (!code.includes('user-not-found')) throw new AuthFlowError(DELETE_UNAVAILABLE);
+  }
+}
+
+export async function deleteOwnedAccount(input: {
+  idToken?: string;
+  email?: unknown;
+  password?: unknown;
+}): Promise<void> {
+  const token = typeof input.idToken === 'string' ? input.idToken.trim() : '';
+  let uid = '';
+  if (token) {
+    const session = await verifyGoogleSession(token);
+    uid = session.uid;
+  } else {
+    const email = normalizeEmail(input.email);
+    const password = typeof input.password === 'string' ? input.password : '';
+    if (!email || !password) throw new AuthFlowError('INVALID_LOGIN');
+    const signed = await identityPost('accounts:signInWithPassword', {
+      email,
+      password,
+      returnSecureToken: true
+    });
+    uid = String(signed.localId || '');
+    if (!uid) throw new AuthFlowError('INVALID_LOGIN');
+    await assertStoredHash(uid, email, password);
+  }
+  if (!uid) throw new AuthFlowError('AUTH_FAILED');
+  await purgeOwnedUserData(uid);
+}
+
+export async function resetEmailAccess(input: { email: unknown }): Promise<void> {
+  const email = normalizeEmail(input.email);
+  if (!email) return;
+
+  const admin = await loadAdmin();
+  if (admin) {
+    try {
+      const user = await admin.auth.getUserByEmail(email);
+      await clearPasswordHash(user.uid);
+    } catch {
+      /* a resposta continua igual quando o e-mail não existe */
+    }
+  }
+  await identityPost('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email }).catch(() => undefined);
+}
+
+export async function verifyGoogleSession(idToken: string): Promise<{
+  uid: string;
+  email: string;
+  displayName: string;
+  emailVerified: boolean;
+}> {
+  const token = idToken.trim();
+  if (!token || token.length > 5000) throw new AuthFlowError('AUTH_FAILED');
+
+  const admin = await loadAdmin();
+  let uid = '';
+  let email = '';
+  let name = '';
+  let verified = false;
+  let provider = '';
+
+  if (admin) {
+    try {
+      const decoded = await admin.auth.verifyIdToken(token);
+      uid = decoded.uid;
+      email = String(decoded.email || '').toLowerCase();
+      name = String(decoded.name || '');
+      verified = Boolean(decoded.email_verified);
+      provider = String(decoded.firebase?.sign_in_provider || '');
+    } catch {
+      throw new AuthFlowError('AUTH_FAILED');
+    }
+  } else {
+    const lookup = await identityPost('accounts:lookup', { idToken: token });
+    const user = Array.isArray(lookup.users) ? lookup.users[0] as Record<string, unknown> : null;
+    if (!user) throw new AuthFlowError('AUTH_FAILED');
+    uid = String(user.localId || '');
+    email = String(user.email || '').toLowerCase();
+    name = String(user.displayName || '');
+    verified = Boolean(user.emailVerified);
+    const providers = Array.isArray(user.providerUserInfo) ? user.providerUserInfo as Array<Record<string, unknown>> : [];
+    provider = String(providers[0]?.providerId || '');
+  }
+
+  if (!uid || !normalizeEmail(email)) throw new AuthFlowError('AUTH_FAILED');
+  if (provider && provider !== 'google.com' && provider !== 'password') {
+    throw new AuthFlowError('AUTH_FAILED');
+  }
+
+  const displayName = sanitizeDisplayName(name) || 'Aluno ATHENA';
+  if (admin) {
+    await admin.db.collection('users').doc(uid).set({
+      displayName,
+      email,
+      provider: provider || 'google.com',
+      updatedAt: Date.now()
+    }, { merge: true });
+  }
+
+  return { uid, email, displayName, emailVerified: verified };
+}
+
+const PUBLIC_AUTH_MESSAGES = new Set([
+  'Não foi possível concluir o cadastro. Se você já tem conta, entre ou peça uma nova senha.',
+  'E-mail ou senha incorretos.',
+  'Não foi possível enviar a senha por e-mail. Tente de novo mais tarde.',
+  'Não foi possível excluir a conta agora. Tente de novo mais tarde.',
+  'Dados de cadastro inválidos.',
+  'Informe uma senha.',
+  'A senha precisa ter entre 10 e 72 caracteres.',
+  'A senha precisa ter letras e números.',
+  'A senha não pode conter o e-mail.',
+  'Muitas tentativas. Aguarde um pouco e tente novamente.'
+]);
+
+export function publicAuthMessage(error: unknown): string {
+  if (error instanceof AuthFlowError) {
+    if (error.message === 'EMAIL_EXISTS') {
+      return 'Não foi possível concluir o cadastro. Se você já tem conta, entre ou peça uma nova senha.';
+    }
+    if (error.message === 'INVALID_LOGIN') return 'E-mail ou senha incorretos.';
+    if (error.message === 'TOO_MANY') return 'Muitas tentativas. Aguarde um pouco e tente novamente.';
+    if (PUBLIC_AUTH_MESSAGES.has(error.message)) return error.message;
+  }
+  return 'Não foi possível concluir a autenticação. Tente novamente.';
+}

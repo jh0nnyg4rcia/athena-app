@@ -1,4 +1,4 @@
-import { ChatSession, GamificationData, UserStat, Schedule, FailedQuestion } from '../types';
+import { ChatSession, GamificationData, UserStat, Schedule, FailedQuestion, ReviewCounterEntry } from '../types';
 
 export const LocalPersistence = {
   getSessions(userId: string): ChatSession[] {
@@ -240,6 +240,23 @@ export const LocalPersistence = {
       }
     } catch (e) {
       console.warn('[LocalPersistence] Falha geral ao sanitizar sessões para 1ª fase:', e);
+    }
+  },
+
+  getReviewCounters(userId: string): Record<string, ReviewCounterEntry> {
+    try {
+      const raw = localStorage.getItem(`athena_review_counters_${userId}`);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  },
+
+  saveReviewCounters(userId: string, counters: Record<string, ReviewCounterEntry>): void {
+    try {
+      localStorage.setItem(`athena_review_counters_${userId}`, JSON.stringify(counters));
+    } catch (e) {
+      console.warn("Local storage save review counters error:", e);
     }
   }
 };

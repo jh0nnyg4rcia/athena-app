@@ -1,24 +1,76 @@
 import express from "express";
-import { askATHENA, evaluateAnswer, testGeminiPing } from "../services/geminiServerService";
+import { askATHENA, evaluateAnswer, generateObjectiveChallenge, testGeminiPing } from "../services/geminiServerService";
+import {
+  askChatGPT,
+  evaluateAnswerChatGPT,
+  generateObjectiveChallengeChatGPT,
+  testChatGptPing
+} from "../services/openaiServerService";
+import {
+  deleteOwnedAccount,
+  loginEmailAccount,
+  publicAuthMessage,
+  registerEmailAccount,
+  resetEmailAccess,
+  verifyGoogleSession
+} from "../services/authServerService";
 import firebaseConfig from "../../firebase-applet-config.json";
+import { generationBackend, isCeoEmail, parseContentProvider, type ContentProvider } from "../lib/contentProvider";
+import { rateLimit } from "./rateLimit";
+import { registerLegalReviewRoutes } from "./legalReviewRoutes";
+import { registerInternalCatalogRoutes } from "./internalCatalogRoutes";
+import { registerLocalStudyProgressRoutes } from "./studyProgressRoutes";
+import { registerSubscriptionRoutes } from "./subscriptionRoutes";
+import { registerPersonalHighlightsRoutes } from "./personalHighlightsRoutes";
 
-async function verifyFirebaseIdToken(idToken: string): Promise<boolean> {
+interface AthenaAuthUser {
+  uid: string;
+  email?: string;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      athenaUser?: AthenaAuthUser;
+    }
+  }
+}
+
+const PRODUCTION_ORIGINS = [
+  "https://athena-mentoria.web.app",
+  "https://athena-mentoria.firebaseapp.com",
+  "https://projetoathena.app.br",
+  "https://www.projetoathena.app.br",
+  "https://localhost",
+  "http://localhost",
+  "capacitor://localhost",
+  "ionic://localhost",
+];
+
+async function verifyFirebaseIdToken(idToken: string): Promise<AthenaAuthUser | null> {
   try {
     const apiKey = process.env.FIREBASE_WEB_API_KEY || firebaseConfig.apiKey;
+    const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST
+      ? `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1`
+      : `https://identitytoolkit.googleapis.com/v1`;
     const response = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+      `${authHost}/accounts:lookup?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken }),
       }
     );
-    if (!response.ok) return false;
+    if (!response.ok) return null;
     const data = await response.json();
-    return Array.isArray(data?.users) && data.users.length > 0;
+    const user = data?.users?.[0];
+    const uid = user?.localId;
+    if (!uid || typeof uid !== "string") return null;
+    const email = typeof user?.email === "string" ? user.email : undefined;
+    return { uid, email };
   } catch (error) {
-    console.warn("[Server API] Falha ao validar token Firebase:", error);
-    return false;
+    console.warn("[Server API] Falha ao validar token Firebase.");
+    return null;
   }
 }
 
@@ -26,28 +78,94 @@ function isProductionRuntime(): boolean {
   return process.env.NODE_ENV === "production" || Boolean(process.argv[1]?.endsWith(".cjs"));
 }
 
-async function requireApiAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const mustAuth =
-    process.env.REQUIRE_API_AUTH === "true" ||
-    (isProductionRuntime() && process.env.REQUIRE_API_AUTH !== "false");
+function isLocalDemoEnvironment(): boolean {
+  return (
+    process.env.ATHENA_STUDY_PROGRESS_LOCAL === "true" ||
+    (Boolean(process.env.GCLOUD_PROJECT?.startsWith("demo-")) &&
+      Boolean(process.env.FIREBASE_AUTH_EMULATOR_HOST))
+  );
+}
 
-  if (!mustAuth) {
+function allowCorsOrigin(requestOrigin: string | undefined): string {
+  const configured = (process.env.CORS_ORIGIN || "").trim();
+  if (configured && configured !== "*") {
+    return configured;
+  }
+  if (!isProductionRuntime()) {
+    return requestOrigin || "*";
+  }
+  if (requestOrigin && PRODUCTION_ORIGINS.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+  if (isLocalDemoEnvironment() && requestOrigin) {
+    try {
+      const u = new URL(requestOrigin);
+      if (
+        (u.hostname === "localhost" || u.hostname === "127.0.0.1") &&
+        (u.protocol === "http:" || u.protocol === "https:")
+      ) {
+        return requestOrigin;
+      }
+    } catch {}
+  }
+  return PRODUCTION_ORIGINS[0];
+}
+
+function isStrictApiAuth(): boolean {
+  return (process.env.REQUIRE_API_AUTH || "").trim().toLowerCase() === "strict";
+}
+
+function skipApiAuth(): boolean {
+  return (process.env.REQUIRE_API_AUTH || "").trim().toLowerCase() === "false";
+}
+
+async function requireApiAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (skipApiAuth()) {
     next();
     return;
   }
 
   const header = String(req.headers.authorization || "");
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+
+  // Login por e-mail/código (APK e web) não tem sessão Firebase.
+  // Sem Bearer o proxy segue, com rate limit. REQUIRE_API_AUTH=strict exige token.
   if (!token) {
-    res.status(401).json({ error: "Autenticação obrigatória para o proxy ATHENA." });
+    if (isStrictApiAuth()) {
+      res.status(401).json({ error: "Autenticação obrigatória para o proxy ATHENA." });
+      return;
+    }
+    next();
     return;
   }
 
-  const valid = await verifyFirebaseIdToken(token);
-  if (!valid) {
+  const user = await verifyFirebaseIdToken(token);
+  if (!user) {
     res.status(401).json({ error: "Token de autenticação inválido." });
     return;
   }
+  req.athenaUser = user;
+  next();
+}
+
+/** A revisão jurídica exige CEO com Google mesmo quando o proxy Gemini aceita chamada sem Bearer. */
+async function requireCeo(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const header = String(req.headers.authorization || "");
+  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  if (!token) {
+    res.status(401).json({ error: "A revisão jurídica exige login do CEO com Google." });
+    return;
+  }
+  const user = await verifyFirebaseIdToken(token);
+  if (!user) {
+    res.status(401).json({ error: "Token de autenticação inválido." });
+    return;
+  }
+  if (!isCeoEmail(user.email)) {
+    res.status(403).json({ error: "Somente o CEO pode revisar aulas com a OpenAI." });
+    return;
+  }
+  req.athenaUser = user;
   next();
 }
 
@@ -58,10 +176,15 @@ export function createAthenaApiApp(): express.Express {
   const app = express();
 
   app.use((req, res, next) => {
-    const allowed = process.env.CORS_ORIGIN || "*";
-    res.setHeader("Access-Control-Allow-Origin", allowed);
+    const origin = allowCorsOrigin(req.headers.origin);
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Cache-Control", "no-store");
     if (req.method === "OPTIONS") {
       res.sendStatus(204);
       return;
@@ -69,67 +192,203 @@ export function createAthenaApiApp(): express.Express {
     next();
   });
 
-  app.use(express.json({ limit: "30mb" }));
-  app.use(express.urlencoded({ limit: "30mb", extended: true }));
+  app.use((req, res, next) => {
+    const limit = req.path === "/api/ask-athena" ? "30mb" : "2mb";
+    express.json({ limit })(req, res, next);
+  });
+  app.use(express.urlencoded({ limit: "2mb", extended: true }));
 
-  app.get("/api/health", (_req, res) => {
+  app.get("/api/health", rateLimit(60, 60_000), (_req, res) => {
     res.json({
       status: "ok",
-      hasGeminiApiKey: Boolean(process.env.GEMINI_API_KEY),
       timestamp: new Date().toISOString()
     });
   });
 
-  app.post("/api/test-gemini", requireApiAuth, async (req, res) => {
+  function rejectCrossSiteAuth(req: express.Request, res: express.Response): boolean {
+    const origin = String(req.headers.origin || "");
+    if (origin && allowCorsOrigin(origin) !== origin && isProductionRuntime()) {
+      res.status(403).json({ error: "Não foi possível concluir a autenticação." });
+      return true;
+    }
+    const contentType = String(req.headers["content-type"] || "");
+    if (!contentType.includes("application/json")) {
+      res.status(415).json({ error: "Não foi possível concluir a autenticação." });
+      return true;
+    }
+    return false;
+  }
+
+  app.post("/api/auth/register", rateLimit(8, 15 * 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
     try {
-      const result = await testGeminiPing(req.body?.preferredModel);
+      const result = await registerEmailAccount({
+        name: req.body?.name,
+        email: req.body?.email,
+        password: req.body?.password
+      });
+      res.json({ ok: true, emailSent: result.emailSent, delivery: result.delivery });
+    } catch (error) {
+      res.status(400).json({ error: publicAuthMessage(error) });
+    }
+  });
+
+  app.post("/api/auth/login", rateLimit(12, 15 * 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    try {
+      await loginEmailAccount({ email: req.body?.email, password: req.body?.password });
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(401).json({ error: publicAuthMessage(error) });
+    }
+  });
+
+  app.post("/api/auth/forgot", rateLimit(6, 15 * 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    try {
+      await resetEmailAccess({ email: req.body?.email });
+    } catch {
+      /* mesma resposta para não revelar se o e-mail existe */
+    }
+    res.json({ ok: true });
+  });
+
+  app.post("/api/auth/delete-account", rateLimit(5, 15 * 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    const header = String(req.headers.authorization || "");
+    const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    try {
+      await deleteOwnedAccount({
+        idToken: token,
+        email: req.body?.email,
+        password: req.body?.password
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      const message = publicAuthMessage(error);
+      const status = message === "E-mail ou senha incorretos." ? 401 : 400;
+      res.status(status).json({ error: message });
+    }
+  });
+
+  app.post("/api/auth/session", rateLimit(20, 60_000), async (req, res) => {
+    if (rejectCrossSiteAuth(req, res)) return;
+    const header = String(req.headers.authorization || "");
+    const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    if (!token) {
+      res.status(401).json({ error: "Não foi possível concluir a autenticação." });
+      return;
+    }
+    try {
+      const session = await verifyGoogleSession(token);
+      res.json({ ok: true, user: session });
+    } catch {
+      res.status(401).json({ error: "Não foi possível concluir a autenticação." });
+    }
+  });
+
+  function contentProviderOf(req: express.Request): ContentProvider {
+    return parseContentProvider(req.body?.contentProvider);
+  }
+
+  function chatGptAllowed(req: express.Request, res: express.Response, provider: ContentProvider): boolean {
+    if (provider !== "chatgpt") return true;
+    if (!isCeoEmail(req.athenaUser?.email)) {
+      res.status(403).json({
+        error: "O ChatGPT só pode ser usado pelo CEO logado com Google."
+      });
+      return false;
+    }
+    return true;
+  }
+
+  app.post("/api/test-gemini", rateLimit(10, 60_000), requireApiAuth, async (req, res) => {
+    const provider = contentProviderOf(req);
+    if (!chatGptAllowed(req, res, provider)) return;
+    try {
+      const result = generationBackend(provider) === "openai"
+        ? await testChatGptPing()
+        : await testGeminiPing(req.body?.preferredModel);
       res.json(result);
     } catch (error: any) {
-      console.error("[Server API Error] testGeminiPing falhou:", error);
+      console.error("[Server API Error] teste de conexão falhou.");
       res.status(500).json({
         success: false,
-        error: error?.message || "Erro interno ao testar Gemini."
+        error: error?.message || "Erro interno ao testar a conexão."
       });
     }
   });
 
-  app.post("/api/ask-athena", requireApiAuth, async (req, res) => {
+  app.post("/api/ask-athena", rateLimit(20, 60_000), requireApiAuth, async (req, res) => {
+    const provider = contentProviderOf(req);
+    if (!chatGptAllowed(req, res, provider)) return;
     try {
       const { message, history, userName, file, mentorshipStyle, mentorshipPhase, preferredModel } = req.body;
-      console.log(`[Server API] Requisitando askATHENA para o usuário: ${userName || "Sem nome"}`);
-      const result = await askATHENA(
-        message,
-        history || [],
-        userName,
-        file,
-        mentorshipStyle,
-        mentorshipPhase,
-        preferredModel
-      );
+      const safeName = typeof userName === "string" && userName.trim() ? userName.trim().slice(0, 80) : "Mestre";
+      const result = generationBackend(provider) === "openai"
+        ? await askChatGPT(message, history || [], safeName, file, mentorshipStyle, mentorshipPhase)
+        : await askATHENA(
+            message,
+            history || [],
+            safeName,
+            file,
+            mentorshipStyle,
+            mentorshipPhase,
+            preferredModel
+          );
       res.json({ responseText: result.text, model: result.model });
     } catch (error: any) {
-      console.error("[Server API Error] askATHENA falhou:", error);
+      console.error("[Server API Error] askATHENA falhou.");
       res.status(500).json({ error: error?.message || "Erro interno ao processar ATHENA." });
     }
   });
 
-  app.post("/api/evaluate-answer", requireApiAuth, async (req, res) => {
+  app.post("/api/regenerate-challenge", rateLimit(12, 60_000), requireApiAuth, async (req, res) => {
+    const provider = contentProviderOf(req);
+    if (!chatGptAllowed(req, res, provider)) return;
+    try {
+      const brief = typeof req.body?.brief === "string" ? req.body.brief : "";
+      if (brief.trim().length < 40) {
+        res.status(400).json({ error: "Falta o recorte da aula para regerar só as questões." });
+        return;
+      }
+      const result = generationBackend(provider) === "openai"
+        ? await generateObjectiveChallengeChatGPT(brief)
+        : await generateObjectiveChallenge(brief);
+      res.json({ responseText: result.text, model: result.model });
+    } catch (error: any) {
+      console.error("[Server API Error] generateObjectiveChallenge falhou.");
+      res.status(500).json({ error: error?.message || "Erro interno ao regerar as questões." });
+    }
+  });
+
+  app.post("/api/evaluate-answer", rateLimit(20, 60_000), requireApiAuth, async (req, res) => {
+    const provider = contentProviderOf(req);
+    if (!chatGptAllowed(req, res, provider)) return;
     try {
       const { questionText, userAnswer, referenceResponse, phase, userName } = req.body;
-      console.log(`[Server API] Requisitando evaluateAnswer para o usuário: ${userName || "Sem nome"}`);
-      const evalResult = await evaluateAnswer(
-        questionText,
-        userAnswer,
-        referenceResponse,
-        phase,
-        userName
-      );
+      const safeName = typeof userName === "string" && userName.trim() ? userName.trim().slice(0, 80) : "Mestre";
+      const evalResult = generationBackend(provider) === "openai"
+        ? await evaluateAnswerChatGPT(questionText, userAnswer, referenceResponse, phase, safeName)
+        : await evaluateAnswer(
+            questionText,
+            userAnswer,
+            referenceResponse,
+            phase,
+            safeName
+          );
       res.json(evalResult);
     } catch (error: any) {
-      console.error("[Server API Error] evaluateAnswer falhou:", error);
+      console.error("[Server API Error] evaluateAnswer falhou.");
       res.status(500).json({ error: error?.message || "Erro interno ao avaliar resposta." });
     }
   });
+
+  registerLegalReviewRoutes(app, requireCeo);
+  registerInternalCatalogRoutes(app);
+  registerLocalStudyProgressRoutes(app);
+  registerSubscriptionRoutes(app);
+  registerPersonalHighlightsRoutes(app);
 
   return app;
 }

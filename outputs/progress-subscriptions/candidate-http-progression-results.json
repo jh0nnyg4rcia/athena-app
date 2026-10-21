@@ -1,0 +1,81 @@
+{
+  "passed": 15,
+  "results": [
+    {
+      "name": "API HTTP: Requisicao desautenticada rejeitada com 401",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API HTTP: Dia 1 acessivel na entrada efetiva da API",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API HTTP: Dia 2 bloqueado antes da conclusao integral do Dia 1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API HTTP: Dia 2 desbloqueado com sucesso apos conclusao do Dia 1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API HTTP: Dia 3 bloqueado para aluno gratuito sem assinatura/convite",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API HTTP: Dia 3 continua bloqueado ate contratacao de assinatura ou convite ativo",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API HTTP: Dia 3 desbloqueado com progressao previa + assinatura vigente",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API HTTP: Salto arbitrario para Dia 10 bloqueado mesmo com assinatura ativa",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Historico Legado: Mensagens do usuario e respostas estao preservadas",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Historico Legado: Corpo da aula protegida foi filtrado para usuario sem acesso",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Historico: Dia 2 filtrado para assinante sem conclusao previa do Dia 1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Respostas Pendentes: Respostas offline do Aluno A preservadas no storage apos logout",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Respostas Pendentes: Aluno B nao enxerga nem envia respostas do Aluno A",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Respostas Pendentes: Tentativa de envio com conta trocada rejeita com ACCOUNT_CHANGED",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Respostas Pendentes: Aluno A recupera suas respostas intactas ao retornar",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "verifiedAt": "2026-10-17T07:04:06.652Z"
+}

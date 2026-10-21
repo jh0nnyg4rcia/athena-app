@@ -1,9 +1,15 @@
+import {TesterInvitePanel} from './components/TesterInvitePanel';
+import {ProfileModal} from './components/ProfileModal';
+import {hashStudyContent} from './lib/studyBaseline';
+import {completeStudyMaterial, saveStudyAnswer, loadStudyMaterial, loadStudentMaterials, refreshStudyAccess, studyContentSession, clearStudySession, loadAuthorizedStudentSessions, type AccessState} from './services/studyProgressClient';
+import { purgeSessionVaultCache } from './services/lessonVault';
+import { reviewDay } from './lib/compressedReviews';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useEffect, useMemo, Suspense, lazy } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Scale, 
@@ -20,8 +26,12 @@ import {
   FileSearch,
   Sparkles,
   ChevronRight,
+  ChevronLeft,
+  ChevronDown,
+  ChevronUp,
   Clock,
   ShieldAlert,
+  AlertCircle,
   Gavel,
   Users,
   Plus,
@@ -56,23 +66,41 @@ import {
   RefreshCw,
   Mail,
   User as UserIcon,
-  Copy,
-  Home
+  Home,
+  Search,
+  EyeOff,
+  ArrowLeft
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { ThemeSelector } from './components/ThemeSelector';
+import { HighlightableContent } from './components/HighlightableContent';
+import { StudyLegend } from './components/StudyLegend';
+import { useStudyLayout } from './components/useStudyLayout';
+import { emphasizeStudyMarkdown } from './lib/emphasizeStudyMarkdown';
+import { presentSavedLesson } from './lib/presentSavedLesson';
+import { cacheHoldsText } from './lib/officialCacheRestore';
+import { watchPublishedLesson } from './lib/publishedLessonRefresh';
+import { ceoEditorMarkdown, exactPublishedLesson, readCeoMarkdown } from './lib/ceoLessonEditing';
 import { memo } from 'react';
-import { askATHENA, evaluateAnswer, isNativeMobile, testGeminiConnection, getSelectedModel, setSelectedModel, type GeminiConnectionTestResult } from './services/geminiService';
+import { askATHENA, evaluateAnswer, isNativeMobile, regenerateObjectiveChallenge, testGeminiConnection, getSelectedModel, setSelectedModel, setAllowChatGptChoice, type GeminiConnectionTestResult } from './services/geminiService';
+import { contentEngineLabel, getContentProvider, regenerateEngineName, regenerateLessonConfirm, setContentProvider, type ContentProvider } from './lib/contentProvider';
 import { TRILHA_JURIDICA_DATA } from './data/trilhaData';
 import { getGroundingForTrilhaPart } from './data/groundingService';
-import { calcularIncidenciaParaMaterias } from './utils/incidenciaUtils';
-import { type UserProfile, type HomologatedLesson, type RegisteredStudent } from './types';
+import { calcularIncidenciaParaMaterias, instrucaoEnfase } from './utils/incidenciaUtils';
+import { type UserProfile, type HomologatedLesson, type FailedQuestion, type FailedQuestionAttempt, type UserStat, type Mentee, type GamificationData } from './types';
+import { clearLocalAccountData, deleteCurrentAccount, loginWithEmail, loginWithGoogle, publicClientAuthError, registerAccount, requestNewPassword } from './services/authClient';
 import { getCachedTrilhaPart, setCachedTrilhaPart, sanitizeTrilhaCacheForObjectivePhase } from './services/trilhaCacheService';
 import { 
   getHomologatedLesson, 
   saveHomologatedLesson, 
   revokeHomologatedLesson, 
   getLocalHomologatedLesson, 
-  getLessonDocId 
+  getLessonDocId,
+  syncOfficialCatalog,
+  ensureObjectiveChallenge,
+  restoreOfficialLessonsFromCloud,
+  setLocalHomologatedLesson,
+  sanitizeLegacyProtectedCaches
 } from './services/curatedLessonService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -95,27 +123,103 @@ import {
 import { 
   db, 
   auth, 
-  signInWithGoogle, 
   logOut, 
-  checkAndSyncNativeAuth,
   handleFirestoreError, 
   OperationType, 
   cleanData,
   isQuotaExhausted,
-  setQuotaExhausted 
+  setQuotaExhausted,
+  isLocalHost
 } from './lib/firebase';
 import { StatsChart } from './components/StatsChart';
 import { ReviewList } from './components/ReviewList';
-import { IncidenceChart } from './components/IncidenceChart';
+import { LegalReviewPanel } from './components/LegalReviewPanel';
+import { approveLegalReview, closeLegalReviewSupplement, createHumanLegalReviewChange, createLegalReviewAddendum, fetchLatestLegalReview, reauditLegalReview, reconcileLegalReviewSnapshot, rejectLegalReview, requestAsyncLegalReview, requestLegalReview, requestLegalReviewSupplement, requestLegalReviewTest, resolveLegalReviewChange, resolveLegalReviewFinding, resolveLegalReviewQuestion, saveLegalReviewCandidate } from './services/legalReviewClient';
+import { LEGAL_REVIEW_TEST_MATERIAL } from './lib/legalReviewTestMaterial';
+import { legalReviewButtonVisible, legalReviewTestButtonVisible, type LegalReviewView } from './lib/legalReviewTypes';
 import { cacheArticle, cacheQuestion } from './services/localCache';
 import { OfflineKnowledgeBase } from './components/OfflineKnowledgeBase';
 import { LocalPersistence } from './services/localPersistence';
+import { ATHENA_AUDIENCE_TITLE, ATHENA_CAREERS_LABEL, sanitizeAthenaVoice } from './lib/athenaVoice';
+import {
+  harvestCompressedReviewsLocal,
+  upsertCompressedReview,
+  deleteCompressedReview,
+  extractReviewBlock,
+  buildCompressedReview,
+  persistReviewFromMessage,
+  selectUserStudiedReviews,
+  canonicalSubjectForDayPart,
+  detectPartFromContent
+} from './lib/compressedReviews';
+import { failedQuestionRetryReward, pendingErrorsCount } from './lib/failedQuestionRetry';
+import { inferTrilhaContext, isTrilhaLesson, isDayCompletionNotice } from './lib/trilhaContext';
+import {
+  embedChallengeInContent,
+  extractChallengeFromText,
+  findChallengeBlockIndex,
+  normalizeObjectiveChallenge,
+  parseChallengeModelOutput,
+  resolveDisplayedChallenge
+} from './lib/objectiveChallenge';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const ATHENA_CEO_EMAIL = 'jhonny.spider@gmail.com';
+
+type AthenaTab = 'chat' | 'stats' | 'reviews' | 'mentees' | 'schedules' | 'trilha' | 'errors';
+
+function isCeoAccount(account: { email?: string | null } | null | undefined): boolean {
+  return (account?.email || '').toLowerCase().trim() === ATHENA_CEO_EMAIL;
+}
+
+function homologatedReviewReady(
+  lesson: HomologatedLesson | null | undefined,
+  day: number | undefined,
+  part: number
+): boolean {
+  return Boolean(
+    day !== undefined &&
+    lesson &&
+    lesson.day === day &&
+    lesson.part === part &&
+    lesson.status === 'approved' &&
+    !lesson.pendingCloud
+  );
+}
+
+type ResumeState = { tab: AthenaTab; sessionId: string | null };
+
+function resumeKey(uid: string) {
+  return `athena_ui_resume_${uid}`;
+}
+
+function loadResume(uid: string): ResumeState | null {
+  try {
+    const raw = localStorage.getItem(resumeKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ResumeState;
+    const tabs: AthenaTab[] = ['chat', 'stats', 'reviews', 'mentees', 'schedules', 'trilha', 'errors'];
+    if (!tabs.includes(parsed.tab)) return { tab: 'chat', sessionId: parsed.sessionId || null };
+    return { tab: parsed.tab, sessionId: parsed.sessionId || null };
+  } catch {
+    return null;
+  }
+}
+
+function saveResume(uid: string, state: ResumeState) {
+  try {
+    localStorage.setItem(resumeKey(uid), JSON.stringify(state));
+  } catch {
+    /* storage indisponível */
+  }
+}
+
 interface Message {
+  studyBaseline?: {version:number;sha256:string};
+  ceoEdited?: boolean;
   role: 'user' | 'model';
   content: string;
   challenge?: ChallengeData;
@@ -133,6 +237,7 @@ interface Message {
   }>;
   sourceType?: 'gemini' | 'offline_pareto';
   modelName?: string;
+  trilhaDay?: number;
   trilhaMaterialIndex?: number;
 }
 
@@ -203,43 +308,38 @@ interface Review {
   article: number;
   content: string;
   timestamp: number;
+  day?: number;
+  part?: number;
 }
 
-interface UserStat {
-  subjectName: string;
-  correctAnswers: number;
-  totalQuestions: number;
-  progress: number;
-  xp: number;
-}
+/* UserStat, GamificationData, Mentee, FailedQuestion imported from ./types */
 
-interface GamificationData {
-  totalXP: number;
-  level: number;
-  streak: number;
-  lastActive: number;
-  completedThemes: string[];
-}
-
-interface Mentee {
-  id: string;
-  displayName: string;
-  photoURL?: string;
-  email: string;
-  stats: UserStat[];
-  gamification?: GamificationData;
-}
-
-interface FailedQuestion extends Question {
-  id: string;
-  userId: string;
-  timestamp: number;
-  originalArticle?: number;
-}
-
-const MemoizedMarkdown = memo(({ content }: { content: string }) => (
-  <ReactMarkdown>{content}</ReactMarkdown>
-));
+const MemoizedMarkdown = memo(({
+  content,
+  lessonId,
+  blockIndex = 0,
+  lessonVersion,
+  lessonSha256
+}: {
+  content: string;
+  lessonId?: string;
+  blockIndex?: number;
+  lessonVersion?: number;
+  lessonSha256?: string;
+}) => {
+  if (lessonId) {
+    return (
+      <HighlightableContent
+        content={content}
+        lessonId={lessonId}
+        blockIndex={blockIndex}
+        lessonVersion={lessonVersion}
+        lessonSha256={lessonSha256}
+      />
+    );
+  }
+  return <ReactMarkdown>{emphasizeStudyMarkdown(presentSavedLesson(content))}</ReactMarkdown>;
+});
 
 MemoizedMarkdown.displayName = 'MemoizedMarkdown';
 
@@ -251,7 +351,9 @@ function QuizQuestion({
   onEvaluate,
   hideExplanationInitially = false,
   userName = "Mestre",
-  onDelete
+  onDelete,
+  isRetry = false,
+  isAlreadyCompletedDay = false
 }: { 
   question: Question, 
   onAnswer?: (index: number, correct: boolean) => void,
@@ -265,7 +367,9 @@ function QuizQuestion({
   onEvaluate?: (userAnswer: string, evaluation: any) => void,
   hideExplanationInitially?: boolean,
   userName?: string,
-  onDelete?: () => void
+  onDelete?: () => void,
+  isRetry?: boolean,
+  isAlreadyCompletedDay?: boolean
 }) {
   const [selected, setSelected] = useState<number | null>(savedAnswer ?? null);
   const [showExplanation, setShowExplanation] = useState(savedAnswer !== undefined && !hideExplanationInitially);
@@ -894,7 +998,7 @@ function QuizQuestion({
                     exit={{ opacity: 0, height: 0 }}
                     className="mt-3 overflow-hidden"
                   >
-                    <div className="p-4 bg-slate-900/60 border border-white/5 rounded-2xl italic text-xs leading-relaxed text-slate-300 whitespace-pre-wrap">
+                    <div className="athena-reading-explanation p-4 bg-slate-900/60 border border-white/5 rounded-2xl italic text-xs leading-relaxed text-slate-300 whitespace-pre-wrap">
                       <span className="font-black text-[10px] uppercase tracking-wider text-slate-500 block mb-2 font-mono">Gabarito Esperado (Espelho de Notas Máximas)</span>
                       {question.explanation}
                     </div>
@@ -947,16 +1051,42 @@ function QuizQuestion({
                 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
                 : "bg-amber-500/10 text-amber-400 border-amber-500/20"
             )}>
-              {selected === question.correctIndex ? (
-                <>
-                  <Zap size={10} className="fill-emerald-400/20" />
-                  Correto! +50 XP
-                </>
+              {isAlreadyCompletedDay ? (
+                selected === question.correctIndex ? (
+                  <>
+                    <Check size={10} className="text-emerald-400" />
+                    Correto
+                  </>
+                ) : (
+                  <>
+                    <X size={10} className="text-amber-400" />
+                    Incorreto
+                  </>
+                )
+              ) : isRetry ? (
+                selected === question.correctIndex ? (
+                  <>
+                    <Zap size={10} className="fill-emerald-400/20" />
+                    Correto! +25 XP
+                  </>
+                ) : (
+                  <>
+                    <Zap size={10} className="fill-amber-400/20" />
+                    Incorreto +5 XP
+                  </>
+                )
               ) : (
-                <>
-                  <Zap size={10} className="fill-amber-400/20" />
-                  Incorreto +10 XP
-                </>
+                selected === question.correctIndex ? (
+                  <>
+                    <Zap size={10} className="fill-emerald-400/20" />
+                    Correto! +50 XP
+                  </>
+                ) : (
+                  <>
+                    <Zap size={10} className="fill-amber-400/20" />
+                    Incorreto +10 XP
+                  </>
+                )
               )}
             </span>
           )}
@@ -1030,7 +1160,7 @@ function QuizQuestion({
                 </div>
                 <div className="space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">Entendimento Técnico</span>
-                  <p className="text-xs text-slate-300 leading-relaxed italic border-l-2 border-brand-gold/30 pl-4 py-1 font-sans">
+                  <p className="athena-reading-explanation text-xs text-slate-300 leading-relaxed italic border-l-2 border-brand-gold/30 pl-4 py-1 font-sans">
                      {question.explanation}
                   </p>
                 </div>
@@ -1100,17 +1230,20 @@ const ChatMessage = memo(({
   onApproveLesson,
   onApproveAndAdvance,
   onEditLesson,
+  onReviewLesson,
   isSavingHomologation,
   homologatedLessonState,
   onGoHome,
-  isDayCompleted
+  onReviewDay,
+  isDayCompleted,
+  onNavigateBlock
 }: { 
   msg: Message,
   msgIdx: number,
   messages: Message[],
   setMessages: (msgs: Message[]) => void,
   saveSession: (data: any) => void,
-  updateStats: (subject: string, correct: boolean, q: Question, answerIndex: number) => void,
+  updateStats: (subject: string, correct: boolean, q: Question, answerIndex: number, options?: any) => void,
   activeStudyItem: { scheduleId: string, itemIndex: number } | null,
   setActiveStudyItem: (item: any) => void,
   setActiveTab: (tab: any) => void,
@@ -1131,11 +1264,66 @@ const ChatMessage = memo(({
   onApproveLesson?: (idx: number) => Promise<any>,
   onApproveAndAdvance?: (idx: number) => Promise<void>,
   onEditLesson?: (idx: number) => void,
+  onReviewLesson?: (day: number, part: number, blockIndex: number) => void,
   isSavingHomologation?: boolean,
   homologatedLessonState?: HomologatedLesson | null,
   onGoHome?: () => void,
-  isDayCompleted?: boolean
+  onReviewDay?: () => void,
+  isDayCompleted?: boolean,
+  onNavigateBlock?: (day: number, blockIdx: number) => void
 }) => {
+  const [studyPending, setStudyPending] = useState(false);
+  const [expandedBlocksState, setExpandedBlocksState] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && detail.blockKey) {
+        setExpandedBlocksState(prev => ({ ...prev, [detail.blockKey]: detail.next }));
+      }
+    };
+    window.addEventListener('athena-block-toggle', handler);
+    return () => window.removeEventListener('athena-block-toggle', handler);
+  }, []);
+  useEffect(() => {
+    const day = msg.trilhaDay ?? trilhaDay, part = msg.trilhaMaterialIndex ?? trilhaMaterialIndex;
+    if (isCEO || msg.role !== 'model' || isDayCompletionNotice(msg) || day === undefined || part === undefined) return;
+    let active = true; const uid = auth.currentUser?.uid;
+    const pending = () => setStudyPending(true);
+    const synced = () => setStudyPending(false);
+    window.addEventListener('athena-study-pending', pending);
+    window.addEventListener('athena-study-synced', synced);
+    void loadStudyMaterial('day_' + day + '_part_' + part).then(async state => {
+      if (!active || auth.currentUser?.uid !== uid) return;
+      const currentMsgAnswers = msg.answers || {};
+      const serverAnswers = state.material.answers || {};
+      const mergedAnswers = { ...serverAnswers, ...currentMsgAnswers };
+      const serverBaseline = { version: state.material.lessonVersion, sha256: state.material.lessonSha256 };
+      const needsBaselineUpdate = !msg.studyBaseline || msg.studyBaseline.sha256 !== serverBaseline.sha256 || msg.studyBaseline.version !== serverBaseline.version;
+      if (JSON.stringify(mergedAnswers) !== JSON.stringify(currentMsgAnswers) || needsBaselineUpdate) {
+        setMessages((messages || []).map((m, i) => i === msgIdx ? { ...m, answers: mergedAnswers, studyBaseline: needsBaselineUpdate ? serverBaseline : (m.studyBaseline || serverBaseline) } : m));
+      }
+      const unsavedEntries = Object.entries(currentMsgAnswers).filter(([k, v]) => serverAnswers[k] !== v);
+      if (unsavedEntries.length === 0) {
+        setStudyPending(false);
+      } else if (!state.material.completed) {
+        const baselineToUse = needsBaselineUpdate ? serverBaseline : (msg.studyBaseline || serverBaseline);
+        for (const [qKey, val] of unsavedEntries) {
+          const qIdx = Number(qKey);
+          if (Number.isInteger(qIdx) && qIdx >= 0) {
+            void saveStudyAnswer('day_' + day + '_part_' + part, qIdx, val, baselineToUse)
+              .then(() => { if (active) setStudyPending(false); })
+              .catch(() => {});
+          }
+        }
+      }
+    }).catch(() => { if (active) setStudyPending(true); });
+    return () => {
+      active = false;
+      window.removeEventListener('athena-study-pending', pending);
+      window.removeEventListener('athena-study-synced', synced);
+    };
+  }, [isCEO, msg.trilhaDay, msg.trilhaMaterialIndex, trilhaDay, trilhaMaterialIndex, msgIdx]);
   const isUser = msg.role === 'user';
   const isError = !isUser && Boolean(
     msg.content && (
@@ -1151,6 +1339,31 @@ const ChatMessage = memo(({
   );
   
   const isInstruction = getIsInstructionMessage(msg);
+
+  const completionNotice = isDayCompletionNotice(msg);
+  const officialDay = completionNotice ? undefined : (msg.trilhaDay ?? trilhaDay);
+  const officialPart = completionNotice ? undefined : (msg.trilhaMaterialIndex ?? trilhaMaterialIndex);
+  const lessonKey = officialDay !== undefined && officialPart !== undefined
+    ? `day_${officialDay}_part_${officialPart}`
+    : (msg.subject && msg.article ? `article_${msg.subject}_${msg.article}` : (msg.subject ? `subject_${msg.subject}` : undefined));
+  const officialLesson =
+    homologatedLessonState &&
+    officialDay !== undefined &&
+    officialPart !== undefined &&
+    homologatedLessonState.day === officialDay &&
+    homologatedLessonState.part === officialPart
+      ? homologatedLessonState
+      : (officialDay !== undefined && officialPart !== undefined
+        ? getLocalHomologatedLesson(officialDay, officialPart)
+        : null);
+  const displayedChallenge = completionNotice ? undefined : resolveDisplayedChallenge({
+    messageChallenge: msg.challenge,
+    messageContent: msg.content,
+    officialChallenge: officialLesson?.challenge,
+    officialContent: officialLesson?.content,
+    preferOfficialForMatchingContent: msg.modelName === 'Oficial Homologado pelo CEO'
+  });
+  const challengeBlockIdx = completionNotice ? -1 : findChallengeBlockIndex(msg.blocks);
 
   if (isInstruction) return null;
   
@@ -1207,7 +1420,7 @@ const ChatMessage = memo(({
               ) : (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-mono text-emerald-400 shadow-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Gerado via IA Gemini ({msg.modelName || 'gemini-3.5-flash-lite'})</span>
+                  <span>Gerado via {contentEngineLabel(msg.modelName)} ({msg.modelName || 'gemini-3.8-flash'})</span>
                 </div>
               )}
             </div>
@@ -1215,116 +1428,217 @@ const ChatMessage = memo(({
 
           {!isUser && msg.blocks ? (
             <>
-              {msg.blocks.slice(0, (msg.currentBlockIndex ?? 0) + 1).map((block, blockIdx) => (
-                <motion.div 
-                  key={blockIdx}
-                  id={`block-${msgIdx}-${blockIdx}`}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={cn(
-                    "markdown-body scroll-mt-24",
-                    blockIdx > 0 && "pt-8 border-t border-white/10"
-                  )}
-                >
-                  <MemoizedMarkdown content={block.replace(/\[ATHENA_AVAILABILITY\]/g, '')} />
-                  
-                  {blockIdx === msg.blocks.length - 1 && !isUser && (msg.content.includes('[ATHENA_AVAILABILITY]') || msg.content.toLowerCase().includes('2 horas ou 4 horas')) && msgIdx === messages.length - 1 && (
-                    <div className="mt-10 p-6 bg-slate-900/50 border border-brand-gold/20 rounded-3xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-6 duration-700">
-                      <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black mb-6 flex items-center gap-2">
-                        <Target size={12} className="text-brand-gold" />
-                        Selecione sua disponibilidade
-                      </p>
-                      <div className="flex flex-col sm:flex-row gap-4">
+              {(() => {
+                const isDayAlreadyDone = Boolean(isDayCompleted);
+                const maxIndex = isDayAlreadyDone ? (msg.blocks.length - 1) : (msg.currentBlockIndex ?? 0);
+                const visibleBlocks = msg.blocks.slice(0, maxIndex + 1);
+                const blockStageTitles = [
+                  'Introdução & Foco de Leitura',
+                  'Lei Seca Essencial',
+                  'Jurisprudência e Teses dos Tribunais',
+                  'Doutrina Sistematizada e Fundamentos',
+                  'Desafio de Fixação / Questões Práticas',
+                  'Revisão Comprimida & Mnemônicos'
+                ];
+
+                return visibleBlocks.map((block, blockIdx) => {
+                  const blockKey = `part_${lessonKey || 'lesson'}_${blockIdx}`;
+                  const isExpanded = expandedBlocksState[blockKey] !== undefined
+                    ? expandedBlocksState[blockKey]
+                    : (() => {
+                        try {
+                          const raw = localStorage.getItem(`athena_expanded_${blockKey}`);
+                          if (raw !== null) return raw === 'true';
+                        } catch {}
+                        return true;
+                      })();
+
+                  return (
+                    <motion.div 
+                      key={blockIdx}
+                      id={`block-${msgIdx}-${blockIdx}`}
+                      data-study-category={blockIdx === 1 ? 'law' : blockIdx === 2 ? 'case-law' : blockIdx === 3 ? 'doctrine' : undefined}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={cn(
+                        "scroll-mt-24",
+                        blockIdx > 0 && "pt-6 border-t border-white/10"
+                      )}
+                    >
+                      <div className="flex items-center justify-between py-2.5 px-3.5 bg-slate-900/80 border border-white/10 rounded-2xl mb-4 select-none">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-brand-gold bg-brand-gold/15 px-2.5 py-1 rounded-xl border border-brand-gold/25 font-mono">
+                            Parte {blockIdx + 1} de {msg.blocks.length}
+                          </span>
+                          <span className="text-xs font-bold text-slate-200">
+                            {blockStageTitles[blockIdx] || `Parte ${blockIdx + 1}`}
+                          </span>
+                          {isDayAlreadyDone && (
+                            <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
+                              <Check size={10} /> Concluída
+                            </span>
+                          )}
+                        </div>
                         <button
-                          onClick={() => handleSendMessageRequest("Minha disponibilidade é de 2 horas diárias.", false)}
-                          className="group flex-1 bg-slate-950 border-2 border-brand-gold/30 text-brand-gold hover:border-brand-gold hover:bg-brand-gold hover:text-slate-950 px-8 py-6 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-[0_10px_30px_rgba(0,0,0,0.3)] active:scale-95 flex items-center justify-center gap-3"
+                          type="button"
+                          onClick={() => {
+                            const next = !isExpanded;
+                            try {
+                              localStorage.setItem(`athena_expanded_${blockKey}`, String(next));
+                            } catch {}
+                            window.dispatchEvent(new CustomEvent('athena-block-toggle', { detail: { blockKey, next } }));
+                          }}
+                          className="px-2.5 py-1 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors flex items-center gap-1.5 text-[10px] font-bold cursor-pointer"
+                          aria-label={isExpanded ? `Recolher Parte ${blockIdx + 1}` : `Expandir Parte ${blockIdx + 1}`}
                         >
-                          <Clock size={20} className="group-hover:scale-110 transition-transform" />
-                          2 Horas Diárias
-                        </button>
-                        <button
-                          onClick={() => handleSendMessageRequest("Minha disponibilidade é de 4 horas diárias.", false)}
-                          className="group flex-1 bg-brand-gold text-slate-950 hover:bg-white px-8 py-6 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-[0_15px_40px_rgba(212,175,55,0.3)] active:scale-95 flex items-center justify-center gap-3"
-                        >
-                          <Zap size={20} className="group-hover:scale-110 transition-transform" />
-                          4 Horas Diárias
+                          <span>{isExpanded ? 'Recolher' : 'Expandir'}</span>
+                          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                         </button>
                       </div>
-                    </div>
-                  )}
-                  
-                  {blockIdx === 4 && msg.challenge && (
-                    <div className="mt-8">
-                      {msg.challenge.questions.map((q, qIdx) => (
-                        <QuizQuestion 
-                          key={qIdx} 
-                          question={q} 
-                          savedAnswer={msg.answers?.[qIdx]}
-                          savedEvaluation={msg.evaluations?.[qIdx]}
-                          userName={auth.currentUser?.displayName || "Mestre"}
-                          onEvaluate={(userAnswer, evalObj) => {
-                            const updatedMessages = (messages || []).map((m, mIdx) => {
-                              if (mIdx === msgIdx) {
-                                return { 
-                                  ...m, 
-                                  evaluations: { 
-                                    ...(m.evaluations || {}), 
-                                    [qIdx]: {
+
+                      {isExpanded && (
+                        <div className="space-y-6">
+                          <div className="markdown-body">
+                            <MemoizedMarkdown
+                              content={block.replace(/\[ATHENA_AVAILABILITY\]/g, '')}
+                              lessonId={!isUser && lessonKey ? lessonKey : undefined}
+                              blockIndex={blockIdx}
+                              lessonVersion={officialLesson?.version}
+                            />
+                          </div>
+                          
+                          {blockIdx === msg.blocks.length - 1 && !isUser && (msg.content.includes('[ATHENA_AVAILABILITY]') || msg.content.toLowerCase().includes('2 horas ou 4 horas')) && msgIdx === messages.length - 1 && (
+                            <div className="mt-10 p-6 bg-slate-900/50 border border-brand-gold/20 rounded-3xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-6 duration-700">
+                              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black mb-6 flex items-center gap-2">
+                                <Target size={12} className="text-brand-gold" />
+                                Selecione sua disponibilidade
+                              </p>
+                              <div className="flex flex-col sm:flex-row gap-4">
+                                <button
+                                  onClick={() => handleSendMessageRequest("Minha disponibilidade é de 2 horas diárias.", false)}
+                                  className="group flex-1 bg-slate-950 border-2 border-brand-gold/30 text-brand-gold hover:border-brand-gold hover:bg-brand-gold hover:text-slate-950 px-8 py-6 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-[0_10px_30px_rgba(0,0,0,0.3)] active:scale-95 flex items-center justify-center gap-3"
+                                >
+                                  <Clock size={20} className="group-hover:scale-110 transition-transform" />
+                                  2 Horas Diárias
+                                </button>
+                                <button
+                                  onClick={() => handleSendMessageRequest("Minha disponibilidade é de 4 horas diárias.", false)}
+                                  className="group flex-1 bg-brand-gold text-slate-950 hover:bg-white px-8 py-6 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-[0_15px_40px_rgba(212,175,55,0.3)] active:scale-95 flex items-center justify-center gap-3"
+                                >
+                                  <Zap size={20} className="group-hover:scale-110 transition-transform" />
+                                  4 Horas Diárias
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {blockIdx === challengeBlockIdx && displayedChallenge && (
+                            <div className="mt-8">
+                              {displayedChallenge.questions.map((q, qIdx) => (
+                                <QuizQuestion 
+                                  key={qIdx} 
+                                  question={q} 
+                                  savedAnswer={msg.answers?.[qIdx]}
+                                  savedEvaluation={msg.evaluations?.[qIdx]}
+                                  userName={auth.currentUser?.displayName || "Mestre"}
+                                  onEvaluate={(userAnswer, evalObj) => {
+                                    const updatedMessages = (messages || []).map((m, mIdx) => {
+                                      if (mIdx === msgIdx) {
+                                        return { 
+                                          ...m, 
+                                          evaluations: { 
+                                            ...(m.evaluations || {}), 
+                                            [qIdx]: {
+                                              userAnswer,
+                                              scores: evalObj.scores,
+                                              finalScore: evalObj.finalScore,
+                                              feedback: evalObj.feedback
+                                            } 
+                                          } 
+                                        };
+                                      }
+                                      return m;
+                                    });
+                                    setMessages(updatedMessages);
+                                    saveSession({ messages: updatedMessages });
+                                    // Cache to IndexedDB
+                                    cacheQuestion({
+                                      ...q,
+                                      subject: msg.subject || 'Conteúdo Geral'
+                                    }, msg.answers?.[qIdx], {
                                       userAnswer,
                                       scores: evalObj.scores,
                                       finalScore: evalObj.finalScore,
                                       feedback: evalObj.feedback
-                                    } 
-                                  } 
-                                };
-                              }
-                              return m;
-                            });
-                            setMessages(updatedMessages);
-                            saveSession({ messages: updatedMessages });
-                            // Cache to IndexedDB
-                            cacheQuestion({
-                              ...q,
-                              subject: msg.subject || 'Conteúdo Geral'
-                            }, msg.answers?.[qIdx], {
-                              userAnswer,
-                              scores: evalObj.scores,
-                              finalScore: evalObj.finalScore,
-                              feedback: evalObj.feedback
-                            });
-                          }}
-                          onAnswer={(answerIndex, correct) => {
-                            if (msg.subject) {
-                              updateStats(msg.subject, correct, q, answerIndex);
-                              
-                              const updatedMessages = (messages || []).map((m, mIdx) => {
-                                if (mIdx === msgIdx) {
-                                  return { 
-                                    ...m, 
-                                    answers: { ...(m.answers || {}), [qIdx]: answerIndex } 
-                                  };
-                                }
-                                return m;
-                              });
-                              setMessages(updatedMessages);
-                              saveSession({ messages: updatedMessages });
-                              // Cache to IndexedDB
-                              cacheQuestion({
-                                ...q,
-                                subject: msg.subject || 'Conteúdo Geral'
-                              }, answerIndex);
-                            }
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </motion.div>
-              ))}
+                                    });
+                                  }}
+                                  onAnswer={async (answerIndex, correct) => {
+                                    const day = msg.trilhaDay ?? trilhaDay, part = msg.trilhaMaterialIndex ?? trilhaMaterialIndex;
+                                    if (!isCEO && day !== undefined && part !== undefined && answerIndex >= 0) {
+                                      let baseline = msg.studyBaseline;
+                                      if (!baseline) {
+                                        const hom = (await getHomologatedLesson(day, part)) || getLocalHomologatedLesson(day, part);
+                                        if (hom?.content) {
+                                          baseline = { version: hom.version || 1, sha256: await hashStudyContent(hom.content) };
+                                        }
+                                      }
+                                      void saveStudyAnswer('day_'+day+'_part_'+part, qIdx, answerIndex, baseline)
+                                        .then(() => {
+                                          window.dispatchEvent(new CustomEvent('athena-study-synced', { detail: { day, part } }));
+                                        })
+                                        .catch(() => {
+                                          window.dispatchEvent(new CustomEvent('athena-study-pending', { detail: { day, part } }));
+                                        });
+                                    }
+                                    if (msg.subject) {
+                                      updateStats(msg.subject, correct, q, answerIndex, {
+                                        trilhaDay: day,
+                                        trilhaMaterialIndex: part,
+                                        studyBaseline: msg.studyBaseline
+                                      });
+                                      
+                                      const updatedMessages = (messages || []).map((m, mIdx) => {
+                                        if (mIdx === msgIdx) {
+                                          return { 
+                                            ...m, 
+                                            answers: { ...(m.answers || {}), [qIdx]: answerIndex } 
+                                          };
+                                        }
+                                        return m;
+                                      });
+                                      setMessages(updatedMessages);
+                                      saveSession({ messages: updatedMessages });
+                                      // Cache to IndexedDB
+                                      cacheQuestion({
+                                        ...q,
+                                        subject: msg.subject || 'Conteúdo Geral'
+                                      }, answerIndex);
+                                    }
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {blockIdx === challengeBlockIdx && isCEO && !displayedChallenge && (
+                            <p className="mt-4 text-xs text-amber-200/90">
+                              Este bloco está no catálogo sem questões objetivas. Use “Regerar questões” para refazer só esta parte.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                });
+              })()}
             </>
           ) : (
             <div className="markdown-body">
-              <MemoizedMarkdown content={(msg.content || '').replace(/\[ATHENA_AVAILABILITY\]/g, '')} />
+              <MemoizedMarkdown
+                content={(msg.content || '').replace(/\[ATHENA_AVAILABILITY\]/g, '')}
+                lessonId={!isUser && lessonKey ? lessonKey : undefined}
+                blockIndex={0}
+                lessonVersion={officialLesson?.version}
+              />
               
               {!isUser && msg.content && (msg.content.includes('[ATHENA_AVAILABILITY]') || msg.content.toLowerCase().includes('2 horas ou 4 horas')) && msgIdx === messages.length - 1 && (
                 <div className="mt-10 p-6 bg-slate-900/50 border border-brand-gold/20 rounded-3xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-6 duration-700">
@@ -1377,16 +1691,6 @@ const ChatMessage = memo(({
 
               <div className="space-y-4">
                 <h4 className="text-[10px] font-serif font-bold text-brand-gold uppercase tracking-[0.2em] flex items-center gap-2">
-                  <BarChart2 size={16} />
-                  Incidência por Disciplina/Tema
-                </h4>
-                <Suspense fallback={<div className="h-44 bg-slate-950/40 rounded-3xl border border-white/5 animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Processando mapa estocástico de incidência...</div>}>
-                  <IncidenceChart data={msg.editalData.raioX} />
-                </Suspense>
-              </div>
-
-              <div className="space-y-4">
-                <h4 className="text-[10px] font-serif font-bold text-brand-gold uppercase tracking-[0.2em] flex items-center gap-2">
                   <Target size={16} />
                   Cronograma Ciclo-Evolutivo
                 </h4>
@@ -1426,6 +1730,35 @@ const ChatMessage = memo(({
               animate={{ opacity: 1 }}
               className="pt-4 flex flex-wrap gap-3"
             >
+              {(() => {
+                const lessonCtx = inferTrilhaContext(
+                  { trilhaDay, trilhaMaterialIndex, title: '' },
+                  messages,
+                  msg
+                );
+                const effectiveDay = lessonCtx.day;
+                const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? lessonCtx.part);
+                const reviewReady = homologatedReviewReady(homologatedLessonState, effectiveDay, msgPartIdx);
+                if (!legalReviewButtonVisible(Boolean(isCEO), reviewReady) || effectiveDay === undefined) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onReviewLesson?.(effectiveDay, msgPartIdx, msg.currentBlockIndex ?? 0)}
+                    className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                    title="Audita somente a parte aberta. A aula publicada não é alterada."
+                  >
+                    <Search size={13} />
+                    <span>Revisar esta parte</span>
+                  </button>
+                );
+              })()}
+              {!isCEO && studyPending && <p role="status" aria-live="polite" className="text-sm text-amber-300">Confirmação pendente. Você pode sair e retomar; nenhuma conclusão foi confirmada.</p>}
+              {isDayCompleted && (
+                <div className="flex items-center gap-2 p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-xs text-emerald-300 font-medium w-full my-2">
+                  <CheckCircle size={15} className="text-emerald-400 shrink-0" />
+                  <span>Dia concluído — Todas as partes internas e blocos homologados estão liberados para navegação e revisão.</span>
+                </div>
+              )}
               {(msg.currentBlockIndex ?? 0) < msg.blocks.length - 1 ? (
                 <div className="flex flex-wrap gap-3 items-center w-full pt-2">
                   {isError && retryMessage && (
@@ -1449,7 +1782,7 @@ const ChatMessage = memo(({
                       }}
                       className="w-full sm:w-auto min-w-[220px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
                     >
-                      <span className="font-extrabold tracking-wider">AVANÇAR BLOCO</span>
+                      <span className="font-extrabold tracking-wider">AVANÇAR PARTE (Parte {(msg.currentBlockIndex ?? 0) + 2} de {msg.blocks.length})</span>
                       <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                     </button>
                   )}
@@ -1468,14 +1801,28 @@ const ChatMessage = memo(({
                       </button>
                     )}
 
-                    {!isError && trilhaDay !== undefined && trilhaTotalMaterials !== undefined ? (
+                    {!isError && isTrilhaLesson(inferTrilhaContext(
+                      { trilhaDay, trilhaMaterialIndex, title: '' },
+                      messages,
+                      msg
+                    ), msg) ? (
                       (() => {
-                        const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? 0);
-                        const localApproved = getLocalHomologatedLesson(trilhaDay, msgPartIdx);
-                        const isThisPartApproved = Boolean(
-                          (localApproved && localApproved.status === 'approved') ||
-                          (homologatedLessonState && homologatedLessonState.day === trilhaDay && homologatedLessonState.part === msgPartIdx && homologatedLessonState.status === 'approved')
+                        const lessonCtx = inferTrilhaContext(
+                          { trilhaDay, trilhaMaterialIndex, title: '' },
+                          messages,
+                          msg
                         );
+                        const effectiveDay = lessonCtx.day;
+                        const msgPartIdx = msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : (trilhaMaterialIndex ?? lessonCtx.part);
+                        const totalParts = (trilhaTotalMaterials && trilhaTotalMaterials > 0) ? trilhaTotalMaterials : (lessonCtx.total || 5);
+                        const localApproved = effectiveDay !== undefined ? getLocalHomologatedLesson(effectiveDay, msgPartIdx) : null;
+                        const cachedForPart =
+                          homologatedLessonState &&
+                          homologatedLessonState.day === effectiveDay &&
+                          homologatedLessonState.part === msgPartIdx
+                            ? homologatedLessonState
+                            : localApproved;
+                        const isThisPartApproved = cacheHoldsText(cachedForPart, msg.content);
 
                         return (
                           <div className="w-full flex flex-col items-center gap-3.5">
@@ -1489,7 +1836,7 @@ const ChatMessage = memo(({
                                   <div>
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-brand-gold">
-                                        Curadoria • Parte {msgPartIdx + 1} de {trilhaTotalMaterials}
+                                        Curadoria • Bloco {msgPartIdx + 1} de {totalParts}
                                       </span>
                                       {isThisPartApproved ? (
                                         <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -1503,8 +1850,8 @@ const ChatMessage = memo(({
                                     </div>
                                     <p className="text-[11px] text-slate-300 font-medium mt-0.5">
                                       {isThisPartApproved 
-                                        ? `Esta parte já foi homologada e está garantida no cache compartilhado.`
-                                        : `Salve esta parte no cache central para garantir seu acesso caso ocorra instabilidade.`}
+                                        ? `Este bloco já foi homologado e está garantido no cache compartilhado.`
+                                        : `Salve este bloco no cache central para garantir seu acesso caso ocorra instabilidade.`}
                                     </p>
                                   </div>
                                 </div>
@@ -1514,7 +1861,7 @@ const ChatMessage = memo(({
                                     type="button"
                                     onClick={() => onEditLesson?.(msgIdx)}
                                     className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                    title="Editar ou refinar o texto desta parte antes de homologar"
+                                    title="Editar ou refinar o texto deste bloco antes de homologar"
                                   >
                                     <Edit3 size={13} />
                                     <span>Editar</span>
@@ -1526,7 +1873,7 @@ const ChatMessage = memo(({
                                       onClick={() => onApproveLesson?.(msgIdx)}
                                       disabled={isSavingHomologation}
                                       className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-brand-gold via-amber-400 to-yellow-500 hover:brightness-110 text-slate-950 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-[0_4px_15px_rgba(212,175,55,0.3)] active:scale-95 cursor-pointer"
-                                      title="Salvar esta parte imediatamente no cache oficial e Firestore"
+                                      title="Salvar este bloco imediatamente no cache oficial e Firestore"
                                     >
                                       <Trophy size={14} />
                                       <span>{isSavingHomologation ? 'Salvando...' : 'Aprovar e Salvar'}</span>
@@ -1536,8 +1883,8 @@ const ChatMessage = memo(({
                               </div>
                             )}
 
-                            {/* Botões de Avanço / Conclusão */}
-                            {msgPartIdx < trilhaTotalMaterials - 1 ? (
+                            {/* Botões de Avanço / Conclusão de Bloco */}
+                            {msgPartIdx < totalParts - 1 ? (
                               isCEO && !isThisPartApproved ? (
                                 <div className="flex flex-col items-center gap-2 w-full sm:w-auto">
                                   <button
@@ -1548,47 +1895,77 @@ const ChatMessage = memo(({
                                   >
                                     <Trophy size={18} className="group-hover:scale-110 transition-transform text-slate-950" />
                                     <span className="font-extrabold tracking-wider">
-                                      {isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & IR PARA PARTE ${msgPartIdx + 2} DE ${trilhaTotalMaterials}`}
+                                      {isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & IR PARA BLOCO ${msgPartIdx + 2} DE ${totalParts}`}
                                     </span>
                                     <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                                   </button>
 
+                                  <div className="flex items-center gap-3">
+                                    {msgPartIdx > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => onNavigateBlock?.(effectiveDay || 1, msgPartIdx - 1)}
+                                        className="text-[11px] font-bold text-slate-400 hover:text-slate-200 underline underline-offset-4 transition-colors py-1 cursor-pointer flex items-center gap-1"
+                                      >
+                                        <ChevronLeft size={12} />
+                                        <span>Bloco Anterior ({msgPartIdx})</span>
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        advanceStage(msgIdx);
+                                        setTimeout(() => {
+                                          e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                                        }, 120);
+                                      }}
+                                      className="text-[11px] font-bold text-slate-400 hover:text-slate-200 underline underline-offset-4 transition-colors py-1 cursor-pointer"
+                                    >
+                                      Avançar para Bloco {msgPartIdx + 2} sem salvar no cache
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full justify-center">
+                                  {msgPartIdx > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onNavigateBlock?.(effectiveDay || 1, msgPartIdx - 1)}
+                                      className="px-5 py-3.5 rounded-2xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 text-xs font-bold transition-all cursor-pointer flex items-center gap-2"
+                                    >
+                                      <ChevronLeft size={16} />
+                                      <span>Bloco Anterior ({msgPartIdx})</span>
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={(e) => {
-                                      advanceStage(msgIdx);
-                                      setTimeout(() => {
-                                        e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                                      }, 120);
+                                      if (isCEO && onNavigateBlock) {
+                                        onNavigateBlock(effectiveDay || 1, msgPartIdx + 1);
+                                      } else {
+                                        advanceStage(msgIdx);
+                                        setTimeout(() => {
+                                          e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                                        }, 120);
+                                      }
                                     }}
-                                    className="text-[11px] font-bold text-slate-400 hover:text-slate-200 underline underline-offset-4 transition-colors py-1 cursor-pointer"
+                                    className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
                                   >
-                                    Avançar para Parte {msgPartIdx + 2} sem salvar no cache
+                                    <span className="font-extrabold tracking-wider">
+                                      IR PARA O BLOCO {msgPartIdx + 2} DE {totalParts}
+                                    </span>
+                                    <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
                                   </button>
                                 </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    advanceStage(msgIdx);
-                                    setTimeout(() => {
-                                      e.currentTarget?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                                    }, 120);
-                                  }}
-                                  className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.35)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.5)] border border-amber-300/60 active:scale-98 transition-all cursor-pointer group"
-                                >
-                                  <span className="font-extrabold tracking-wider">
-                                    IR PARA PARTE {msgPartIdx + 2} DE {trilhaTotalMaterials}
-                                  </span>
-                                  <ChevronRight size={18} className="group-hover:translate-x-1.5 transition-transform stroke-[2.5]" />
-                                </button>
                               )
                             ) : (() => {
                               const isDayFinished = Boolean(
-                                isDayCompleted || 
+                                isDayCompleted ||
                                 msg.content?.includes("Parabéns de Elite") || 
-                                msg.content?.includes("completou todos os blocos") || 
-                                msg.content?.includes("Lição Pulada")
+                                msg.content?.includes("completou todos os blocos") ||
+                                msg.content?.includes("completou todas as partes") || 
+                                msg.content?.includes("Conclusão confirmada pelo servidor") ||
+                                (isCEO && msg.content?.includes("Lição Pulada"))
                               );
 
                               if (isDayFinished) {
@@ -1597,21 +1974,23 @@ const ChatMessage = memo(({
                                     <button
                                       type="button"
                                       onClick={onGoHome}
-                                      className="w-full sm:w-auto min-w-[280px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.4)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.6)] border border-amber-300/80 active:scale-98 transition-all cursor-pointer group"
+                                      className="w-full sm:w-auto min-w-[240px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(212,175,55,0.4)] hover:shadow-[0_15px_40px_rgba(212,175,55,0.6)] border border-amber-300/80 active:scale-98 transition-all cursor-pointer group"
                                     >
                                       <Home size={18} className="group-hover:scale-110 transition-transform stroke-[2.5]" />
-                                      <span className="font-extrabold tracking-wider">VOLTAR PARA A PÁGINA INICIAL</span>
+                                      <span className="font-extrabold tracking-wider">Voltar à página inicial</span>
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        setActiveTab('trilha');
+                                        if (onReviewDay) {
+                                          onReviewDay();
+                                        }
                                         window.scrollTo({ top: 0, behavior: 'smooth' });
                                       }}
                                       className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-4 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 rounded-2xl text-xs font-bold transition-all cursor-pointer"
                                     >
-                                      <Trophy size={16} className="text-brand-gold" />
-                                      <span>Ver Mapa da Trilha (100 Dias)</span>
+                                      <BookOpen size={16} className="text-brand-gold" />
+                                      <span>Revisar o Dia concluído</span>
                                     </button>
                                   </div>
                                 );
@@ -1628,7 +2007,7 @@ const ChatMessage = memo(({
                                   className="w-full sm:w-auto min-w-[280px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-brand-gold via-amber-400 to-emerald-400 hover:from-yellow-400 hover:to-emerald-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.4)] active:scale-98 transition-all cursor-pointer group"
                                 >
                                   <Trophy size={18} className="group-hover:scale-110 transition-transform" />
-                                  <span>{isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & CONCLUIR DIA ${trilhaDay}`}</span>
+                                  <span>{isSavingHomologation ? 'SALVANDO NO CACHE...' : `APROVAR & CONCLUIR DIA ${effectiveDay}`}</span>
                                 </button>
                               ) : (
                                 <button
@@ -1636,7 +2015,7 @@ const ChatMessage = memo(({
                                   onClick={() => advanceStage(msgIdx)}
                                   className="w-full sm:w-auto min-w-[260px] flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.35)] active:scale-98 transition-all cursor-pointer group"
                                 >
-                                  <span>CONCLUIR DIA {trilhaDay} DA TRILHA</span>
+                                  <span>CONCLUIR DIA {effectiveDay} DA TRILHA</span>
                                   <Trophy size={18} className="group-hover:scale-110 transition-transform" />
                                 </button>
                               );
@@ -1672,297 +2051,132 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   // Estados do Novo Sistema de Autenticação ATHENA (Cadastro & Login Unificado)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [loginIdentifier, setLoginIdentifier] = useState(() => {
-    try { return localStorage.getItem('athena_saved_login_email') || ''; } catch { return ''; }
-  });
-  const [loginAccessCode, setLoginAccessCode] = useState('');
-  
-  // Estados de Cadastro de Novo Estudante
+  const [authBusy, setAuthBusy] = useState(false);
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
-  const [registerCpf, setRegisterCpf] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
-  const [registeredSuccess, setRegisteredSuccess] = useState<RegisteredStudent | null>(null);
-  const [copiedCode, setCopiedCode] = useState(false);
-
-  // Estados de Recuperação de Código (Esqueci a Senha)
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registeredSuccess, setRegisteredSuccess] = useState<{ fullName: string; email: string; emailSent: boolean; chosePassword: boolean; delivery: 'password' | 'link' | 'none' } | null>(null);
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotInput, setForgotInput] = useState('');
-  const [forgotResult, setForgotResult] = useState<RegisteredStudent | null>(null);
+  const [forgotSent, setForgotSent] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
-
-  const formatCpf = (val: string): string => {
-    const raw = val.replace(/\D/g, '').slice(0, 11);
-    if (raw.length <= 3) return raw;
-    if (raw.length <= 6) return `${raw.slice(0, 3)}.${raw.slice(3)}`;
-    if (raw.length <= 9) return `${raw.slice(0, 3)}.${raw.slice(3, 6)}.${raw.slice(6)}`;
-    return `${raw.slice(0, 3)}.${raw.slice(3, 6)}.${raw.slice(6, 9)}-${raw.slice(9, 11)}`;
-  };
-
-  const getSavedRegisteredStudents = (): RegisteredStudent[] => {
-    try {
-      const raw = localStorage.getItem('athena_registered_students');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const saveRegisteredStudentLocally = (student: RegisteredStudent) => {
-    try {
-      const list = getSavedRegisteredStudents().filter(s => s.cpf !== student.cpf && s.email !== student.email);
-      list.push(student);
-      localStorage.setItem('athena_registered_students', JSON.stringify(list));
-    } catch (e) {
-      console.warn('Erro ao salvar estudante localmente:', e);
-    }
-  };
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
 
   const handleRegisterStudent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (authBusy) return;
     setAuthError(null);
-
-    const name = registerName.trim();
-    const rawCpf = registerCpf.replace(/\D/g, '');
-    const email = registerEmail.trim().toLowerCase();
-
-    if (name.length < 3) {
-      setAuthError("Por favor, informe seu nome completo.");
-      return;
-    }
-    if (rawCpf.length !== 11) {
-      setAuthError("Por favor, informe um CPF válido com 11 dígitos.");
-      return;
-    }
-    if (!email || !email.includes('@') || !email.includes('.')) {
-      setAuthError("Por favor, informe um endereço de e-mail válido.");
-      return;
-    }
-
-    // Gera um código de acesso de 6 dígitos numérico único
-    const accessCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const safeUid = `student_${rawCpf}`;
-
-    const newStudent: RegisteredStudent = {
-      uid: safeUid,
-      fullName: name,
-      cpf: registerCpf,
-      email,
-      accessCode,
-      createdAt: Date.now(),
-      trialExpiresAt: Date.now() + 100 * 24 * 60 * 60 * 1000
-    };
-
-    saveRegisteredStudentLocally(newStudent);
-    setLoginIdentifier(email);
-    setLoginAccessCode(accessCode);
-
-    // Tenta persistir de forma não-bloqueante no Firestore
+    setAuthBusy(true);
     try {
-      if (!isQuotaExhausted()) {
-        const docRef = doc(db, 'users', safeUid);
-        setDoc(docRef, cleanData(newStudent), { merge: true }).catch(() => {});
-      }
-    } catch {}
-
-    setRegisteredSuccess(newStudent);
-  };
-
-  const handleCompleteRegisterLogin = () => {
-    if (!registeredSuccess) return;
-    const studentUser = {
-      uid: registeredSuccess.uid,
-      displayName: registeredSuccess.fullName,
-      email: registeredSuccess.email,
-      photoURL: '',
-      emailVerified: true
-    };
-    try {
-      localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
-      localStorage.setItem('athena_saved_login_email', registeredSuccess.email);
-    } catch {}
-    setUser(studentUser as any);
-    setRegisteredSuccess(null);
-    setAuthError(null);
-  };
-
-  const handleLoginAsCEO = () => {
-    const ceoUser = {
-      uid: 'jhonny-spider-ceo',
-      displayName: 'Jhonny (CEO)',
-      email: 'jhonny.spider@gmail.com',
-      photoURL: '',
-      emailVerified: true
-    };
-    localStorage.setItem('athena_local_user', JSON.stringify(ceoUser));
-    setUser(ceoUser as any);
-    setAuthError(null);
+      const result = await registerAccount({
+        name: registerName,
+        email: registerEmail,
+        password: registerPassword
+      });
+      setLoginIdentifier(registerEmail.trim().toLowerCase());
+      setRegisteredSuccess({
+        fullName: registerName.trim(),
+        email: registerEmail.trim().toLowerCase(),
+        emailSent: result.emailSent,
+        delivery: result.delivery,
+        chosePassword: registerPassword.trim().length > 0
+      });
+      setRegisterPassword('');
+    } catch (error) {
+      setAuthError(publicClientAuthError(error));
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const handleUnifiedLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (authBusy) return;
     setAuthError(null);
-
-    const identifier = loginIdentifier.trim().toLowerCase();
-    const rawId = identifier.replace(/\D/g, '');
-    const code = loginAccessCode.trim();
-
-    if (!identifier) {
-      setAuthError("Informe seu E-mail ou CPF para acessar.");
-      return;
-    }
-    if (!code) {
-      setAuthError("Informe seu Código de Acesso / Senha.");
-      return;
-    }
-
+    setAuthBusy(true);
     try {
-      localStorage.setItem('athena_saved_login_email', identifier);
-    } catch {}
-
-    // 1. Verificação Unificada do CEO Mestre
-    if (identifier === CEO_EMAIL.toLowerCase() && code === '7777') {
-      handleLoginAsCEO();
-      return;
+      await loginWithEmail(loginIdentifier, loginPassword);
+      setLoginPassword('');
+    } catch (error) {
+      setAuthError(publicClientAuthError(error));
+    } finally {
+      setAuthBusy(false);
     }
+  };
 
-    // 2. Busca entre estudantes cadastrados no dispositivo
-    const localStudents = getSavedRegisteredStudents();
-    const found = localStudents.find(s => 
-      s.email.toLowerCase() === identifier || 
-      (rawId.length >= 9 && s.cpf.replace(/\D/g, '') === rawId)
-    );
-
-    if (found) {
-      if (found.accessCode === code) {
-        const studentUser = {
-          uid: found.uid,
-          displayName: found.fullName,
-          email: found.email,
-          photoURL: '',
-          emailVerified: true
-        };
-        try {
-          localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
-        } catch {}
-        setUser(studentUser as any);
-        setAuthError(null);
-        return;
-      } else {
-        setAuthError("Código de acesso incorreto. Clique em 'Esqueci meu código de acesso' abaixo para recuperar.");
-        return;
-      }
+  const handleGoogleLogin = async () => {
+    if (authBusy) return;
+    setAuthError(null);
+    setAuthBusy(true);
+    try {
+      await loginWithGoogle();
+    } catch (error) {
+      setAuthError(publicClientAuthError(error));
+    } finally {
+      setAuthBusy(false);
     }
-
-    // 3. Fallback: Se for novo aparelho e online, consulta nuvem
-    if (!isQuotaExhausted() && rawId.length === 11) {
-      try {
-        const snap = await getDoc(doc(db, 'users', `student_${rawId}`));
-        if (snap.exists()) {
-          const remoteStudent = snap.data() as RegisteredStudent;
-          if (remoteStudent && remoteStudent.accessCode === code) {
-            saveRegisteredStudentLocally(remoteStudent);
-            const studentUser = {
-              uid: remoteStudent.uid,
-              displayName: remoteStudent.fullName,
-              email: remoteStudent.email,
-              photoURL: '',
-              emailVerified: true
-            };
-            try {
-              localStorage.setItem('athena_local_user', JSON.stringify(studentUser));
-            } catch {}
-            setUser(studentUser as any);
-            return;
-          }
-        }
-      } catch {}
-    }
-
-    // Se nenhum cadastro for encontrado
-    setAuthError("E-mail/CPF ou código de acesso não encontrado. Caso ainda não possua cadastro, clique na aba 'Cadastre-se' acima.");
   };
 
   const handleForgotCode = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (authBusy) return;
     setForgotError(null);
-    setForgotResult(null);
-
-    const term = forgotInput.trim().toLowerCase();
-    const rawTerm = term.replace(/\D/g, '');
-
-    if (!term) {
-      setForgotError("Informe seu E-mail ou CPF cadastrado.");
-      return;
-    }
-
-    const localStudents = getSavedRegisteredStudents();
-    let match = localStudents.find(s => 
-      s.email.toLowerCase() === term || 
-      (rawTerm.length >= 9 && s.cpf.replace(/\D/g, '') === rawTerm)
-    );
-
-    if (!match && !isQuotaExhausted() && rawTerm.length === 11) {
-      try {
-        const snap = await getDoc(doc(db, 'users', `student_${rawTerm}`));
-        if (snap.exists()) {
-          match = snap.data() as RegisteredStudent;
-        }
-      } catch {}
-    }
-
-    if (match) {
-      setForgotResult(match);
-    } else {
-      setForgotError("Nenhum cadastro encontrado com este dado. Acesse a aba 'Cadastre-se' para criar sua conta.");
-    }
-  };
-
-  const handleLoginAsGuest = () => {
-    const guestUser = {
-      uid: `aluno-${Date.now()}`,
-      displayName: 'Aluno(a) ATHENA',
-      email: 'aluno@athena.app',
-      photoURL: '',
-      emailVerified: false
-    };
+    setForgotSent(false);
+    setAuthBusy(true);
     try {
-      localStorage.setItem('athena_local_user', JSON.stringify(guestUser));
-    } catch {}
-    setUser(guestUser as any);
-    setAuthError(null);
-  };
-
-  const handleGoogleLogin = async () => {
-    setAuthError(null);
-    try {
-      const cred = await signInWithGoogle();
-      if (cred && 'user' in cred && cred.user) {
-        setUser(cred.user);
-      }
-    } catch (err: any) {
-      console.warn("Erro ao fazer login com Google:", err);
-      const msg = err?.message || String(err);
-      if (err?.code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
-        setAuthError("Domínio não autorizado no Firebase. Para testar imediatamente, clique em 'Entrar como Aluno'.");
-      } else if (err?.code === 'auth/popup-closed-by-user' || msg.includes('16') || msg.toLowerCase().includes('cancel')) {
-        setAuthError("A seleção da Conta Google foi cancelada.");
-      } else if (msg.includes('network') || msg.includes('NETWORK')) {
-        setAuthError("Falha de conexão com os servidores do Google. Verifique sua conexão com a internet.");
-      } else {
-        setAuthError(err?.message || "Não foi possível conectar com a Conta Google no momento. Utilize o acesso de Aluno abaixo.");
-      }
+      await requestNewPassword(forgotInput);
+      setForgotSent(true);
+    } catch (error) {
+      setForgotError(publicClientAuthError(error));
+    } finally {
+      setAuthBusy(false);
     }
   };
 
   const handleLogout = async () => {
-    localStorage.removeItem('athena_local_user');
+    try {
+      localStorage.removeItem('athena_local_user');
+      localStorage.removeItem('athena_registered_students');
+    } catch {}
+    clearStudySession();
+    studyContentSession.setAccount(null);
+    purgeSessionVaultCache();
+    sanitizeLegacyProtectedCaches();
+    setSessions([]);
+    setCurrentSessionId(null);
+    setMessages([]);
     try {
       await logOut();
-    } catch (e) {}
+    } catch {}
     setUser(null);
   };
 
+  const handleDeleteAccount = async () => {
+    if (deleteAccountBusy || !user?.uid) return;
+    setDeleteAccountError(null);
+    setDeleteAccountBusy(true);
+    const uid = String(user.uid);
+    try {
+      await deleteCurrentAccount();
+      clearLocalAccountData(uid);
+      try {
+        await logOut();
+      } catch {}
+      setUser(null);
+      setDeleteAccountOpen(false);
+    } catch (error) {
+      setDeleteAccountError(publicClientAuthError(error));
+    } finally {
+      setDeleteAccountBusy(false);
+    }
+  };
+
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [legacyStudyDays, setLegacyStudyDays] = useState<number[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [navInput, setNavInput] = useState('');
@@ -1972,17 +2186,43 @@ export default function App() {
   const [guidedSubject, setGuidedSubject] = useState<string | null>(null);
   const [currentArticle, setCurrentArticle] = useState(1);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'stats' | 'reviews' | 'mentees' | 'schedules' | 'trilha'>('chat');
+  const { desktop, sidebarRef, headerRef, mainRef } = useStudyLayout(isSidebarOpen, setIsSidebarOpen);
+  const [activeTab, setActiveTab] = useState<AthenaTab>('chat');
   const [trilhaCompletedDays, setTrilhaCompletedDays] = useState<number[]>([]);
   const [selectedTrilhaWeek, setSelectedTrilhaWeek] = useState<number>(1);
   const [dashboardDay, setDashboardDay] = useState<number | null>(null);
+  const [compressedReviews, setCompressedReviews] = useState<Review[]>([]);
   const reviews = useMemo(() => {
-    const all: Review[] = [];
+    const fromSessions: Review[] = [];
     sessions.forEach(s => {
-      if (s.reviews) all.push(...s.reviews);
+      if (s.reviews) fromSessions.push(...s.reviews);
     });
-    return all.sort((a, b) => b.timestamp - a.timestamp);
-  }, [sessions]);
+    return selectUserStudiedReviews([...compressedReviews, ...fromSessions]);
+  }, [sessions, compressedReviews]);
+
+  useEffect(() => {
+    if (!user) {
+      setCompressedReviews([]);
+      return;
+    }
+    setCompressedReviews(harvestCompressedReviewsLocal(user.uid, { sessions }));
+  }, [user?.uid, sessions.length, activeTab]);
+
+  const [serverCeoUid, setServerCeoUid] = useState<string | null>(null);
+  const isCEO = isCeoAccount(user) && !!user?.uid && serverCeoUid === user.uid;
+
+  useEffect(() => {
+    if (!isCEO) return;
+    const slots = TRILHA_JURIDICA_DATA.flatMap((item) =>
+      (item.materias || []).map((_, part) => ({ day: item.dia, part }))
+    );
+    void restoreOfficialLessonsFromCloud(slots);
+  }, [isCEO]);
+
+  useEffect(() => {
+    if (!user?.uid || !isCEO) return;
+    void syncOfficialCatalog();
+  }, [user?.uid, isCEO]);
   const [userStats, setUserStats] = useState<UserStat[]>([]);
   const [gamification, setGamification] = useState<GamificationData>({
     totalXP: 0,
@@ -1994,6 +2234,192 @@ export default function App() {
   const [mentees, setMentees] = useState<Mentee[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [failedQuestions, setFailedQuestions] = useState<FailedQuestion[]>([]);
+  const [errorsFilter, setErrorsFilter] = useState<'all' | 'pending' | 'resolved'>('all');
+  const [studyAccess, setStudyAccess] = useState<AccessState | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [activeRetryMap, setActiveRetryMap] = useState<Record<string, { active: boolean; submittedAnswer?: number; isSubmitting?: boolean; retryKey?: number }>>({});
+  const [preStudyPrompt, setPreStudyPrompt] = useState<{ dayNum: number; sessionType?: 'estudo' | 'discursivo' | 'oral'; targetMaterialIndex?: number } | null>(null);
+  const [returnToDayAfterReview, setReturnToDayAfterReview] = useState<number | null>(null);
+  const [reviewFilterDays, setReviewFilterDays] = useState<number[] | null>(null);
+  const sessionPromptedDaysRef = useRef<Set<number>>(new Set());
+  const [isCeoQueryBarOpen, setIsCeoQueryBarOpen] = useState(false);
+  const [reviewingCompletedDay, setReviewingCompletedDay] = useState<number | null>(null);
+  const [expandedBlocksMap, setExpandedBlocksMap] = useState<Record<string, boolean>>({});
+
+  const getBlockExpanded = useCallback((blockKey: string, defaultExpanded: boolean = true): boolean => {
+    if (expandedBlocksMap[blockKey] !== undefined) return expandedBlocksMap[blockKey];
+    try {
+      const raw = localStorage.getItem(`athena_expanded_${blockKey}`);
+      if (raw !== null) return raw === 'true';
+    } catch {}
+    return defaultExpanded;
+  }, [expandedBlocksMap]);
+
+  const toggleBlockExpanded = useCallback((blockKey: string, current: boolean) => {
+    const nextVal = !current;
+    setExpandedBlocksMap(prev => ({ ...prev, [blockKey]: nextVal }));
+    try {
+      localStorage.setItem(`athena_expanded_${blockKey}`, String(nextVal));
+    } catch {}
+  }, []);
+
+  const getScheduledReviewsForDay = useCallback((day: number) => {
+    if (day <= 1) return [];
+    const list: { type: 'diaria' | 'semanal' | 'quinzenal' | 'mensal'; label: string; description: string; targetDay?: number }[] = [];
+    list.push({
+      type: 'diaria',
+      label: `Revisão Diária (Dia ${day - 1})`,
+      description: `Revisão dos conteúdos do dia anterior (Dia ${day - 1})`,
+      targetDay: day - 1
+    });
+    if (day % 7 === 0) {
+      list.push({
+        type: 'semanal',
+        label: `Revisão Semanal (Semana ${day / 7})`,
+        description: `Consolidação dos tópicos da semana (Dias ${day - 6} a ${day - 1})`
+      });
+    }
+    if (day % 15 === 0) {
+      list.push({
+        type: 'quinzenal',
+        label: `Revisão Quinzenal (Bloco ${day / 15})`,
+        description: `Revisão acumulada dos últimos 15 dias de estudo`
+      });
+    }
+    if (day === 30 || day === 60 || day === 90) {
+      list.push({
+        type: 'mensal',
+        label: `Revisão Mensal (${day} Dias)`,
+        description: `Revisão ampla do ciclo de 30 dias de matérias acumuladas`
+      });
+    }
+    return list;
+  }, []);
+
+  useEffect(() => {
+    void refreshStudyAccess().then(s => { setStudyAccess(s); setServerCeoUid(s.ceo ? s.uid : null); }).catch(() => {});
+  }, []);
+
+  const filteredErrors = useMemo(() => {
+    if (errorsFilter === 'pending') return failedQuestions.filter(q => !q.resolved);
+    if (errorsFilter === 'resolved') return failedQuestions.filter(q => q.resolved);
+    return failedQuestions;
+  }, [failedQuestions, errorsFilter]);
+
+  const canAccessFailedQuestion = useCallback((fq: FailedQuestion): boolean => {
+    if (isCEO) return true;
+    if (!fq.trilhaDay || fq.trilhaDay <= 1) return true;
+    if (studyAccess && !studyAccess.allowedDays.includes(fq.trilhaDay)) return false;
+    return true;
+  }, [isCEO, studyAccess]);
+
+  const resolveUpdatedCatalogQuestion = useCallback((fq: FailedQuestion): { question: Question; isCatalogUpdated: boolean } => {
+    if (fq.trilhaDay === undefined || fq.trilhaMaterialIndex === undefined) {
+      return { question: fq, isCatalogUpdated: false };
+    }
+    const lesson = getLocalHomologatedLesson(fq.trilhaDay, fq.trilhaMaterialIndex);
+    if (!lesson) return { question: fq, isCatalogUpdated: false };
+
+    const parsed = lesson.content ? parseATHENAResponse(lesson.content) : null;
+    const challenge = normalizeObjectiveChallenge(lesson.challenge) || parsed?.challenge;
+    if (!challenge || !challenge.questions || challenge.questions.length === 0) {
+      return { question: fq, isCatalogUpdated: false };
+    }
+
+    const match = challenge.questions.find((cq) => {
+      if (!cq || !cq.text) return false;
+      const cleanCq = cq.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const cleanFq = fq.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return cleanCq === cleanFq || cleanCq.includes(cleanFq) || cleanFq.includes(cleanCq);
+    });
+
+    if (!match) return { question: fq, isCatalogUpdated: false };
+
+    const isUpdated =
+      match.correctIndex !== fq.correctIndex ||
+      (lesson.version !== undefined && fq.studyBaseline?.version !== undefined && lesson.version > fq.studyBaseline.version) ||
+      match.explanation !== fq.explanation;
+
+    return {
+      question: {
+        ...fq,
+        text: match.text || fq.text,
+        options: match.options?.length ? match.options : fq.options,
+        correctIndex: match.correctIndex ?? fq.correctIndex,
+        explanation: match.explanation || fq.explanation
+      },
+      isCatalogUpdated: isUpdated
+    };
+  }, []);
+
+  const retryInFlightRef = useRef<Set<string>>(new Set());
+
+  const handleRetryFailedQuestion = async (fq: FailedQuestion, answerIndex: number) => {
+    if (!user) return;
+    if (retryInFlightRef.current.has(fq.id)) return;
+    retryInFlightRef.current.add(fq.id);
+    try {
+    const latestFq = failedQuestions.find(item => item.id === fq.id);
+    const alreadyResolved = Boolean(fq.resolved || latestFq?.resolved);
+    const { question: effectiveQ } = resolveUpdatedCatalogQuestion(fq);
+    const isCorrect = answerIndex === effectiveQ.correctIndex;
+    const now = Date.now();
+    const newAttempt: FailedQuestionAttempt = {
+      timestamp: now,
+      selectedOption: answerIndex,
+      correct: isCorrect
+    };
+    const updatedAttempts = [...(fq.attempts || []), newAttempt];
+    const isNowResolved = isCorrect || alreadyResolved;
+    const updatedFq: FailedQuestion = {
+      ...fq,
+      text: effectiveQ.text,
+      options: effectiveQ.options,
+      correctIndex: effectiveQ.correctIndex,
+      explanation: effectiveQ.explanation,
+      resolved: isNowResolved,
+      resolvedAt: isCorrect ? (fq.resolvedAt || latestFq?.resolvedAt || now) : (fq.resolvedAt || latestFq?.resolvedAt),
+      attempts: updatedAttempts
+    };
+
+    LocalPersistence.saveFailedQuestion(user.uid, updatedFq);
+    setFailedQuestions(prev => prev.map(item => item.id === fq.id ? updatedFq : item));
+
+    if (auth.currentUser && !isQuotaExhausted()) {
+      try {
+        await setDoc(doc(db, `users/${user.uid}/failed_questions`, fq.id), cleanData(updatedFq), { merge: true });
+      } catch (err) {
+        console.error("Error updating failed question attempt in cloud:", err);
+      }
+    }
+
+    if (fq.subject) {
+      await updateStats(fq.subject, isCorrect, updatedFq, answerIndex, {
+        isRetry: true,
+        failedQuestionId: fq.id,
+        trilhaDay: fq.trilhaDay,
+        trilhaMaterialIndex: fq.trilhaMaterialIndex,
+        studyBaseline: fq.studyBaseline,
+        alreadyResolved
+      });
+    }
+    } finally {
+      retryInFlightRef.current.delete(fq.id);
+    }
+  };
+
+  const handleDeleteFailedQuestion = async (id: string) => {
+    if (!user) return;
+    LocalPersistence.deleteFailedQuestion(user.uid, id);
+    setFailedQuestions(prev => prev.filter(item => item.id !== id));
+    if (auth.currentUser && !isQuotaExhausted()) {
+      try {
+        await deleteDoc(doc(db, `users/${user.uid}/failed_questions`, id));
+      } catch (err) {
+        console.error("Error deleting failed question:", err);
+      }
+    }
+  };
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [attachedFile, setAttachedFile] = useState<{ name: string, mimeType: string, data: string } | null>(null);
@@ -2011,15 +2437,13 @@ export default function App() {
     return () => window.removeEventListener('firestore-quota-exceeded', onQuota);
   }, []);
 
-  const CEO_EMAIL = 'jhonny.spider@gmail.com';
-
   const userProfile: UserProfile | null = useMemo(() => {
     if (!user) return null;
-    const isCeoUser = user.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
+    const isCeoUser = isCeoAccount(user);
     if (isCeoUser) {
       return {
         uid: user.uid,
-        email: user.email || CEO_EMAIL,
+        email: user.email || ATHENA_CEO_EMAIL,
         displayName: user.displayName || 'Mestre CEO (Jhonny)',
         photoURL: user.photoURL || '',
         role: 'ceo',
@@ -2042,18 +2466,65 @@ export default function App() {
     };
   }, [user]);
 
-  const isCEO = userProfile?.role === 'ceo' || user?.email?.toLowerCase().trim() === CEO_EMAIL.toLowerCase();
-
   const [tokenExhaustedBanner, setTokenExhaustedBanner] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
 
   // Estados de Curadoria e Homologação do CEO
   const [homologatedLessonState, setHomologatedLessonState] = useState<HomologatedLesson | null>(null);
   const [isSavingHomologation, setIsSavingHomologation] = useState(false);
+  const [isRegeneratingQuestions, setIsRegeneratingQuestions] = useState(false);
   const [isEditingLesson, setIsEditingLesson] = useState(false);
   const [editingLessonContent, setEditingLessonContent] = useState('');
   const [editingLessonIndex, setEditingLessonIndex] = useState<number | undefined>(undefined);
+  const [legalReviewOpen, setLegalReviewOpen] = useState(false);
+  const [legalReviewPhase, setLegalReviewPhase] = useState<'confirm' | 'running' | 'notice' | 'result' | 'edit' | 'error'>('confirm');
+  const [legalReviewStage, setLegalReviewStage] = useState('Analisando aula');
+  const [legalReviewError, setLegalReviewError] = useState<string | null>(null);
+  const [legalReviewConflict, setLegalReviewConflict] = useState(false);
+  const [legalReviewCatalogHash, setLegalReviewCatalogHash] = useState<string | null>(null);
+  const [legalReviewNotice, setLegalReviewNotice] = useState<{ lastReviewDate: string } | null>(null);
+  const [legalReview, setLegalReview] = useState<LegalReviewView | null>(null);
+  const [legalReviewBusy, setLegalReviewBusy] = useState(false);
+  const [legalReviewDay, setLegalReviewDay] = useState<number | null>(null);
+  const [legalReviewPart, setLegalReviewPart] = useState<number | null>(null);
+  const [legalReviewBlock, setLegalReviewBlock] = useState<number | null>(null);
+  const [legalReviewTestMode, setLegalReviewTestMode] = useState(false);
+  const [legalReviewTestDraft, setLegalReviewTestDraft] = useState(LEGAL_REVIEW_TEST_MATERIAL);
   const [homologationSuccessBanner, setHomologationSuccessBanner] = useState<string | null>(null);
+  const [homologationBannerTone, setHomologationBannerTone] = useState<'ok' | 'warn'>('ok');
+  const homologationBannerTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!legalReviewOpen || legalReviewPhase !== 'running') return;
+    const labels = [
+      'Analisando aula',
+      'Verificando legislação e jurisprudência',
+      'Consolidando correções',
+      'Preparando comparação'
+    ];
+    let index = 0;
+    setLegalReviewStage(labels[0]);
+    const timer = window.setInterval(() => {
+      index = (index + 1) % labels.length;
+      setLegalReviewStage(labels[index]);
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [legalReviewOpen, legalReviewPhase]);
+
+  const showHomologationBanner = (text: string, tone: 'ok' | 'warn') => {
+    if (homologationBannerTimer.current) {
+      window.clearTimeout(homologationBannerTimer.current);
+      homologationBannerTimer.current = null;
+    }
+    setHomologationBannerTone(tone);
+    setHomologationSuccessBanner(text);
+    if (tone === 'ok') {
+      homologationBannerTimer.current = window.setTimeout(() => {
+        setHomologationSuccessBanner(null);
+        homologationBannerTimer.current = null;
+      }, 6000);
+    }
+  };
 
   useEffect(() => {
     const activeSess = sessions.find(s => s.id === currentSessionId);
@@ -2071,9 +2542,27 @@ export default function App() {
       setHomologatedLessonState(null);
     }
 
-    getHomologatedLesson(day, part).then(res => {
-      if (res) setHomologatedLessonState(res);
+    const stopPublishedRefresh = watchPublishedLesson({
+      target: window,
+      visibilityTarget: document,
+      visible: () => document.visibilityState === 'visible',
+      read: () => getHomologatedLesson(day, part),
+      apply: setHomologatedLessonState,
+      subscribe: invalidate => {
+        if (!isCEO) return () => {};
+        return onSnapshot(
+          doc(db, 'homologated_lessons', getLessonDocId(day, part)),
+          { includeMetadataChanges: true },
+          snapshot => { if (!snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites) invalidate(); },
+          () => undefined
+        );
+      }
     });
+
+    const refreshApproved = () => {
+      const next = getLocalHomologatedLesson(day, part);
+      if (next) setHomologatedLessonState(next);
+    };
 
     const onHomologated = (e: any) => {
       const detail = e.detail as HomologatedLesson;
@@ -2089,9 +2578,14 @@ export default function App() {
     };
     window.addEventListener('athena-lesson-homologated', onHomologated);
     window.addEventListener('athena-lesson-revoked', onRevoked);
+    window.addEventListener('athena-vault-ready', refreshApproved);
+    window.addEventListener('athena-lessons-restored', refreshApproved);
     return () => {
+      stopPublishedRefresh();
       window.removeEventListener('athena-lesson-homologated', onHomologated);
       window.removeEventListener('athena-lesson-revoked', onRevoked);
+      window.removeEventListener('athena-vault-ready', refreshApproved);
+      window.removeEventListener('athena-lessons-restored', refreshApproved);
     };
   }, [currentSessionId, sessions]);
 
@@ -2118,6 +2612,11 @@ export default function App() {
   const [testAiLoading, setTestAiLoading] = useState(false);
   const [testAiResult, setTestAiResult] = useState<GeminiConnectionTestResult | null>(null);
   const [selectedAiModel, setSelectedAiModel] = useState<string>(() => getSelectedModel());
+  const [contentProvider, setContentProviderState] = useState<ContentProvider>(() => getContentProvider());
+
+  useEffect(() => {
+    setAllowChatGptChoice(isCEO);
+  }, [isCEO]);
 
   const handleTestGeminiConnection = async () => {
     setTestAiLoading(true);
@@ -2170,57 +2669,56 @@ export default function App() {
     scrollToTop();
   };
 
-  // Auth Observer
-  useEffect(() => {
-    // 1. Tenta restaurar sessão local se existir
-    const savedLocalUser = localStorage.getItem('athena_local_user');
-    if (savedLocalUser) {
-      try {
-        const parsed = JSON.parse(savedLocalUser);
-        setUser(parsed);
-        setLoadingAuth(false);
-      } catch (e) {
-        console.warn("Erro ao restaurar usuário local:", e);
-      }
-    } else {
-      // Nenhum usuário local persistido: aguarda autenticação oficial via Google Sign-In
-      setLoadingAuth(false);
-    }
+  const resumeHydratedForUid = useRef<string | null>(null);
+  const [resumeReady, setResumeReady] = useState(false);
+  const skipResumeSaveRef = useRef(true);
 
-    checkAndSyncNativeAuth();
+  // Auth Observer: a sessão válida é a do Firebase Auth, nunca um JSON local.
+  useEffect(() => {
+    try {
+      localStorage.removeItem('athena_local_user');
+    } catch {}
     sanitizeTrilhaCacheForObjectivePhase();
     LocalPersistence.sanitizeSessionsForObjectivePhase();
 
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        setUser(u);
-        localStorage.removeItem('athena_local_user');
-      } else if (!localStorage.getItem('athena_local_user')) {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      if (u && !u.isAnonymous && u.email) {
+        setUser((prev) => {
+          if (prev && prev.uid !== u.uid) {
+            clearStudySession();
+            setSessions([]);
+            setCurrentSessionId(null);
+            setMessages([]);
+          }
+          return u;
+        });
+        studyContentSession.setAccount(u.uid);
+      } else {
         setUser(null);
+        clearStudySession();
+        studyContentSession.setAccount(null);
+        purgeSessionVaultCache();
+        sanitizeLegacyProtectedCaches();
+        setSessions([]);
+        setCurrentSessionId(null);
+        setMessages([]);
       }
       setLoadingAuth(false);
-
-      if (u && !isQuotaExhausted()) {
-        // Save user profile to Firestore only once per session to preserve quota
-        const syncKey = `lastLoginSynced_${u.uid}`;
-        if (!sessionStorage.getItem(syncKey)) {
-          sessionStorage.setItem(syncKey, 'true');
-          const userRef = doc(db, 'users', u.uid);
-          try {
-            const cleaned = cleanData({
-              displayName: u.displayName || 'Usuário',
-              email: u.email || '',
-              photoURL: u.photoURL || '',
-              lastLogin: Date.now()
-            });
-            await setDoc(userRef, cleaned, { merge: true });
-          } catch (error) {
-            console.warn("Notice: User profile sync postponed (resilient local mode active):", error);
-          }
-        }
-      }
     });
     return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    studyContentSession.setOnline(navigator.onLine);
+    const onOnline = () => studyContentSession.setOnline(true);
+    const onOffline = () => studyContentSession.setOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    sanitizeLegacyProtectedCaches();
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
   }, []);
 
   // Sync Sessions from Firestore + Local Cache
@@ -2241,13 +2739,6 @@ export default function App() {
     const localSessions = LocalPersistence.getSessions(user.uid);
     if (localSessions.length > 0) {
       setSessions(localSessions);
-      if (!currentSessionId) {
-        const last = localSessions[0];
-        setCurrentSessionId(last.id);
-        setMessages(last.messages || []);
-        setGuidedSubject(last.guidedSubject || null);
-        setCurrentArticle(last.currentArticle || 1);
-      }
     }
 
     // 2. Attach Firestore onSnapshot listener only if Firebase Auth is signed in
@@ -2262,18 +2753,38 @@ export default function App() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatSession));
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ChatSession));
       if (docs.length > 0) {
-        setSessions(docs);
-        docs.forEach(s => LocalPersistence.saveSession(user.uid, s));
-        
-        if (!currentSessionId) {
-          const last = docs[0];
-          setCurrentSessionId(last.id);
-          setMessages(last.messages);
-          setGuidedSubject(last.guidedSubject);
-          setCurrentArticle(last.currentArticle);
-        }
+        const local = LocalPersistence.getSessions(user.uid);
+        const merged = docs.map((cloud) => {
+          const prev = local.find((s) => s.id === cloud.id);
+          const cloudMsgs = cloud.messages || [];
+          const prevMsgs = prev?.messages || [];
+          const mergedMessages = cloudMsgs.map((c, i) => {
+            const p = prevMsgs[i];
+            if (!p) return c;
+            return {
+              ...p,
+              ...c,
+              trilhaDay: c.trilhaDay ?? p.trilhaDay,
+              trilhaMaterialIndex: c.trilhaMaterialIndex ?? p.trilhaMaterialIndex
+            };
+          });
+          const messages = prevMsgs.length > mergedMessages.length
+            ? [...mergedMessages, ...prevMsgs.slice(mergedMessages.length)]
+            : mergedMessages;
+          return {
+            ...prev,
+            ...cloud,
+            messages,
+            trilhaDay: cloud.trilhaDay ?? prev?.trilhaDay,
+            trilhaMaterialIndex: cloud.trilhaMaterialIndex ?? prev?.trilhaMaterialIndex,
+            trilhaSessionType: cloud.trilhaSessionType ?? prev?.trilhaSessionType,
+            reviews: (cloud.reviews?.length ? cloud.reviews : prev?.reviews) || []
+          } as ChatSession;
+        });
+        setSessions(merged);
+        merged.forEach((s) => LocalPersistence.saveSession(user.uid, s));
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/sessions`);
@@ -2282,10 +2793,78 @@ export default function App() {
       if (fallback.length > 0 && sessions.length === 0) {
         setSessions(fallback);
       }
+      if (!isCEO) {
+        loadAuthorizedStudentSessions().then(res => {
+          if (res?.sessions?.length) {
+            setSessions(res.sessions);
+            res.sessions.forEach(s => LocalPersistence.saveSession(user.uid, s));
+            setCurrentSessionId(prev => {
+              if (prev) return prev;
+              const latest = res.sessions[0];
+              if (latest && (latest.trilhaDay !== undefined || latest.guidedSubject)) {
+                setMessages(latest.messages || []);
+                setGuidedSubject(latest.guidedSubject || null);
+                setCurrentArticle(latest.currentArticle || 1);
+                return latest.id;
+              }
+              return null;
+            });
+          }
+        }).catch(() => {});
+      }
     });
 
     return () => unsubscribe();
   }, [user]);
+
+  useLayoutEffect(() => {
+    if (!user) {
+      resumeHydratedForUid.current = null;
+      setResumeReady(false);
+      return;
+    }
+    if (resumeHydratedForUid.current === user.uid) return;
+    skipResumeSaveRef.current = true;
+    resumeHydratedForUid.current = user.uid;
+
+    const resume = loadResume(user.uid);
+    const localSessions = LocalPersistence.getSessions(user.uid);
+    const wanted = resume?.sessionId
+      ? localSessions.find((s) => s.id === resume.sessionId)
+      : undefined;
+    const allowSession = Boolean(
+      wanted && (isCeoAccount(user) || wanted.trilhaDay !== undefined)
+    );
+
+    let nextTab: AthenaTab = resume?.tab || 'chat';
+    if (nextTab === 'mentees' && !isCeoAccount(user)) {
+      nextTab = 'chat';
+    }
+
+    if (allowSession && wanted) {
+      setCurrentSessionId(wanted.id);
+      setMessages(wanted.messages || []);
+      setGuidedSubject(wanted.guidedSubject || null);
+      setCurrentArticle(wanted.currentArticle || 1);
+      setActiveTab(nextTab);
+    } else {
+      setCurrentSessionId(null);
+      setMessages([]);
+      setGuidedSubject(null);
+      setCurrentArticle(1);
+      setActiveTab(nextTab === 'chat' ? 'chat' : nextTab);
+    }
+    setResumeReady(true);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user || !resumeReady || resumeHydratedForUid.current !== user.uid) return;
+    if (skipResumeSaveRef.current) {
+      skipResumeSaveRef.current = false;
+      return;
+    }
+    saveResume(user.uid, { tab: activeTab, sessionId: currentSessionId });
+  }, [user?.uid, activeTab, currentSessionId, resumeReady]);
 
   // Sync Statistics and Schedules
   useEffect(() => {
@@ -2358,15 +2937,10 @@ export default function App() {
       failed.forEach(fq => LocalPersistence.saveFailedQuestion(user.uid, fq));
     }, (error) => handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/failed_questions`));
 
-    // Trilha Progress
-    const trilhaRef = doc(db, `users/${user.uid}/trilha`, 'progress');
-    const unsubTrilha = onSnapshot(trilhaRef, (doc) => {
-      if (doc.exists()) {
-        const days = doc.data().completedDays || [];
-        setTrilhaCompletedDays(days);
-        LocalPersistence.saveTrilhaProgress(user.uid, days);
-      }
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/trilha/progress`));
+    // Legacy progress remains stored, but student authorization comes only from the server.
+    let activeProgress=true;
+    let unsubTrilha=()=>{activeProgress=false;};
+    void refreshStudyAccess().then(state=>{if(activeProgress&&auth.currentUser?.uid===state.uid){setStudyAccess(state);setServerCeoUid(state.ceo?state.uid:null);setTrilhaCompletedDays(state.completedDays);setLegacyStudyDays(state.unreviewedLegacyDays || []);}}).catch(()=>{if(activeProgress){setServerCeoUid(null);setTrilhaCompletedDays([]);}});
 
     return () => {
       unsubStats();
@@ -2469,6 +3043,23 @@ export default function App() {
         performCloudSave();
       }, 2500);
     }
+  };
+
+  const persistBlock6 = (
+    msg: Message,
+    extra?: { sessionId?: string | null; day?: number; part?: number; subject?: string | null; article?: number }
+  ) => {
+    if (!user || msg.role !== 'model') return;
+    const sess = sessions.find((s) => s.id === (extra?.sessionId || currentSessionId));
+    setCompressedReviews(
+      persistReviewFromMessage(user.uid, msg, {
+        sessionId: extra?.sessionId || currentSessionId || undefined,
+        guidedSubject: extra?.subject || sess?.guidedSubject || guidedSubject,
+        currentArticle: extra?.article ?? sess?.currentArticle ?? currentArticle,
+        trilhaDay: extra?.day ?? sess?.trilhaDay,
+        trilhaMaterialIndex: extra?.part ?? sess?.trilhaMaterialIndex
+      })
+    );
   };
 
   const awardXP = async (amount: number) => {
@@ -2628,12 +3219,32 @@ export default function App() {
     }
   };
 
-  const updateStats = async (subject: string, isCorrect: boolean, question?: Question, answerIndex?: number) => {
+  const updateStats = async (
+    subject: string, 
+    isCorrect: boolean, 
+    question?: Question, 
+    answerIndex?: number,
+    options?: {
+      isRetry?: boolean;
+      failedQuestionId?: string;
+      trilhaDay?: number;
+      trilhaMaterialIndex?: number;
+      studyBaseline?: { version: number; sha256: string };
+      alreadyResolved?: boolean;
+    }
+  ) => {
     if (!user) return;
     
-    // XP Logic
-    const xpReward = isCorrect ? 50 : 10;
-    await awardXP(xpReward);
+    const isAlreadyCompletedDay = Boolean(options?.trilhaDay && trilhaCompletedDays.includes(options.trilhaDay));
+    const isRetry = Boolean(options?.isRetry);
+    // XP Logic: 50 on first-pass correct, 25 on retry correct, 10 on first-pass wrong, 5 on retry wrong
+    // Se o dia já foi concluído anteriormente e não for retry do caderno de erros, não conceder XP duplo
+    // Caderno de Erros: XP e "erro superado" contam uma única vez, no primeiro acerto de uma questão ainda pendente.
+    const retryReward = failedQuestionRetryReward(isCorrect, Boolean(options?.alreadyResolved));
+    const xpReward = isRetry ? retryReward.xp : (isAlreadyCompletedDay ? 0 : (isCorrect ? 50 : 10));
+    if (xpReward > 0) {
+      await awardXP(xpReward);
+    }
 
     // Calculate progress for this subject
     const subjectData = subjects.find(s => s.name === subject);
@@ -2653,16 +3264,40 @@ export default function App() {
       correctAnswers: 0, 
       totalQuestions: 0, 
       progress: 0,
-      xp: 0
+      xp: 0,
+      uniqueQuestions: 0,
+      totalAttempts: 0,
+      evolution: {
+        firstAttemptAccuracy: 0,
+        resolvedErrors: 0
+      }
     };
+
+    const newUniqueQuestions = (isRetry || isAlreadyCompletedDay)
+      ? (current.uniqueQuestions ?? current.totalQuestions)
+      : current.totalQuestions + 1;
+    const newTotalAttempts = (current.totalAttempts ?? current.totalQuestions) + (isAlreadyCompletedDay && !isRetry ? 0 : 1);
+    const newCorrectAnswers = (isRetry || isAlreadyCompletedDay)
+      ? current.correctAnswers
+      : current.correctAnswers + (isCorrect ? 1 : 0);
+    const newResolvedErrors = (current.evolution?.resolvedErrors ?? 0) + (isRetry ? retryReward.resolvedIncrement : 0);
+    const firstAttemptAccuracy = newUniqueQuestions > 0
+      ? Math.round((newCorrectAnswers / newUniqueQuestions) * 100)
+      : 0;
 
     const cleaned = cleanData({
       subjectName: subject,
-      correctAnswers: current.correctAnswers + (isCorrect ? 1 : 0),
-      totalQuestions: current.totalQuestions + 1,
+      correctAnswers: newCorrectAnswers,
+      totalQuestions: newUniqueQuestions,
       progress: Math.max(current.progress, calculatedProgress),
       xp: (current.xp || 0) + xpReward,
-      userId: user.uid
+      userId: user.uid,
+      uniqueQuestions: newUniqueQuestions,
+      totalAttempts: newTotalAttempts,
+      evolution: {
+        firstAttemptAccuracy,
+        resolvedErrors: newResolvedErrors
+      }
     });
 
     LocalPersistence.saveStat(user.uid, cleaned);
@@ -2681,7 +3316,7 @@ export default function App() {
         await setDoc(statRef, cleaned, { merge: true });
 
         // Handle Failed Questions tracking
-        if (!isCorrect && question) {
+        if (!isRetry && !isCorrect && question) {
           const questionId = crypto.randomUUID();
           const failedRef = doc(db, `users/${user.uid}/failed_questions`, questionId);
           const failedObj: FailedQuestion = {
@@ -2690,7 +3325,18 @@ export default function App() {
             userId: user.uid,
             subject,
             timestamp: Date.now(),
-            originalArticle: currentArticle
+            originalArticle: currentArticle,
+            trilhaDay: options?.trilhaDay,
+            trilhaMaterialIndex: options?.trilhaMaterialIndex,
+            studyBaseline: options?.studyBaseline,
+            resolved: false,
+            attempts: [
+              {
+                timestamp: Date.now(),
+                selectedOption: answerIndex ?? -1,
+                correct: false
+              }
+            ]
           };
           LocalPersistence.saveFailedQuestion(user.uid, failedObj);
           setFailedQuestions(prev => [failedObj, ...prev]);
@@ -2709,7 +3355,7 @@ export default function App() {
       }
     } else {
       // Local-only flow when quota is exhausted
-      if (!isCorrect && question) {
+      if (!isRetry && !isCorrect && question) {
         const questionId = crypto.randomUUID();
         const failedObj: FailedQuestion = {
           ...question,
@@ -2717,7 +3363,18 @@ export default function App() {
           userId: user.uid,
           subject,
           timestamp: Date.now(),
-          originalArticle: currentArticle
+          originalArticle: currentArticle,
+          trilhaDay: options?.trilhaDay,
+          trilhaMaterialIndex: options?.trilhaMaterialIndex,
+          studyBaseline: options?.studyBaseline,
+          resolved: false,
+          attempts: [
+            {
+              timestamp: Date.now(),
+              selectedOption: answerIndex ?? -1,
+              correct: false
+            }
+          ]
         };
         LocalPersistence.saveFailedQuestion(user.uid, failedObj);
         setFailedQuestions(prev => [failedObj, ...prev]);
@@ -2728,6 +3385,7 @@ export default function App() {
 
   const startNewSession = async (title: string = "Nova Mentoria", sub: string | null = null, art: number = 1) => {
     if (!user) return;
+    if (!isCEO && !sub) return;
     
     const id = crypto.randomUUID();
     const newSession: ChatSession = {
@@ -2761,6 +3419,10 @@ export default function App() {
   const switchSession = (id: string) => {
     const session = sessions.find(s => s.id === id);
     if (session) {
+      if (!isCEO && session.trilhaDay === undefined && !session.guidedSubject) {
+        handleGoHome();
+        return;
+      }
       setCurrentSessionId(id);
       setMessages(session.messages || []);
       setGuidedSubject(session.guidedSubject);
@@ -2794,31 +3456,32 @@ export default function App() {
     }
   };
 
-  const deleteReview = async (reviewId: string, sessionId?: string) => {
+  const deleteReview = async (reviewId: string) => {
     if (!user) return;
     try {
-      let targetSessionId = sessionId;
-      
-      // Fallback for older reviews missing sessionId
-      if (!targetSessionId) {
-        const sessionWithReview = sessions.find(s => s.reviews?.some(r => r.id === reviewId));
-        if (sessionWithReview) targetSessionId = sessionWithReview.id;
-      }
+      const next = deleteCompressedReview(user.uid, reviewId, reviews);
+      setCompressedReviews(next);
 
-      if (!targetSessionId) return;
+      const touched = sessions.filter((session) => session.reviews?.some((review) => review.id === reviewId));
+      if (!touched.length) return;
 
-      const session = sessions.find(s => s.id === targetSessionId);
-      if (!session || !session.reviews) return;
-      
-      const updatedReviews = session.reviews.filter(r => r.id !== reviewId);
-      const updatedSession = { ...session, reviews: updatedReviews };
-      LocalPersistence.saveSession(user.uid, updatedSession);
-      setSessions(prev => prev.map(s => s.id === targetSessionId ? updatedSession : s));
+      const updatedSessions = sessions.map((session) => {
+        if (!session.reviews?.some((review) => review.id === reviewId)) return session;
+        const updated = { ...session, reviews: session.reviews.filter((review) => review.id !== reviewId) };
+        LocalPersistence.saveSession(user.uid, updated);
+        return updated;
+      });
+      setSessions(updatedSessions);
 
       if (auth.currentUser && !isQuotaExhausted()) {
-        const sessionRef = doc(db, `users/${user.uid}/sessions`, targetSessionId);
-        const cleaned = cleanData({ reviews: updatedReviews });
-        await setDoc(sessionRef, cleaned, { merge: true });
+        await Promise.all(touched.map(async (session) => {
+          const updatedReviews = (session.reviews || []).filter((review) => review.id !== reviewId);
+          await setDoc(
+            doc(db, `users/${user.uid}/sessions`, session.id),
+            cleanData({ reviews: updatedReviews }),
+            { merge: true }
+          );
+        }));
       }
     } catch (error) {
       console.error("Delete review error:", error);
@@ -2894,93 +3557,96 @@ export default function App() {
       }
     }
 
-    // Extract Challenge JSON
-    if (rawContent.includes(challengeKey)) {
-      const parts = rawContent.split(challengeKey);
-      const afterTag = parts[1].trim();
-      
-      try {
-        const firstBrace = afterTag.indexOf("{");
-        const lastBrace = afterTag.lastIndexOf("}");
-        
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          const challengeJson = afterTag.substring(firstBrace, lastBrace + 1);
-          challenge = JSON.parse(challengeJson);
-          
-          if (challenge && Array.isArray(challenge.questions)) {
-            challenge.questions = challenge.questions.map((q: any) => ({
-              ...q,
-              correctIndex: q.correctIndex !== undefined ? q.correctIndex : (q.correctAnswer !== undefined ? q.correctAnswer : 0)
-            }));
-
-            // Para cursos de 1ª Fase (Objetiva), retira estritamente questões discursivas e orais
-            if (mentorshipPhase === 'objetiva') {
-              challenge.questions = challenge.questions.filter(
-                (q: any) => q.correctIndex !== -1 && q.correctIndex !== -2 && q.correctIndex >= 0
-              );
-            }
-          }
-
-          rawContent = parts[0] + (afterTag.substring(lastBrace + 1));
-        }
-      } catch (e) {
-        console.error("Failed to parse challenge JSON:", e);
-      }
+    // Extract Challenge JSON sem engolir o [BLOCK_6] que vem depois
+    const extractedChallenge = extractChallengeFromText(rawContent);
+    if (extractedChallenge.challenge) {
+      challenge = extractedChallenge.challenge;
+      rawContent = extractedChallenge.content;
+    } else if (rawContent.includes(challengeKey)) {
+      console.error("Failed to parse challenge JSON.");
     }
 
-    // Improved block splitting strategy
+    // Split by named [BLOCK_1]..[BLOCK_6] so um preâmbulo extra não desloca a revisão
     const blocks: string[] = [];
     const blockMarkers = Array.from({ length: 6 }, (_, i) => `[BLOCK_${i + 1}]`);
     let tempContent = rawContent;
-
-    // Check if markers exist
     const hasMarkers = blockMarkers.some(m => tempContent.includes(m));
 
     if (hasMarkers) {
-      // Find all markers and their positions
-      const positions: { index: number, marker: string }[] = [];
-      blockMarkers.forEach(m => {
-        const idx = tempContent.indexOf(m);
-        if (idx !== -1) positions.push({ index: idx, marker: m });
-      });
-      positions.sort((a, b) => a.index - b.index);
-
-      if (positions.length > 0) {
-        // Add preamble if exists
-        if (positions[0].index > 0) {
-          const preamble = tempContent.substring(0, positions[0].index).trim();
-          if (preamble) blocks.push(preamble);
-        }
-
-        // Add blocks
-        for (let i = 0; i < positions.length; i++) {
-          const start = positions[i].index + positions[i].marker.length;
-          const end = (i < positions.length - 1) ? positions[i + 1].index : tempContent.length;
-          const content = tempContent.substring(start, end).trim();
-          
-          if (i === 0 && blocks.length > 0) {
-            // Merge preamble into the first block instead of making it a separate block
-            blocks[0] = blocks[0] + "\n\n" + content;
-          } else {
-            blocks.push(content);
+      for (let i = 0; i < blockMarkers.length; i++) {
+        const marker = blockMarkers[i];
+        const start = tempContent.indexOf(marker);
+        if (start === -1) continue;
+        const contentStart = start + marker.length;
+        let end = tempContent.length;
+        for (let j = i + 1; j < blockMarkers.length; j++) {
+          const next = tempContent.indexOf(blockMarkers[j], contentStart);
+          if (next !== -1) {
+            end = next;
+            break;
           }
         }
+        const chunk = tempContent.substring(contentStart, end).trim();
+        if (chunk) blocks.push(chunk);
+      }
+      if (blocks.length === 0) {
+        blocks.push(tempContent);
       }
     } else {
       blocks.push(tempContent);
     }
 
-    // Capture all generated blocks, but try to stay within 6-7 logical ones
-    const finalBlocks = blocks;
+    const finalBlocks = blocks.map((b) => sanitizeAthenaVoice(b));
+    if (challenge?.questions) {
+      challenge = normalizeObjectiveChallenge({
+        questions: challenge.questions.map((q) => ({
+          ...q,
+          text: sanitizeAthenaVoice(q.text || ""),
+          explanation: sanitizeAthenaVoice(q.explanation || ""),
+          options: Array.isArray(q.options) ? q.options.map((o: string) => sanitizeAthenaVoice(String(o))) : q.options,
+        }))
+      }) || challenge;
+    }
 
-    return { content: rawContent, blocks: finalBlocks, challenge, editalData };
+    return { content: sanitizeAthenaVoice(rawContent), blocks: finalBlocks, challenge, editalData };
   };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+  const pendingReadingStartRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const anchorIndex = pendingReadingStartRef.current;
+    if (anchorIndex !== null) {
+      let cancelled = false;
+      const align = () => {
+        if (cancelled) return;
+        const scroller = document.getElementById('main-scroller');
+        const block = document.getElementById(`block-${anchorIndex}-0`);
+        if (!scroller) return;
+        if (!block) {
+          scroller.scrollTop = 0;
+          return;
+        }
+        const top = block.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+        scroller.scrollTop = Math.max(0, top - 28);
+      };
+      const raf = requestAnimationFrame(() => {
+        align();
+        window.setTimeout(align, 120);
+        window.setTimeout(() => {
+          align();
+          if (pendingReadingStartRef.current === anchorIndex) pendingReadingStartRef.current = null;
+        }, 420);
+      });
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(raf);
+      };
+    }
+    const readingTrilha = messages.some((m) => m.role === 'model' && typeof m.trilhaDay === 'number');
+    if (readingTrilha) return;
     scrollToBottom();
   }, [messages, isLoading]);
 
@@ -3087,6 +3753,19 @@ export default function App() {
     let targetSessionId = sessionId;
     const activeArticle = forcedArticle !== undefined ? forcedArticle : currentArticle;
     const activeSubject = forcedSubject !== undefined ? forcedSubject : guidedSubject;
+    const pendingSession =
+      sessions.find((s) => s.id === (targetSessionId || currentSessionId)) ||
+      (user ? LocalPersistence.getSessions(user.uid).find((s) => s.id === (targetSessionId || currentSessionId)) : undefined);
+    const inStructuredStudy = Boolean(
+      forcedTrilhaDay !== undefined ||
+      pendingSession?.trilhaDay !== undefined ||
+      activeSubject ||
+      pendingSession?.guidedSubject ||
+      activeStudyItem
+    );
+    if (!isCEO && !inStructuredStudy) {
+      return;
+    }
 
     const currentAttachedFile = attachedFile;
 
@@ -3140,7 +3819,7 @@ export default function App() {
         parts: [{ text: m.content || "" }]
       }));
 
-      const audienceName = dayNum !== undefined ? "Futuro(a) Magistrado(a)" : (user?.displayName || "Mestre");
+      const audienceName = ATHENA_AUDIENCE_TITLE;
       const { text: responseText, model: usedModel } = await askATHENA(userMessage, history, audienceName, currentAttachedFile, mentorshipStyle, resolvedPhase);
       const parsed = parseATHENAResponse(responseText);
 
@@ -3155,10 +3834,21 @@ export default function App() {
         article: activeArticle,
         sourceType: 'gemini',
         modelName: usedModel,
+        trilhaDay: dayNum !== undefined ? dayNum : undefined,
         trilhaMaterialIndex: dayNum !== undefined ? (activeSession?.trilhaMaterialIndex ?? 0) : undefined
       };
 
-      setMessages(prev => [...prev, botMessage]);
+      persistBlock6(botMessage, {
+        sessionId: targetSessionId || currentSessionId,
+        day: dayNum,
+        part: botMessage.trilhaMaterialIndex,
+        subject: activeSubject,
+        article: activeArticle
+      });
+      setMessages(prev => {
+        if (dayNum !== undefined) pendingReadingStartRef.current = prev.length;
+        return [...prev, botMessage];
+      });
 
       if (dayNum !== undefined) {
         const matIdx = activeSession?.trilhaMaterialIndex ?? 0;
@@ -3199,7 +3889,9 @@ export default function App() {
           await saveSession({ 
             messages: updatedMessages,
             guidedSubject: activeSubject,
-            currentArticle: activeArticle
+            currentArticle: activeArticle,
+            trilhaDay: dayNum ?? session?.trilhaDay,
+            trilhaMaterialIndex: botMessage.trilhaMaterialIndex ?? session?.trilhaMaterialIndex
           }, targetSessionId, true);
         } catch (saveErr) {
           console.warn("Notice: Cloud sync deferred (quota/network fallback active):", saveErr);
@@ -3366,11 +4058,23 @@ ${matList}
             blocks: parsed.blocks,
             currentBlockIndex: 0,
             subject: activeSubject,
-            article: activeArticle,
+            article: dayNum ?? activeArticle,
             sourceType: 'offline_pareto',
-            modelName: 'Material Local Pareto 80/20'
+            modelName: 'Material Local Pareto 80/20',
+            trilhaDay: dayNum,
+            trilhaMaterialIndex: dayNum !== undefined ? (activeSession?.trilhaMaterialIndex ?? 0) : undefined
           };
-          setMessages(prev => [...prev, botMessage]);
+          persistBlock6(botMessage, {
+            sessionId: targetSessionId || currentSessionId,
+            day: dayNum,
+            part: botMessage.trilhaMaterialIndex,
+            subject: activeSubject,
+            article: dayNum ?? activeArticle
+          });
+          setMessages(prev => {
+            if (dayNum !== undefined) pendingReadingStartRef.current = prev.length;
+            return [...prev, botMessage];
+          });
 
           const activeId = (targetSessionId || currentSessionId);
           if (activeId) {
@@ -3386,7 +4090,9 @@ ${matList}
             saveSession({
               messages: updatedMessages,
               guidedSubject: activeSubject,
-              currentArticle: activeArticle
+              currentArticle: activeArticle,
+              trilhaDay: dayNum ?? session?.trilhaDay,
+              trilhaMaterialIndex: botMessage.trilhaMaterialIndex ?? session?.trilhaMaterialIndex
             }, activeId, true);
           }
           return;
@@ -3489,6 +4195,7 @@ ${matList}
   };
 
   const toggleTrilhaDayComplete = async (dayNumber: number) => {
+    if (!isCEO) throw new Error("Conclusão exige confirmação do servidor; marcação manual indisponível.");
     if (!user) return;
     const isCompleted = trilhaCompletedDays.includes(dayNumber);
     const newCompleted = isCompleted 
@@ -3520,24 +4227,10 @@ ${matList}
     
     let prep = '';
     if (style === 'automatico') {
-      prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (Magistratura, Ministério Público, Defensoria e Delegado) indicam que o estudo deste tema (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
-Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
-- Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
-- Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
-- Jurisprudência (Precedentes/Súmulas STF e STJ): ${incidencia.porcentagens.jurisprudencia}%
-
-Justificativa Estatística e Metodológica:
-${incidencia.justificativa}
-Provas e Concursos de Referência Recente:
-${incidencia.concursoHistorico}
-
-Adote rigores condizentes com estes dados, concentrando a explanação guiada nesta prioridade definida e apresentando as porcentagens e referências logo após a sua saudação inicial para o aluno!
-------
-`;
+      prep = instrucaoEnfase(`o Dia ${dayNum}`, incidencia);
     }
     
-    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e questões de provas anteriores de Magistratura/Ministério Público. Siga o fluxo de estudos em blocos!`;
+    return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos para o estudo focado do DIA ${dayNum} (Semana ${semana}). Os materiais de hoje são:\n\n${materialsList}\n\nFaça um estudo aprofundado destes artigos focando especialmente na jurisprudência recente e em questões objetivas de ${ATHENA_CAREERS_LABEL}. Siga o fluxo de estudos em partes! Não atribua percentual nem nível de incidência.`;
   };
 
   const getTrilhaDayDiscursiveMessage = (dayNum: number, materias: { nome: string; conteudo: string }[], semana: number) => {
@@ -3573,44 +4266,17 @@ Sua conduta como Presidente da Mesa Examinadora:
     
     let prep = '';
     if (style === 'automatico') {
-      prep = `[INSTRUÇÃO DE INCIDÊNCIA DE BANCA - SISTEMA INTELIGENTE DE PRIORIZAÇÃO AUTOMÁTICA EM ATIVIDADE]
-Nesta sessão de mentoria do Módulo Automático, as estatísticas históricas de alta performance (Magistratura, Ministério Público, Defensoria e Delegado) indicam que o estudo de "${currentMat.nome}" (Dia ${dayNum}) deve priorizar: ${incidencia.label}.
-Percentuais exatíssimos de cobrança em provas de primeira, segunda e fase oral:
-- Lei Seca (Texto da Lei): ${incidencia.porcentagens.leiSeca}%
-- Doutrina (Teoria Densa): ${incidencia.porcentagens.doutrina}%
-- Jurisprudência (Precedentes/Súmulas STF e STJ): ${incidencia.porcentagens.jurisprudencia}%
-
-Justificativa Estatística e Metodológica:
-${incidencia.justificativa}
-Provas e Concursos de Referência Recente:
-${incidencia.concursoHistorico}
-
-Adote rigores condizentes com estes dados, concentrando a explanação guiada nesta prioridade definida e apresentando as porcentagens e referências logo após a sua saudação inicial para o aluno!
-------
-`;
+      prep = instrucaoEnfase(`"${currentMat.nome}" (Dia ${dayNum})`, incidencia);
     }
     
-    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
-    
-    // Eventual automatic trigger of discursive or oral challenges during the 100 days flow
-    let hybridDirective = "";
-    if (dayNum % 10 === 5 || dayNum % 5 === 0) {
-      hybridDirective = `\n\n[ALERTA DE DESAFIO ESPECIAL - QUESTÃO DISCURSIVA (2ª FASE)]
-Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de Desafio Especial Athena de 2ª Fase!
-No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas de múltipla escolha normais, elabore obrigatoriamente uma única QUESTÃO DISCURSIVA (2ª Fase) densa do tema estudado hoje para treinar o aluno, instruindo-o a redigir sua resposta fundamentada por escrito. Aguarde a submissão de sua resposta para proferir uma correção analítica rigorosa com nota final de banca.`;
-    } else if (dayNum % 10 === 3 || dayNum % 7 === 0) {
-      hybridDirective = `\n\n[ALERTA DE DESAFIO ESPECIAL - SIMULADO EXAME ORAL (3ª FASE)]
-Mesmo que o aluno esteja estudando no fluxo geral de 100 dias, hoje é um Dia de Desafio Especial Athena de Exame Oral da 3ª Fase!
-No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questões objetivas normais, apresente uma única ARGUIÇÃO ORAL (Pergunta de Exame Oral) formal de banca examinadora, instruindo o aluno a utilizar gravação de áudio ou digitação por ditado de voz para responder verbalmente sob pressão à banca. Aguarde a sustentação para proferir nota oficial de oratória jurídica.`;
-    }
-
     let extraSource = `\n\n[DIRETRIZES DA BASE DE CONHECIMENTO E PERTINÊNCIA TEMÁTICA ABSOLUTA ATHENA]:
 1. BASE SOBERANA E CONFINAMENTO TEMÁTICO RESTRITO:
    - A sua base soberana de verdade é EXCLUSIVAMENTE o seguinte recorte: ${currentMat.nome} (${currentMat.conteudo}).
-   - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo dos 6 blocos deve nascer e se esgotar no exame deste recorte!
+   - TOLERÂNCIA ZERO À FUGA DO TEMA: É terminantemente vedado avançar para artigos posteriores, retroceder para artigos anteriores ou derivar para matérias, livros ou temas fora do intervalo programado (${currentMat.conteudo}). Todo o conteúdo das 6 partes deve nascer e se esgotar no exame deste recorte!
+   - DIPLOMA NOMEADO É INSUBSTITUÍVEL: se o recorte nomear uma lei, um decreto ou uma resolução pelo número, a aula inteira trata só desse diploma. É proibido trocá-lo por outro, em especial pelos arts. 337-E a 337-P do Código Penal ou pela Lei nº 14.133/2021, salvo quando o próprio recorte programado for expressamente esses dispositivos. A palavra "crimes" no título não autoriza a troca.
 
-2. DIRETRIZES BLOCO A BLOCO (RIGOR ESTRITO):
-   - [BLOCK_1] (👋 Saudação e Raio-X): Use SEMPRE uma saudação institucional e universal de mentoria de alto rendimento (ex: "Olá, Futuro(a) Magistrado(a)!", "Seja bem-vindo(a), Candidato(a) de Elite!"). NUNCA use nomes individuais ou apelidos pessoais nesta saudação, pois este conteúdo será homologado e compartilhado com todos os alunos da mentoria. Apresente o Raio-X e a relevância prática deste recorte exato (${currentMat.conteudo}) para concursos de ponta (Magistratura, MP, Defensoria e Delegado).
+2. DIRETRIZES PARTE A PARTE (RIGOR ESTRITO). Os marcadores [BLOCK_1] a [BLOCK_6] continuam internos. Para o aluno, cada um é uma Parte (Parte 1 a Parte 6). O recorte do dia é um Bloco, nunca uma Parte.
+   - [BLOCK_1] (👋 Saudação e foco de leitura): Use SEMPRE a saudação institucional "Olá, ${ATHENA_AUDIENCE_TITLE}!". NUNCA diga Futuro Magistrado, Futuro Juiz ou nome pessoal. O público é só ${ATHENA_CAREERS_LABEL}. Proibido citar Procuradoria, Advocacia Pública, OAB, Delegado de Polícia ou certame nominado (TJSP, MPRS, TRF4, DPU 2024 etc.). Proibido percentual de banca e proibido nível de incidência (alta, média, baixa, menor). Apresente o recorte (${currentMat.conteudo}) e o foco de leitura em três linhas, sem números: Lei Seca, Jurisprudência e Doutrina. Proibido gerar tabelas Markdown.
    
    - [BLOCK_2] (⚖️ Letra da Lei Decodificada): Decodifique, esquematize e disseque com suas próprias palavras e rigor analítico CADA UM dos artigos e princípios compreendidos no intervalo ${currentMat.conteudo}. Destaque núcleos dogmáticos, prazos, exceções legais, postulados normativos e pegadinhas clássicas de banca examinadora, evitando transcrição mecânica literal de apostilas comerciais.
    
@@ -3629,11 +4295,13 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
    - [BLOCK_4] (📖 Doutrina com Exemplos e Casuística): Explicação doutrinária verticalizada (densidade de 2ª fase) estritamente circunscrita aos institutos disciplinados em ${currentMat.conteudo}. Traga divergências doutrinárias reais e exemplos práticos da atividade forense que ilustrem exatamente os artigos estudados hoje.
    
    - [BLOCK_5] (🎯 Desafio ATHENA - Questões Estritamente Temáticas):
-     * REGRA DE PERTINÊNCIA DAS QUESTÕES: 100% das questões geradas (objetivas ou discursiva/oral) DEVEM ter como objeto de cobrança EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
+     * SOMENTE questões OBJETIVAS de múltipla escolha (4 ou 5 alternativas, correctIndex 0-4). É PROIBIDO discursiva, subjetiva ou prova oral.
+     * REGRA DE PERTINÊNCIA: 100% das questões DEVEM cobrar EXCLUSIVAMENTE as regras, conceitos, exceções e jurisprudência dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).
      * É TERMINANTEMENTE PROIBIDO formular questões sobre artigos ou tópicos de fora deste recorte.
      * Na explicação/justificativa de cada alternativa e gabarito, cite expressamente o artigo ou o entendimento consolidado deste recorte (${currentMat.conteudo}) que comprova a resposta correta e o erro das demais, sem inventar números de processos fictícios.
    
-   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}).${hybridDirective}`;
+   - [BLOCK_6] (📝 Revisão Comprimida Pareto 80/20): Exatamente 10 tópicos atômicos (bullet points) de máxima densidade sintetizando unicamente as regras de ouro, prazos, exceções e postulados dos artigos estudados hoje (${currentMat.conteudo} de ${currentMat.nome}). Cada tópico começa com o rótulo em **negrito** seguido de dois-pontos.
+   - FORMATAÇÃO OBRIGATÓRIA EM TODAS AS PARTES: cada tópico, instituto, prazo, competência, exceção e ponto principal fica em **negrito**. Não entregue a lista de pontos principais em texto puro.`;
 
     const grounding = getGroundingForTrilhaPart(dayNum, currentMat.nome, currentMat.conteudo);
     if (grounding.hasGrounding) {
@@ -3642,18 +4310,19 @@ No Último Bloco (Bloco de Exercícios/Fixação / Questões), em vez de questõ
 
     return `${prep}ATHENA, conforme nosso cronograma da Trilha Jurídica de 100 Dias (Elite), hoje vamos estudar de forma PARTICIONADA o tema do DIA ${dayNum} (Semana ${semana}) para garantir profundidade monumental sem sobrecarga de processamento.
 
-Dentre os temas programados para hoje, este comando refere-se especificamente à seguinte parte:
-**Parte ${materialIndex + 1} de ${totalMaterials}**: **${currentMat.nome}**: ${currentMat.conteudo}${extraSource}
+Dentre os temas programados para hoje, este comando refere-se especificamente ao seguinte bloco:
+**Bloco ${materialIndex + 1} de ${totalMaterials}**: **${currentMat.nome}**: ${currentMat.conteudo}${extraSource}
 
-Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo específico, com base na melhor doutrina, jurisprudência e na sua complementação por inteligência artificial sob o Princípio de Pareto aplicável a provas anteriores. Siga rigorosamente o fluxo de estudos em 6 blocos!`;
+Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo específico, com base na melhor doutrina, jurisprudência e na sua complementação por inteligência artificial. Siga rigorosamente o fluxo de estudos em 6 partes! Não atribua percentual nem nível de incidência.`;
   };
 
   const prefetchNextTrilhaPart = async (dayNum: number, nextMatIdx: number, resolvedPhase: string, mStyle: any) => {
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
     if (!dayItem || !dayItem.materias || nextMatIdx >= dayItem.materias.length) return;
     
-    // Check if already in cache or homologated
-    if (getLocalHomologatedLesson(dayNum, nextMatIdx)) return;
+    // Aula oficial vem do Firestore, documento a documento. Não gasta o proxy Gemini.
+    const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
+    if (homologated?.content) return;
     if (getCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase)) return;
 
     const nextMat = dayItem.materias[nextMatIdx];
@@ -3667,7 +4336,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     try {
       console.log(`[ATHENA Pre-fetch] Disparando em background geração da Parte ${nextMatIdx + 1} de ${dayItem.materias.length} (Dia ${dayNum} - ${nextMat.nome})...`);
-      const { text, model } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mStyle, resolvedPhase as any);
+      const { text, model } = await askATHENA(nextMsg, [], ATHENA_AUDIENCE_TITLE, undefined, mStyle, resolvedPhase as any);
       setCachedTrilhaPart(dayNum, nextMatIdx, resolvedPhase, {
         text,
         model,
@@ -3679,13 +4348,23 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
   };
 
-  const handleStartTrilhaStudy = async (dayNum: number, sessionType: 'estudo' | 'discursivo' | 'oral' = 'estudo') => {
+  const executeStartTrilhaStudy = async (dayNum: number, sessionType: 'estudo' | 'discursivo' | 'oral' = 'estudo', targetMaterialIndex: number = 0) => {
+    try {
+      const access=await refreshStudyAccess();
+      setStudyAccess(access);setServerCeoUid(access.ceo?access.uid:null);
+      if(!access.ceo && !access.allowedDays.includes(dayNum)){
+        if(isCeoAccount(user)){alert('O acesso administrativo não foi confirmado pelo servidor para esta sessão. Saia e entre com o Google (conta CEO verificada) para acesso total.');return;}
+        alert(dayNum>2&&!access.subscriptionActive&&!access.testerAccess.active?'Para continuar após o Dia 2, é necessária assinatura verificada pelo Google Play ou pela App Store. Compras ainda não disponíveis; nenhum acesso pago será concedido.':'Conclua o dia anterior e seus desafios para avançar.');return;
+      }
+    } catch { alert('Não foi possível confirmar seu acesso. Conecte-se para continuar; seu progresso não foi apagado.'); return; }
+
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
     if (!dayItem || !dayItem.materias || dayItem.materias.length === 0) return;
 
     setActiveTab('chat');
+    document.getElementById('main-scroller')?.scrollTo({ top: 0, behavior: 'auto' });
 
-    const materialIndex = 0;
+    const materialIndex = Math.min(Math.max(0, targetMaterialIndex), dayItem.materias.length - 1);
     let initialMsg = '';
     let titleStr = '';
     let guidedSubjectName = '';
@@ -3710,6 +4389,121 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       guidedSubjectName = dayItem.materias[materialIndex].nome;
     }
 
+    const isDayCompleted = trilhaCompletedDays.includes(dayNum);
+    if (isDayCompleted && targetMaterialIndex === 0 && reviewingCompletedDay !== dayNum) {
+      setReviewingCompletedDay(null);
+    } else if (isDayCompleted && targetMaterialIndex > 0) {
+      setReviewingCompletedDay(dayNum);
+    }
+
+    const activeUserId = user?.uid || 'jhonny-spider-ceo';
+    const allUserSessions = LocalPersistence.getSessions(activeUserId);
+    const existingSession = sessions.find(s => 
+      s.trilhaDay === dayNum && 
+      (s.trilhaSessionType || 'estudo') === sessionType
+    ) || allUserSessions.find(s => 
+      s.trilhaDay === dayNum && 
+      (s.trilhaSessionType || 'estudo') === sessionType
+    );
+
+    if (existingSession && existingSession.messages && existingSession.messages.length > 0) {
+      setCurrentSessionId(existingSession.id);
+      const readyMessages = await Promise.all((isDayCompleted
+        ? existingSession.messages.map(m => m.role === 'model' && m.blocks ? { ...m, currentBlockIndex: m.blocks.length - 1 } : m)
+        : existingSession.messages
+      ).map(async m => {
+        if (isDayCompletionNotice(m)) return m;
+        const mDay = m.trilhaDay ?? existingSession.trilhaDay ?? dayNum;
+        let mPart = m.trilhaMaterialIndex;
+        if (mPart === undefined && dayItem?.materias && m.subject) {
+          const match = dayItem.materias.findIndex(mat => mat.nome.trim().toLowerCase() === m.subject?.trim().toLowerCase());
+          if (match >= 0) mPart = match;
+        }
+        if (mPart === undefined) {
+          mPart = existingSession.trilhaMaterialIndex ?? targetMaterialIndex ?? 0;
+        }
+        if (m.role === 'model') {
+          let updatedM = {
+            ...m,
+            trilhaDay: mDay,
+            trilhaMaterialIndex: mPart
+          };
+          if (!updatedM.studyBaseline) {
+            const hom = (await getHomologatedLesson(mDay, mPart)) || getLocalHomologatedLesson(mDay, mPart);
+            if (hom && hom.content) {
+              updatedM.studyBaseline = { version: hom.version || 1, sha256: await hashStudyContent(hom.content) };
+            }
+          }
+          return updatedM;
+        }
+        return m;
+      }));
+      const hasTarget = readyMessages.some(m => m.role === 'model' && !isDayCompletionNotice(m) && m.trilhaMaterialIndex === targetMaterialIndex);
+      if (hasTarget) {
+        setMessages(readyMessages);
+        setGuidedSubject(dayItem?.materias[targetMaterialIndex]?.nome || existingSession.guidedSubject || guidedSubjectName);
+        setCurrentArticle(existingSession.currentArticle || 1);
+        setIsLoading(false);
+        setTimeout(() => {
+          const targetMsgIdx = readyMessages.findIndex(m => m.role === 'model' && !isDayCompletionNotice(m) && m.trilhaMaterialIndex === targetMaterialIndex);
+          if (targetMsgIdx >= 0) {
+            document.getElementById(`block-${targetMsgIdx}-0`)?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }, 100);
+        return;
+      }
+
+      // Se a sessão existe mas o bloco alvo ainda não foi gerado/carregado nela:
+      const hom = (await getHomologatedLesson(dayNum, targetMaterialIndex)) || getLocalHomologatedLesson(dayNum, targetMaterialIndex);
+      if (hom && hom.content) {
+        const parsed = parseATHENAResponse(hom.content);
+        const resolvedChallenge = normalizeObjectiveChallenge(hom.challenge) || parsed.challenge;
+        const targetLessonId = `day_${dayNum}_part_${targetMaterialIndex}`;
+        const existingMat = await loadStudyMaterial(targetLessonId).catch(() => null);
+        const newBotMsg: Message = {
+          role: 'model',
+          content: parsed.content,
+          challenge: resolvedChallenge,
+          blocks: parsed.blocks,
+          currentBlockIndex: isDayCompleted ? (parsed.blocks ? parsed.blocks.length - 1 : 0) : 0,
+          subject: guidedSubjectName,
+          article: dayNum,
+          sourceType: 'gemini',
+          modelName: 'Oficial Homologado pelo CEO',
+          studyBaseline: { version: hom.version || 1, sha256: await hashStudyContent(hom.content) },
+          trilhaDay: dayNum,
+          trilhaMaterialIndex: targetMaterialIndex,
+          answers: existingMat?.material?.answers || {}
+        };
+        const appendedMessages: Message[] = [
+          ...readyMessages,
+          { role: 'user', content: `Entendido. Vamos para o Bloco ${targetMaterialIndex + 1} de ${dayItem.materias.length} (${guidedSubjectName})!` },
+          newBotMsg
+        ];
+        setMessages(appendedMessages);
+        setGuidedSubject(guidedSubjectName);
+        setCurrentArticle(1);
+        setIsLoading(false);
+        await saveSession({
+          title: `Trilha Dia ${dayNum}: P${targetMaterialIndex + 1}/${dayItem.materias.length}`,
+          guidedSubject: guidedSubjectName,
+          trilhaDay: dayNum,
+          trilhaMaterialIndex: targetMaterialIndex,
+          messages: appendedMessages
+        }, existingSession.id);
+        setTimeout(() => {
+          document.getElementById(`block-${appendedMessages.length - 1}-0`)?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+        return;
+      }
+
+      setMessages(readyMessages);
+      setGuidedSubject(existingSession.guidedSubject || guidedSubjectName);
+      setCurrentArticle(existingSession.currentArticle || 1);
+      setIsLoading(false);
+      return;
+    }
+
     let resolvedPhase: 'objetiva' | 'subjetiva' | 'oral' = mentorshipPhase;
     if (mentorshipPhase === 'objetiva') {
       resolvedPhase = 'objetiva';
@@ -3720,7 +4514,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
 
     const id = crypto.randomUUID();
-    const activeUserId = user?.uid || 'jhonny-spider-ceo';
     const newSession: ChatSession = {
       id,
       title: titleStr,
@@ -3742,23 +4535,33 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     // 0. Prioridade Máxima: Conteúdo Oficial Homologado pelo CEO (0.05s)
     if (sessionType === 'estudo') {
-      const homologated = await getHomologatedLesson(dayNum, 0);
+      const homologated = await getHomologatedLesson(dayNum, materialIndex);
       if (homologated && homologated.content) {
-        console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte 1! Carregamento imediato.`);
+        console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte ${materialIndex + 1}! Carregamento imediato.`);
         const parsed = parseATHENAResponse(homologated.content);
-        const resolvedChallenge = homologated.challenge || parsed.challenge;
+        const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
         const botMessage: Message = {
           role: 'model',
           content: parsed.content,
           challenge: resolvedChallenge,
           blocks: parsed.blocks,
-          currentBlockIndex: 0,
+          currentBlockIndex: isDayCompleted ? (parsed.blocks ? parsed.blocks.length - 1 : 0) : 0,
           subject: guidedSubjectName,
-          article: 1,
+          article: dayNum,
           sourceType: 'gemini',
           modelName: 'Oficial Homologado pelo CEO',
-          trilhaMaterialIndex: 0
+                  studyBaseline: {version:homologated.version,sha256:await hashStudyContent(homologated.content)},
+          trilhaDay: dayNum,
+          trilhaMaterialIndex: materialIndex
         };
+
+        persistBlock6(botMessage, {
+          sessionId: id,
+          day: dayNum,
+          part: materialIndex,
+          subject: guidedSubjectName,
+          article: 1
+        });
 
         const cachedSession: ChatSession = {
           ...newSession,
@@ -3770,6 +4573,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         setCurrentSessionId(id);
         setGuidedSubject(guidedSubjectName);
         setCurrentArticle(1);
+        pendingReadingStartRef.current = 1;
         setMessages([{ role: 'user', content: initialMsg }, botMessage]);
         setIsLoading(false);
 
@@ -3782,27 +4586,36 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           }
         }
 
-        prefetchNextTrilhaPart(dayNum, 1, resolvedPhase, mentorshipStyle);
+        prefetchNextTrilhaPart(dayNum, materialIndex + 1, resolvedPhase, mentorshipStyle);
         return;
       }
 
       // 1. Verificação de Cache Instantâneo (0s de espera)
-      const cached = getCachedTrilhaPart(dayNum, 0, resolvedPhase);
+      const cached = getCachedTrilhaPart(dayNum, materialIndex, resolvedPhase);
       if (cached) {
-        console.log(`[ATHENA Cache] Hit para Dia ${dayNum} Parte 1! Carregando instantaneamente (0s).`);
+        console.log(`[ATHENA Cache] Hit para Dia ${dayNum} Parte ${materialIndex + 1}! Carregando instantaneamente (0s).`);
         const parsed = parseATHENAResponse(cached.text);
         const botMessage: Message = {
           role: 'model',
           content: parsed.content,
           challenge: parsed.challenge,
           blocks: parsed.blocks,
-          currentBlockIndex: 0,
+          currentBlockIndex: isDayCompleted ? ((parsed.blocks?.length || 1) - 1) : 0,
           subject: guidedSubjectName,
-          article: 1,
+          article: dayNum,
           sourceType: 'gemini',
           modelName: `${cached.model} (Cache Instantâneo)`,
-          trilhaMaterialIndex: 0
+          trilhaDay: dayNum,
+          trilhaMaterialIndex: materialIndex
         };
+
+        persistBlock6(botMessage, {
+          sessionId: id,
+          day: dayNum,
+          part: materialIndex,
+          subject: guidedSubjectName,
+          article: 1
+        });
 
         const cachedSession: ChatSession = {
           ...newSession,
@@ -3814,6 +4627,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         setCurrentSessionId(id);
         setGuidedSubject(guidedSubjectName);
         setCurrentArticle(1);
+        pendingReadingStartRef.current = 1;
         setMessages([{ role: 'user', content: initialMsg }, botMessage]);
         setIsLoading(false);
 
@@ -3826,8 +4640,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           }
         }
 
-        // Pré-carregamento em background da Parte 2
-        prefetchNextTrilhaPart(dayNum, 1, resolvedPhase, mentorshipStyle);
+        // Pré-carregamento em background da próxima parte
+        prefetchNextTrilhaPart(dayNum, materialIndex + 1, resolvedPhase, mentorshipStyle);
         return;
       }
     }
@@ -3855,18 +4669,176 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
   };
 
+  const handleStartTrilhaStudy = async (dayNum: number, sessionType: 'estudo' | 'discursivo' | 'oral' = 'estudo', targetMaterialIndex: number = 0) => {
+    if (dayNum > 1 && !sessionPromptedDaysRef.current.has(dayNum)) {
+      sessionPromptedDaysRef.current.add(dayNum);
+      setPreStudyPrompt({ dayNum, sessionType, targetMaterialIndex });
+      return;
+    }
+    await executeStartTrilhaStudy(dayNum, sessionType, targetMaterialIndex);
+  };
+
   const advanceStage = async (msgIdx: number) => {
     const msg = messages[msgIdx];
     if (!msg || !msg.blocks) return;
     
+    // Conclusão ou parabéns não é lição de estudo e não deve reiniciar desafios
+    if (msg.content?.includes("Parabéns de Elite") || msg.content?.includes("Conclusão confirmada pelo servidor")) {
+      return;
+    }
+
     const isLastBlock = (msg.currentBlockIndex ?? 0) >= msg.blocks.length - 1;
-    
+    const session = sessions.find(s => s.id === currentSessionId);
+    const trilha = inferTrilhaContext(session, messages, msg);
+    const isDayAlreadyCompleted = trilha.day !== undefined && trilhaCompletedDays.includes(trilha.day);
+
+    if (!isCEO && isLastBlock && trilha.day !== undefined && !isDayAlreadyCompleted) {
+      const dayNum = trilha.day;
+      const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
+      const total = dayItem?.materias?.length || 0;
+
+      // Resolução estrita do índice da matéria atual (part) para a mensagem em foco
+      let part = msg.trilhaMaterialIndex;
+      if (part === undefined && dayItem?.materias && msg.subject) {
+        const matchIdx = dayItem.materias.findIndex(m => m.nome.trim().toLowerCase() === msg.subject?.trim().toLowerCase());
+        if (matchIdx >= 0) part = matchIdx;
+      }
+      if (part === undefined) {
+        const modelMsgs = (messages || []).filter(m => m.role === 'model' && !isDayCompletionNotice(m) && (m.blocks || m.challenge));
+        const idxInModels = modelMsgs.indexOf(msg);
+        if (idxInModels >= 0 && idxInModels < total) {
+          part = idxInModels;
+        }
+      }
+      if (part === undefined) {
+        part = (trilha.part !== undefined && trilha.part < total) ? trilha.part : 0;
+      }
+
+      const isFinishingDay = part === total - 1;
+
+      try {
+        if (!isFinishingDay) {
+          // Concluindo matéria intermediária do dia individualmente
+          const lessonId = `day_${dayNum}_part_${part}`;
+          const serverMatState = await loadStudyMaterial(lessonId).catch(() => null);
+          const serverAnswers = serverMatState?.material?.answers || {};
+          const localAnswers = msg.answers || {};
+          const mergedAnswers = { ...serverAnswers, ...localAnswers };
+
+          const homLesson = (await getHomologatedLesson(dayNum, part)) || getLocalHomologatedLesson(dayNum, part);
+          const reqCount = homLesson?.challenge?.questions?.length || 10;
+          const answeredCount = Object.keys(mergedAnswers).length;
+
+          if (answeredCount < reqCount) {
+            const matName = dayItem?.materias[part]?.nome || `Bloco ${part + 1}`;
+            alert(`A matéria "${matName}" (Bloco ${part + 1} de ${total}) possui ${reqCount - answeredCount} questão(ões) sem resposta no Desafio de Fixação. Responda todas as ${reqCount} questões obrigatórias para avançar.`);
+            return;
+          }
+
+          const effectiveBaseline = (serverMatState?.material ? {
+            version: serverMatState.material.lessonVersion,
+            sha256: serverMatState.material.lessonSha256
+          } : undefined) || msg.studyBaseline || (homLesson?.content ? {
+            version: homLesson.version || 1,
+            sha256: await hashStudyContent(homLesson.content)
+          } : undefined);
+
+          const confirmed = await completeStudyMaterial(lessonId, mergedAnswers, effectiveBaseline);
+          if (confirmed?.completedDays) {
+            setTrilhaCompletedDays(confirmed.completedDays);
+          }
+          window.dispatchEvent(new CustomEvent('athena-study-synced', { detail: { day: dayNum, part } }));
+        } else {
+          // Concluindo a última matéria do dia: validação e finalização de todos os requisitos canônicos do dia
+          const { materials: serverMaterials } = await loadStudentMaterials().catch(() => ({ materials: [] }));
+          
+          for (let p = 0; p < total; p++) {
+            const lessonId = `day_${dayNum}_part_${p}`;
+            const serverMat = serverMaterials.find(m => m.lessonId === lessonId);
+            
+            if (serverMat?.completed) {
+              continue;
+            }
+
+            const pMsg = (p === part)
+              ? msg
+              : (messages || []).slice().reverse().find(m => m.role === 'model' && (m.trilhaMaterialIndex === p || m.subject === dayItem?.materias[p]?.nome));
+            
+            const pAnswers = { ...(serverMat?.answers || {}), ...(pMsg?.answers || {}) };
+            const homLesson = (await getHomologatedLesson(dayNum, p)) || getLocalHomologatedLesson(dayNum, p);
+            const reqCount = homLesson?.challenge?.questions?.length || 10;
+            const answeredCount = Object.keys(pAnswers).length;
+
+            if (answeredCount < reqCount) {
+              const matName = dayItem?.materias[p]?.nome || `Bloco ${p + 1}`;
+              alert(`A matéria "${matName}" (Bloco ${p + 1} de ${total}) possui ${reqCount - answeredCount} questão(ões) sem resposta no Desafio de Fixação. Responda todas as ${reqCount} questões obrigatórias para concluir o Dia ${dayNum}.`);
+              return;
+            }
+
+            const pBaseline = (serverMat ? {
+              version: serverMat.lessonVersion,
+              sha256: serverMat.lessonSha256
+            } : undefined) || pMsg?.studyBaseline || (homLesson?.content ? {
+              version: homLesson.version || 1,
+              sha256: await hashStudyContent(homLesson.content)
+            } : undefined);
+
+            const confirmedPart = await completeStudyMaterial(lessonId, pAnswers, pBaseline);
+            if (confirmedPart.completedDays?.length) {
+              setTrilhaCompletedDays(confirmedPart.completedDays);
+            }
+          }
+
+          const refreshed = await refreshStudyAccess();
+          if (refreshed.completedDays?.includes(dayNum)) {
+            setTrilhaCompletedDays(refreshed.completedDays);
+          } else {
+            alert('Conclusão pendente de confirmação com o servidor. Verifique se todas as questões obrigatórias foram salvas.');
+            return;
+          }
+          window.dispatchEvent(new CustomEvent('athena-study-synced', { detail: { day: dayNum, part } }));
+        }
+      } catch (err: any) {
+        console.error('[advanceStage completion error]', err);
+        const errMsg = err?.message || String(err);
+        if (errMsg.includes('ANSWERS_INCOMPLETE')) {
+          alert('Conclusão não confirmada: existem questões obrigatórias sem resposta no Desafio de Fixação. Responda todas as questões de cada matéria para avançar.');
+        } else if (errMsg.includes('AUTHENTICATION_REQUIRED')) {
+          alert('Sessão expirada. Faça login novamente para confirmar seu progresso com o servidor.');
+        } else if (errMsg.includes('PROGRESSION_OR_SUBSCRIPTION_REQUIRED')) {
+          alert('Esta matéria exige a conclusão dos dias anteriores ou assinatura ativa.');
+        } else if (errMsg.includes('DISPLAYED_BASELINE_CHANGED') || errMsg.includes('BASELINE_CHANGED') || errMsg.includes('LESSON_CHANGED_REVIEW_REQUIRED')) {
+          alert('O conteúdo da aula foi atualizado pelo coordenador pedagógico. Recarregue a lição para atualizar as questões.');
+        } else if (errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('CONFIRMATION_PENDING')) {
+          alert('Conclusão pendente de confirmação com o servidor. Seu progresso local foi salvo e você pode tentar novamente ou retomar a qualquer momento.');
+        } else {
+          alert(`Não foi possível confirmar a conclusão: ${errMsg}`);
+        }
+        return;
+      }
+    }
+
     if (isLastBlock) {
-      const session = sessions.find(s => s.id === currentSessionId);
-      if (session && session.trilhaDay) {
-        const dayNum = session.trilhaDay;
-        const currentMatIdx = (msg?.trilhaMaterialIndex !== undefined) ? msg.trilhaMaterialIndex : (session.trilhaMaterialIndex ?? 0);
+      await saveReview(msgIdx);
+      const dayNum = trilha.day;
+      if (dayNum !== undefined) {
         const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
+        let part = msg.trilhaMaterialIndex;
+        if (part === undefined && dayItem?.materias && msg.subject) {
+          const matchIdx = dayItem.materias.findIndex(m => m.nome.trim().toLowerCase() === msg.subject?.trim().toLowerCase());
+          if (matchIdx >= 0) part = matchIdx;
+        }
+        if (part === undefined) {
+          const modelMsgs = (messages || []).filter(m => m.role === 'model' && !isDayCompletionNotice(m) && (m.blocks || m.challenge));
+          const idxInModels = modelMsgs.indexOf(msg);
+          if (idxInModels >= 0 && idxInModels < (dayItem?.materias?.length || 0)) {
+            part = idxInModels;
+          }
+        }
+        if (part === undefined) {
+          part = (trilha.part !== undefined && trilha.part < (dayItem?.materias?.length || 0)) ? trilha.part : 0;
+        }
+        const currentMatIdx = part;
         
         if (dayItem && dayItem.materias) {
           const nextMatIdx = currentMatIdx + 1;
@@ -3882,7 +4854,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             
             const updatedMessages: Message[] = [
               ...messages,
-              { role: 'user', content: `Entendido. Vamos avançar para a Parte ${nextMatIdx + 1} de ${dayItem.materias.length} (${nextMat.nome})!` }
+              { role: 'user', content: `Entendido. Vamos avançar para o Bloco ${nextMatIdx + 1} de ${dayItem.materias.length} (${nextMat.nome})!` }
             ];
             setMessages(updatedMessages);
             setIsLoading(true);
@@ -3906,6 +4878,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             await saveSession({
               title: `Trilha Dia ${dayNum}: P${nextMatIdx + 1}/${dayItem.materias.length}`,
               guidedSubject: nextMat.nome,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx,
               messages: updatedMessages
             }, currentSessionId);
@@ -3920,11 +4893,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             }
 
               // 0. Prioridade Máxima: Conteúdo Oficial Homologado pelo CEO (0.05s)
-              const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
+              const homologated = (await getHomologatedLesson(dayNum, nextMatIdx)) || getLocalHomologatedLesson(dayNum, nextMatIdx);
               if (homologated && homologated.content) {
                 console.log(`[ATHENA Homologated] Lição Oficial do CEO encontrada para Dia ${dayNum} Parte ${nextMatIdx + 1}! Carregamento imediato.`);
                 const parsed = parseATHENAResponse(homologated.content);
-                const resolvedChallenge = homologated.challenge || parsed.challenge;
+                const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
+                const nextLessonId = `day_${dayNum}_part_${nextMatIdx}`;
+                const existingMat = await loadStudyMaterial(nextLessonId).catch(() => null);
                 const botMessage: Message = {
                   role: 'model',
                   content: parsed.content,
@@ -3932,12 +4907,23 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: 'Oficial Homologado pelo CEO',
-                  trilhaMaterialIndex: nextMatIdx
+                  studyBaseline: {version:homologated.version || 1,sha256:await hashStudyContent(homologated.content)},
+                  trilhaDay: dayNum,
+                  trilhaMaterialIndex: nextMatIdx,
+                  answers: existingMat?.material?.answers || {}
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 const finalMessages = [...updatedMessages, botMessage];
+                pendingReadingStartRef.current = finalMessages.length - 1;
                 setMessages(finalMessages);
                 setIsLoading(false);
 
@@ -3986,12 +4972,21 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: `${cached.model} (Cache Instantâneo)`,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 const finalMessages = [...updatedMessages, botMessage];
+                pendingReadingStartRef.current = finalMessages.length - 1;
                 setMessages(finalMessages);
                 setIsLoading(false);
 
@@ -4032,7 +5027,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               try {
                 // Cada parte da trilha possui comando autocontido com escopo exato.
                 // Usamos histórico limpo ([]), idêntico ao prefetch, para máxima agilidade e sem poluição de contexto.
-                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
+                const { text: responseText, model: usedModel } = await askATHENA(nextMsg, [], ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, resolvedPhase);
                 const parsed = parseATHENAResponse(responseText);
                 const botMessage: Message = {
                   role: 'model',
@@ -4041,13 +5036,22 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   blocks: parsed.blocks,
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
                   sourceType: 'gemini',
                   modelName: usedModel,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
+                persistBlock6(botMessage, {
+                  sessionId: currentSessionId,
+                  day: dayNum,
+                  part: nextMatIdx,
+                  subject: nextMat.nome,
+                  article: 1
+                });
                 
                 const finalMessages = [...updatedMessages, botMessage];
+                pendingReadingStartRef.current = finalMessages.length - 1;
                 setMessages(finalMessages);
 
                 const updatedSessionsGemini = sessions.map(s => {
@@ -4108,11 +5112,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 }
                 const botErrorMessage: Message = {
                   role: 'model',
-                  content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
-                  blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
+                  content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para o Bloco ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
+                  blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para o Bloco ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
                   currentBlockIndex: 0,
                   subject: nextMat.nome,
-                  article: 1,
+                  article: dayNum,
+                  trilhaDay: dayNum,
                   trilhaMaterialIndex: nextMatIdx
                 };
                 const finalMessages = [...updatedMessages, botErrorMessage];
@@ -4128,11 +5133,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               }
             } else {
               // No more parts remaining! Congratulate and complete the Trilha day.
-              if (!trilhaCompletedDays.includes(dayNum)) {
-                await toggleTrilhaDayComplete(dayNum);
-              }
+              // Acesso administrativo (CEO) não gera conclusão nem XP: só alunos concluem, via servidor.
+              setReviewingCompletedDay(null);
               
-              const congratMsg = `🎉 **Parabéns de Elite!** Você completou todos os blocos de estudo do **Dia ${dayNum} da Trilha Jurídica de 100 Dias!**\n\nTodos os temas programados foram vencidos de forma fracionada e aprofundada. Você faturou **+150 XP**!\n\nContinue obstinado rumo à posse! Deseja programar os estudos de amanhã ou revisar o conteúdo de hoje?`;
+              const congratMsg = isCEO
+                ? `🎉 **Parabéns de Elite!** Você percorreu todas as partes do **Dia ${dayNum}** em modo administrativo (CEO).\n\nO acesso administrativo não registra conclusão, respostas nem XP no servidor.`
+                : `🎉 **Parabéns de Elite!** Você completou todas as partes de estudo do **Dia ${dayNum} da Trilha Jurídica de 100 Dias!**\n\nTodos os temas programados foram vencidos de forma fracionada e aprofundada. Conclusão confirmada pelo servidor.\n\nContinue obstinado rumo à posse! Deseja programar os estudos de amanhã ou revisar o conteúdo de hoje?`;
               
               const finalMessages: Message[] = [
                 ...messages,
@@ -4153,28 +5159,42 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           return;
         }
 
-        // Default (non-trilha) flow
+        // Default (non-trilha) flow — nunca na Trilha Jurídica
+        if (isTrilhaLesson(trilha, msg)) {
+          return;
+        }
         const nextArt = (msg.article || currentArticle) + 1;
         setCurrentArticle(nextArt);
         handleSendMessage(`Excelente. Vamos avançar para o Artigo ${nextArt} da ${guidedSubject}?`, true, nextArt);
         return;
       }
 
+      const nextBlockIndex = (msg.currentBlockIndex ?? 0) + 1;
       const updatedMessages = (messages || []).map((m, i) => {
         if (i === msgIdx) {
-          const nextIndex = (m.currentBlockIndex ?? 0) + 1;
-          
-          // If it's the last block, and we have an active study item, mark it complete
-          if (nextIndex === (m.blocks?.length ?? 0) - 1 && activeStudyItem) {
+          if (nextBlockIndex === (m.blocks?.length ?? 0) - 1 && activeStudyItem) {
             markScheduleItemComplete(activeStudyItem.scheduleId, activeStudyItem.itemIndex);
           }
 
-          return { ...m, currentBlockIndex: nextIndex };
+          return { ...m, currentBlockIndex: nextBlockIndex };
         }
         return m;
       });
       setMessages(updatedMessages);
-      saveSession({ messages: updatedMessages });
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: trilha.day ?? session?.trilhaDay,
+        trilhaMaterialIndex: msg.trilhaMaterialIndex ?? trilha.part
+      });
+      if (nextBlockIndex >= (msg.blocks.length - 1)) {
+        persistBlock6(msg, {
+          sessionId: currentSessionId,
+          day: trilha.day,
+          part: msg.trilhaMaterialIndex ?? trilha.part,
+          subject: msg.subject || guidedSubject,
+          article: msg.article
+        });
+      }
 
       // Transição suave com scroll automático para o novo bloco revelado
       const targetBlockIndex = (messages[msgIdx]?.currentBlockIndex ?? 0) + 1;
@@ -4201,16 +5221,15 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
     for (const name of namesToSanitize) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), '$1, Futuro(a) Magistrado(a)');
-      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), 'Futuro(a) Magistrado(a)');
+      sanitized = sanitized.replace(new RegExp(`(Olá|Bem-vindo|Bem-vinda|Parabéns|Caro|Prezado|Prezada|Força|Mestre)[,]?\\s+${escaped}`, 'gi'), `$1, ${ATHENA_AUDIENCE_TITLE}`);
+      sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), ATHENA_AUDIENCE_TITLE);
     }
-    return sanitized;
+    return sanitizeAthenaVoice(sanitized);
   };
 
   const handleCeoApproveLesson = async (targetMsgIdx?: number) => {
+    if (!isCEO) return null;
     const activeSess = sessions.find(s => s.id === currentSessionId);
-    if (!activeSess || activeSess.trilhaDay === undefined) return null;
-    const day = activeSess.trilhaDay;
 
     let targetMsg: Message | undefined;
     if (targetMsgIdx !== undefined && messages[targetMsgIdx]) {
@@ -4219,29 +5238,34 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
     }
 
+    const trilha = inferTrilhaContext(activeSess, messages, targetMsg);
+    if (trilha.day === undefined) return null;
+    const day = trilha.day;
     if (!targetMsg || !targetMsg.content) {
       alert("Aguarde o conteúdo da lição ser gerado antes de aprovar.");
       return null;
     }
 
-    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (activeSess.trilhaMaterialIndex ?? 0);
+    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (trilha.part ?? 0);
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
     const partSubject = (dayItem && dayItem.materias && dayItem.materias[part]) 
       ? dayItem.materias[part].nome 
-      : (targetMsg.subject || activeSess.guidedSubject || 'Direito');
+      : (targetMsg.subject || activeSess?.guidedSubject || 'Direito');
 
     setIsSavingHomologation(true);
     try {
-      let sanitizedContent = sanitizeHomologatedContent(targetMsg.content, user?.displayName);
-      const sanitizedBlocks = targetMsg.blocks?.map(b => sanitizeHomologatedContent(b, user?.displayName));
+      let sanitizedContent = targetMsg.ceoEdited ? targetMsg.content : sanitizeHomologatedContent(targetMsg.content, user?.displayName);
+      const sanitizedBlocks = targetMsg.ceoEdited ? targetMsg.blocks : targetMsg.blocks?.map(b => sanitizeHomologatedContent(b, user?.displayName));
 
-      // Preservação essencial das questões e do bloco de desafio para que nunca sumam
-      const lessonChallenge = targetMsg.challenge || null;
-      if (lessonChallenge && !sanitizedContent.includes('[ATHENA_CHALLENGE]')) {
-        sanitizedContent = sanitizedContent.trim() + '\n\n[ATHENA_CHALLENGE]\n' + JSON.stringify(lessonChallenge, null, 2);
+      const lessonChallenge = (targetMsg.ceoEdited ? readCeoMarkdown(sanitizedContent).challenge : normalizeObjectiveChallenge(targetMsg.challenge))
+        || extractChallengeFromText(sanitizedContent).challenge
+        || null;
+      if (lessonChallenge && !targetMsg.ceoEdited) {
+        sanitizedContent = embedChallengeInContent(sanitizedContent, lessonChallenge);
       }
 
-      const lesson: HomologatedLesson = {
+      const prepareLesson = targetMsg.ceoEdited ? exactPublishedLesson : ensureObjectiveChallenge;
+      const lesson = prepareLesson({
         id: getLessonDocId(day, part),
         day,
         part,
@@ -4251,36 +5275,62 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         blocks: sanitizedBlocks,
         challenge: lessonChallenge,
         status: 'approved',
-        approvedBy: user?.email || 'jhonny.spider@gmail.com',
+        approvedBy: 'jhonny.spider@gmail.com',
         approvedAt: Date.now(),
         modelUsed: targetMsg.modelName || 'gemini-3.8-flash',
-        version: 1
-      };
-      await saveHomologatedLesson(lesson);
-      setHomologatedLessonState(lesson);
+        version: 1,
+        review: extractReviewBlock(sanitizedContent, sanitizedBlocks) || undefined
+      });
+      const republished = parseATHENAResponse(lesson.content);
+      const saved = await saveHomologatedLesson(lesson);
+      setHomologatedLessonState(saved.cloud ? (saved.lesson || { ...lesson, pendingCloud: false }) : { ...lesson, pendingCloud: true });
+      if (user) {
+        const reviewText = extractReviewBlock(sanitizedContent, sanitizedBlocks);
+        if (reviewText) {
+          setCompressedReviews(upsertCompressedReview(user.uid, buildCompressedReview({
+            content: reviewText,
+            subject: partSubject,
+            article: day,
+            sessionId: currentSessionId || undefined,
+            day,
+            part
+          })));
+        }
+      }
 
-      // Também sincroniza a mensagem da sessão com a versão limpa e universal
       const updatedMessages = (messages || []).map((m, i) => {
         if ((targetMsgIdx !== undefined && i === targetMsgIdx) || (targetMsgIdx === undefined && m === targetMsg)) {
           return {
             ...m,
-            content: sanitizedContent,
-            blocks: sanitizedBlocks,
-            challenge: lessonChallenge || m.challenge
+            content: targetMsg.ceoEdited ? lesson.content : republished.content,
+            blocks: republished.blocks,
+            challenge: lesson.challenge || republished.challenge || m.challenge
           };
         }
         return m;
       });
       setMessages(updatedMessages);
-      saveSession({ messages: updatedMessages }, currentSessionId);
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: day,
+        trilhaMaterialIndex: part
+      }, currentSessionId);
 
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) homologado com sucesso! Salvo no cache central e no dispositivo.`);
-      setTimeout(() => setHomologationSuccessBanner(null), 6000);
-      return lesson;
+      const quizCount = lesson.challenge?.questions?.length || 0;
+      if (saved.cloud) {
+        showHomologationBanner(
+          quizCount
+            ? `Dia ${day} · Bloco ${part + 1} publicado no catálogo oficial com ${quizCount} questões objetivas. Esse bloco vale para todos os alunos.`
+            : `Dia ${day} · Bloco ${part + 1} publicado sem questões objetivas. Use Regerar questões para refazer só essa parte.`,
+          'ok'
+        );
+      } else {
+        showHomologationBanner(`Dia ${day} · Bloco ${part + 1}: ${saved.error || 'não entrou no catálogo oficial.'}`, 'warn');
+      }
+      return saved.cloud ? lesson : null;
     } catch (err: any) {
-      console.warn("Aviso ao homologar lição (preservada no cache local):", err);
-      setHomologationSuccessBanner(`Dia ${day} (Parte ${part + 1} - ${partSubject}) salvo no cache local com sucesso!`);
-      setTimeout(() => setHomologationSuccessBanner(null), 6000);
+      console.warn("Aviso ao homologar lição:", err);
+      showHomologationBanner(`Dia ${day} · Bloco ${part + 1} não entrou no catálogo oficial. ${err?.message || 'Tente Aprovar e Salvar de novo.'}`, 'warn');
       return null;
     } finally {
       setIsSavingHomologation(false);
@@ -4300,12 +5350,17 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
     if (!dayItem || !dayItem.materias) return;
 
-    if (!confirm(`Deseja regerar o conteúdo da Parte ${part + 1} do Dia ${day} (${dayItem.materias[part].nome}) com a IA Gemini?`)) return;
+    if (!confirm(regenerateLessonConfirm({
+      provider: contentProvider,
+      day,
+      block: part + 1,
+      subject: dayItem.materias[part].nome,
+    }))) return;
 
     setIsLoading(true);
     const msg = getTrilhaDayPartitionMessage(day, dayItem.materias, part, dayItem.semana, mentorshipStyle);
     try {
-      const { text, model } = await askATHENA(msg, [], "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, mentorshipPhase);
+      const { text, model } = await askATHENA(msg, [], ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, mentorshipPhase);
       const parsed = parseATHENAResponse(text);
       const botMessage: Message = {
         role: 'model',
@@ -4314,15 +5369,25 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         blocks: parsed.blocks,
         currentBlockIndex: 0,
         subject: dayItem.materias[part].nome,
-        article: 1,
+        article: day,
         sourceType: 'gemini',
         modelName: `${model} (Regerado pelo CEO)`,
+        trilhaDay: day,
         trilhaMaterialIndex: part
       };
+      persistBlock6(botMessage, {
+        sessionId: currentSessionId,
+        day,
+        part,
+        subject: dayItem.materias[part].nome,
+        article: day
+      });
       const userMsg: Message = { role: 'user', content: msg };
+      pendingReadingStartRef.current = 1;
       setMessages([userMsg, botMessage]);
       await saveSession({
         messages: [userMsg, botMessage],
+        trilhaDay: day,
         trilhaMaterialIndex: part
       }, currentSessionId);
       setHomologatedLessonState(prev => prev ? { ...prev, status: 'draft' } : null);
@@ -4334,7 +5399,97 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     }
   };
 
+  const handleCeoRegenerateQuestions = async () => {
+    const activeSess = sessions.find(s => s.id === currentSessionId);
+    const targetMsg = (messages || []).slice().reverse().find(m => m.role === 'model' && m.blocks && m.blocks.length > 0);
+    const trilha = inferTrilhaContext(activeSess, messages, targetMsg);
+    if (!targetMsg || trilha.day === undefined) {
+      alert('Abra o bloco da trilha antes de regerar as questões.');
+      return;
+    }
+    const day = trilha.day;
+    const part = targetMsg.trilhaMaterialIndex !== undefined ? targetMsg.trilhaMaterialIndex : (trilha.part ?? 0);
+    const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === day);
+    const subject = (dayItem?.materias && dayItem.materias[part])
+      ? dayItem.materias[part].nome
+      : (targetMsg.subject || activeSess?.guidedSubject || 'Direito');
+    const outline = (targetMsg.blocks || [])
+      .map((block, index) => {
+        if (/desafio\s+athena/i.test(block) && index >= 4) return '';
+        return `[BLOCK_${index + 1}] ${block.replace(/\s+/g, ' ').slice(0, 900)}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+    if (!confirm(`Regerar somente as questões objetivas do Bloco ${part + 1} do Dia ${day}? O texto das outras partes permanece.`)) return;
+
+    setIsRegeneratingQuestions(true);
+    try {
+      const { text, model } = await regenerateObjectiveChallenge(
+        `Dia ${day}, bloco ${part + 1}. Matéria: ${subject}.\nGere 10 questões objetivas inéditas somente sobre este recorte. Não reescreva a aula.\n\n${outline}`
+      );
+      const quiz = parseChallengeModelOutput(text);
+      if (!quiz || quiz.questions.length < 8) {
+        throw new Error('A IA não devolveu um bloco objetivo utilizável. Tente de novo.');
+      }
+      const baseContent = targetMsg.content?.includes('[BLOCK_1]')
+        ? targetMsg.content
+        : (targetMsg.blocks || []).map((block, index) => `[BLOCK_${index + 1}]\n${block}`).join('\n\n');
+      const mergedContent = embedChallengeInContent(baseContent, quiz);
+      const parsed = parseATHENAResponse(mergedContent);
+      const challengeIndex = findChallengeBlockIndex(parsed.blocks);
+      const lesson = ensureObjectiveChallenge({
+        id: getLessonDocId(day, part),
+        day,
+        part,
+        subject,
+        topic: targetMsg.subject || subject,
+        content: mergedContent,
+        blocks: parsed.blocks,
+        challenge: quiz,
+        status: 'approved',
+        approvedBy: 'jhonny.spider@gmail.com',
+        approvedAt: Date.now(),
+        modelUsed: model,
+        version: 1,
+        review: extractReviewBlock(mergedContent, parsed.blocks) || undefined
+      });
+      const saved = await saveHomologatedLesson(lesson);
+      setHomologatedLessonState(saved.cloud ? (saved.lesson || { ...lesson, pendingCloud: false }) : { ...lesson, pendingCloud: true });
+      const updatedMessages = (messages || []).map((m) => {
+        if (m !== targetMsg) return m;
+        return {
+          ...m,
+          content: parsed.content,
+          blocks: parsed.blocks,
+          challenge: lesson.challenge || quiz,
+          currentBlockIndex: Math.max(m.currentBlockIndex ?? 0, challengeIndex),
+          modelName: `${model} (questões regeradas)`,
+          trilhaDay: day,
+          trilhaMaterialIndex: part
+        };
+      });
+      setMessages(updatedMessages);
+      saveSession({
+        messages: updatedMessages,
+        trilhaDay: day,
+        trilhaMaterialIndex: part
+      }, currentSessionId);
+      showHomologationBanner(
+        saved.cloud
+          ? `Questões do Bloco ${part + 1} do Dia ${day} atualizadas (${lesson.challenge?.questions.length || quiz.questions.length}). O restante da aula foi mantido.`
+          : `Dia ${day} · Bloco ${part + 1}: ${saved.error || 'as questões não entraram no catálogo oficial.'}`,
+        saved.cloud ? 'ok' : 'warn'
+      );
+    } catch (err: any) {
+      console.error('Erro ao regerar questões:', err);
+      alert(err?.message || 'Não foi possível regerar só as questões.');
+    } finally {
+      setIsRegeneratingQuestions(false);
+    }
+  };
+
   const handleCeoEditOpen = (msgIdx?: number) => {
+    if (!isCEO) return;
     let targetMsg: Message | undefined;
     if (msgIdx !== undefined && messages[msgIdx]) {
       targetMsg = messages[msgIdx];
@@ -4345,19 +5500,27 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       alert("Nenhum conteúdo disponível para edição.");
       return;
     }
-    setEditingLessonIndex(msgIdx);
-    setEditingLessonContent(targetMsg.content);
+    setEditingLessonIndex(messages.indexOf(targetMsg));
+    setEditingLessonContent(ceoEditorMarkdown(targetMsg, homologatedLessonState));
     setIsEditingLesson(true);
   };
 
   const handleCeoSaveEdit = () => {
-    if (!editingLessonContent.trim()) return;
-    const parsed = parseATHENAResponse(editingLessonContent);
+    if (!isCEO || !editingLessonContent.trim()) return;
+    let parsed: ReturnType<typeof readCeoMarkdown>;
+    try {
+      parsed = readCeoMarkdown(editingLessonContent);
+      if (messages[editingLessonIndex!]?.challenge && !parsed.challenge) throw new Error('Preserve o JSON das questões existentes.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Markdown incompatível.');
+      return;
+    }
     const updatedMessages = (messages || []).map((m, idx) => {
       if (idx === editingLessonIndex || (editingLessonIndex === undefined && m.role === 'model' && m.blocks && m.blocks.length > 0)) {
         return {
           ...m,
           content: parsed.content,
+          ceoEdited: true,
           challenge: parsed.challenge || m.challenge,
           blocks: parsed.blocks,
           modelName: (m.modelName || 'gemini-3.5-flash-lite') + ' (Ajustado pelo CEO)'
@@ -4376,18 +5539,394 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
     if (!activeSess || activeSess.trilhaDay === undefined) return;
     const day = activeSess.trilhaDay;
     const part = activeSess.trilhaMaterialIndex ?? 0;
-    if (!confirm(`Deseja revogar a homologação e despublicar a Parte ${part + 1} do Dia ${day}?`)) return;
+    if (!confirm(`Deseja revogar a homologação e despublicar o Bloco ${part + 1} do Dia ${day}?`)) return;
     await revokeHomologatedLesson(day, part);
     setHomologatedLessonState(null);
   };
 
+  const legalReviewPollRef = useRef<(() => void) | null>(null);
+
+  const startLegalReviewPolling = (day: number, part: number, blockIndex: number | null) => {
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+
+    let isPolling = true;
+    let timerId: NodeJS.Timeout | null = null;
+
+    const poll = async () => {
+      if (!isPolling) return;
+      try {
+        const latest = await fetchLatestLegalReview(day, part, blockIndex !== null ? blockIndex : undefined);
+        if (!isPolling) return;
+        if (latest.found && latest.review) {
+          if (latest.review.status === 'pending_approval' || latest.review.status === 'approved' || latest.review.status === 'rejected') {
+            setLegalReview(latest.review);
+            setLegalReviewPhase('result');
+            isPolling = false;
+            return;
+          }
+          if (latest.review.status === 'failed') {
+            setLegalReviewError(latest.review.reviewNotes || 'A auditoria falhou. A aula publicada não foi alterada.');
+            setLegalReviewPhase('confirm');
+            isPolling = false;
+            return;
+          }
+          // Continua em queued ou processing
+          setLegalReviewStage(latest.review.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+        }
+      } catch {
+        // Falhas transitórias no poll não cancelam nem disparam nova auditoria
+      }
+
+      if (isPolling) {
+        timerId = setTimeout(poll, 3000);
+      }
+    };
+
+    timerId = setTimeout(poll, 3000);
+
+    legalReviewPollRef.current = () => {
+      isPolling = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  };
+
+  const startSupplementPolling = (day: number, part: number, blockIndex: number | null) => {
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+
+    let isPolling = true;
+    let timerId: NodeJS.Timeout | null = null;
+
+    const poll = async () => {
+      if (!isPolling) return;
+      try {
+        const latest = await fetchLatestLegalReview(day, part, blockIndex !== null ? blockIndex : undefined);
+        if (!isPolling) return;
+        if (latest.found && latest.review) {
+          setLegalReview(latest.review);
+          const suppStatus = latest.review.supplement?.status;
+          if (suppStatus !== 'reserved' && suppStatus !== 'running') {
+            isPolling = false;
+            return;
+          }
+        }
+      } catch {
+        // Falhas transitórias no poll não afetam o processamento
+      }
+
+      if (isPolling) {
+        timerId = setTimeout(poll, 3000);
+      }
+    };
+
+    timerId = setTimeout(poll, 3000);
+
+    legalReviewPollRef.current = () => {
+      isPolling = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  };
+
+  const openLegalReview = async (day: number, part: number, blockIndex?: number) => {
+    setLegalReviewTestMode(false);
+    setLegalReviewDay(day);
+    setLegalReviewPart(part);
+    const bIndex = typeof blockIndex === 'number' ? blockIndex : null;
+    setLegalReviewBlock(bIndex);
+    setLegalReviewError(null);
+    setLegalReviewNotice(null);
+    setLegalReview(null);
+    setLegalReviewConflict(false);
+    setLegalReviewCatalogHash(null);
+    setLegalReviewBusy(true);
+    setLegalReviewOpen(true);
+    if (legalReviewPollRef.current) {
+      legalReviewPollRef.current();
+      legalReviewPollRef.current = null;
+    }
+    try {
+      const latest = await fetchLatestLegalReview(day, part, typeof blockIndex === 'number' ? blockIndex : undefined);
+      if (latest.found && latest.review) {
+        setLegalReviewConflict(Boolean(latest.conflict));
+        setLegalReviewCatalogHash(latest.catalogHash || null);
+        if (latest.review.status === 'pending_approval') {
+          setLegalReview(latest.review);
+          setLegalReviewPhase('result');
+          if (latest.review.supplement?.status === 'reserved' || latest.review.supplement?.status === 'running') {
+            startSupplementPolling(day, part, bIndex);
+          }
+        } else if (latest.review.status === 'processing' || latest.review.status === 'queued') {
+          setLegalReview(latest.review);
+          setLegalReviewPhase('running');
+          setLegalReviewStage(latest.review.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+          startLegalReviewPolling(day, part, bIndex);
+        } else {
+          if (latest.conflict) {
+            setLegalReviewError('A aula foi modificada no catálogo após o início da revisão armazenada.');
+          }
+          setLegalReview(latest.review);
+          setLegalReviewPhase('confirm');
+        }
+      } else {
+        setLegalReviewConflict(false);
+        setLegalReviewPhase('confirm');
+      }
+    } catch (err: any) {
+      setLegalReviewError(err?.message || 'Falha ao consultar histórico de auditorias. A auditoria não foi iniciada.');
+      setLegalReviewPhase('error');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const openLegalReviewTest = () => {
+    setLegalReviewTestMode(true);
+    setLegalReviewDay(null);
+    setLegalReviewPart(null);
+    setLegalReviewBlock(null);
+    setLegalReviewError(null);
+    setLegalReviewNotice(null);
+    setLegalReview(null);
+    setLegalReviewConflict(false);
+    setLegalReviewPhase('confirm');
+    setLegalReviewOpen(true);
+  };
+
+  const applyApprovedReviewLesson = async (lesson: {
+    id: string;
+    day: number;
+    part: number;
+    subject: string;
+    topic?: string;
+    content: string;
+    challenge?: unknown;
+    approvedBy?: string;
+    approvedAt?: number;
+    modelUsed?: string;
+    version?: number;
+    review?: string;
+  }) => {
+    const published = ensureObjectiveChallenge({
+      id: lesson.id,
+      day: lesson.day,
+      part: lesson.part,
+      subject: lesson.subject,
+      topic: lesson.topic,
+      content: lesson.content,
+      challenge: normalizeObjectiveChallenge(lesson.challenge) || null,
+      status: 'approved',
+      approvedBy: lesson.approvedBy || ATHENA_CEO_EMAIL,
+      approvedAt: lesson.approvedAt || Date.now(),
+      modelUsed: lesson.modelUsed,
+      version: lesson.version,
+      review: lesson.review
+    });
+    await setLocalHomologatedLesson(published);
+    setHomologatedLessonState(published);
+    const parsed = parseATHENAResponse(published.content);
+    const updatedMessages = (messages || []).map((message) => {
+      if (message.role !== 'model') return message;
+      if (message.trilhaDay !== published.day) return message;
+      const part = message.trilhaMaterialIndex ?? 0;
+      if (part !== published.part) return message;
+      return {
+        ...message,
+        content: parsed.content,
+        blocks: parsed.blocks,
+        challenge: published.challenge || parsed.challenge || message.challenge
+      };
+    });
+    setMessages(updatedMessages);
+    saveSession({
+      messages: updatedMessages,
+      trilhaDay: published.day,
+      trilhaMaterialIndex: published.part
+    }, currentSessionId);
+  };
+
+  const runLegalReviewTest = async () => {
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewPhase('running');
+    try {
+      const result = await requestLegalReviewTest(legalReviewTestDraft);
+      if (!result.review?.testMode) {
+        throw new Error('A auditoria de teste não foi isolada. Nenhuma aula foi alterada.');
+      }
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A auditoria falhou. Nenhuma aula foi alterada.');
+      setLegalReviewPhase('confirm');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const endLegalReviewTest = async () => {
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      if (legalReview) await rejectLegalReview(legalReview.id);
+      setLegalReview(null);
+      setLegalReviewTestMode(false);
+      setLegalReviewOpen(false);
+      showHomologationBanner('Teste encerrado. Nenhuma aula foi alterada.', 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'Não foi possível encerrar o teste. Nenhuma aula foi alterada.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const runLegalReview = async (force: boolean) => {
+    if (legalReviewDay === null || legalReviewPart === null) return;
+    if (force && legalReview && legalReview.status === 'pending_approval') {
+      setLegalReviewError('A opção force=true está bloqueada para preservar o histórico: o índice do catálogo não mantém array histórico de revisões. Executar uma nova revisão sobrescreveria o ponteiro latestReviewId, tornando inacessível a revisão existente e os achados recuperados da att-2.');
+      return;
+    }
+    if (force && !confirm('ATENÇÃO: Gerar uma nova revisão jurídica enviará uma nova chamada paga à OpenAI e substituirá o ponteiro da última revisão no catálogo. Deseja realmente prosseguir?')) {
+      return;
+    }
+    if (legalReviewConflict && !force) {
+      setLegalReviewError('Já existe uma revisão pendente com divergência de catálogo. Para visualizá-la, use a tela de resultados.');
+      return;
+    }
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewPhase('running');
+    setLegalReviewStage('Iniciando auditoria jurídica...');
+    try {
+      const result = await requestAsyncLegalReview(
+        legalReviewDay,
+        legalReviewPart,
+        legalReviewBlock !== null ? legalReviewBlock : undefined,
+        force
+      );
+      if (result.alreadyReviewed) {
+        setLegalReviewNotice({ lastReviewDate: result.lastReviewDate || '' });
+        setLegalReviewPhase('notice');
+        return;
+      }
+      if (result.existingPending && result.review) {
+        setLegalReview(result.review);
+        setLegalReviewPhase('result');
+        return;
+      }
+      if (result.enqueued || result.alreadyProcessing) {
+        setLegalReviewStage(result.status === 'queued' ? 'Auditoria na fila de processamento...' : 'Auditoria jurídica em andamento no servidor...');
+        startLegalReviewPolling(legalReviewDay, legalReviewPart, legalReviewBlock);
+        return;
+      }
+      throw new Error(result.message || 'Resposta inesperada ao enfileirar auditoria. Nenhuma chamada foi executada.');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A solicitação falhou. A aula publicada não foi alterada.');
+      setLegalReviewPhase('confirm');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const approveOpenLegalReview = async () => {
+    if (!legalReview) return;
+    if (legalReviewConflict) {
+      setLegalReviewError('A aprovação está bloqueada: o conteúdo do catálogo oficial difere do snapshot desta revisão histórica.');
+      return;
+    }
+    if (legalReview.testMode || legalReviewTestMode) {
+      setLegalReviewError('Revisão de teste não pode ser publicada. Nenhuma aula foi alterada.');
+      return;
+    }
+    if (legalReview.previewOnly || typeof legalReview.blockIndex === 'number') {
+      setLegalReviewError('A prévia desta parte não substitui a aula publicada. Nenhuma aula foi alterada.');
+      return;
+    }
+    if (legalReview.verificationLevel === 'FALHA_NA_VERIFICACAO') {
+      setLegalReviewError('A aprovação integral está bloqueada: as afirmações jurídicas materiais não foram devidamente verificadas em fontes oficiais.');
+      return;
+    }
+    if (legalReview.supplement?.status === 'inconclusive' || (Array.isArray(legalReview.supplement?.findings) && legalReview.supplement.findings.some((f: any) => f.classification === 'nao_verificada'))) {
+      setLegalReviewError('A aprovação está bloqueada: a complementação jurídica contém achados inconclusivos ou não verificados em fontes oficiais.');
+      return;
+    }
+    if (!confirm('Substituir a aula publicada por esta versão revisada? A versão anterior fica guardada no histórico da revisão.')) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      const result = await approveLegalReview(legalReview.id);
+      await applyApprovedReviewLesson(result.lesson);
+      setLegalReviewOpen(false);
+      showHomologationBanner(`Dia ${result.lesson.day} · Bloco ${result.lesson.part + 1} substituído pela revisão aprovada.`, 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A aprovação falhou. A aula publicada não foi alterada.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const rejectOpenLegalReview = async () => {
+    if (!legalReview) return;
+    if (!confirm('Rejeitar esta revisão? A aula publicada permanece como está.')) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      await rejectLegalReview(legalReview.id);
+      setLegalReviewOpen(false);
+      showHomologationBanner('Revisão rejeitada. A aula publicada permanece como está.', 'ok');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'Não foi possível rejeitar a revisão.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const reauditOpenLegalReview = async () => {
+    if (!legalReview) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    setLegalReviewStage('Revisando novamente a versão editada');
+    setLegalReviewPhase('running');
+    try {
+      const result = await reauditLegalReview(legalReview.id);
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A auditoria falhou. A aula publicada não foi alterada.');
+      setLegalReviewPhase('result');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
+  const saveOpenLegalReviewCandidate = async (markdown: string) => {
+    if (!legalReview) return;
+    setLegalReviewBusy(true);
+    setLegalReviewError(null);
+    try {
+      const result = await saveLegalReviewCandidate(legalReview.id, markdown);
+      setLegalReview(result.review);
+      setLegalReviewPhase('result');
+    } catch (error) {
+      setLegalReviewError(error instanceof Error ? error.message : 'A candidata não foi salva. A aula publicada permanece como está.');
+    } finally {
+      setLegalReviewBusy(false);
+    }
+  };
+
   const skipTrilhaLesson = async (msgIdx: number) => {
+    if (!isCEO) { alert("Pular não conclui o dia. Você pode sair e retomar o estudo."); return; }
     const session = sessions.find(s => s.id === currentSessionId);
-    if (session && session.trilhaDay !== undefined) {
-      const dayNum = session.trilhaDay;
-      const currentMatIdx = (messages[msgIdx]?.trilhaMaterialIndex !== undefined) ? messages[msgIdx].trilhaMaterialIndex : (session.trilhaMaterialIndex ?? 0);
+    const trilha = inferTrilhaContext(session, messages, messages[msgIdx]);
+    if (trilha.day !== undefined) {
+      const dayNum = trilha.day;
+      const currentMatIdx = (messages[msgIdx]?.trilhaMaterialIndex !== undefined) ? messages[msgIdx].trilhaMaterialIndex : trilha.part;
       const dayItem = TRILHA_JURIDICA_DATA.find(d => d.dia === dayNum);
-      const isEstudo = session.trilhaSessionType === 'estudo' || !session.trilhaSessionType;
+      const isEstudo = !session?.trilhaSessionType || session.trilhaSessionType === 'estudo';
       
       if (dayItem && dayItem.materias && isEstudo) {
         const nextMatIdx = currentMatIdx + 1;
@@ -4436,7 +5975,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             const homologated = await getHomologatedLesson(dayNum, nextMatIdx);
             if (homologated && homologated.content) {
               const parsed = parseATHENAResponse(homologated.content);
-              const resolvedChallenge = homologated.challenge || parsed.challenge;
+              const resolvedChallenge = normalizeObjectiveChallenge(homologated.challenge) || parsed.challenge;
               const botMessage: Message = {
                 role: 'model',
                 content: parsed.content,
@@ -4444,12 +5983,22 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 blocks: parsed.blocks,
                 currentBlockIndex: 0,
                 subject: nextMat.nome,
-                article: 1,
+                article: dayNum,
                 sourceType: 'gemini',
                 modelName: 'Oficial Homologado pelo CEO',
+                  studyBaseline: {version:homologated.version,sha256:await hashStudyContent(homologated.content)},
+                trilhaDay: dayNum,
                 trilhaMaterialIndex: nextMatIdx
               };
+              persistBlock6(botMessage, {
+                sessionId: currentSessionId,
+                day: dayNum,
+                part: nextMatIdx,
+                subject: nextMat.nome,
+                article: 1
+              });
               const finalMessages = [...updatedMessages, botMessage];
+              pendingReadingStartRef.current = finalMessages.length - 1;
               setMessages(finalMessages);
               setIsLoading(false);
               await saveSession({
@@ -4473,7 +6022,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             } else if (session?.trilhaSessionType === 'oral') {
               resolvedPhase = 'oral';
             }
-            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, "Futuro(a) Magistrado(a)", undefined, mentorshipStyle, resolvedPhase);
+            const { text: responseText, model: usedModel } = await askATHENA(nextMsg, history, ATHENA_AUDIENCE_TITLE, undefined, mentorshipStyle, resolvedPhase);
             const parsed = parseATHENAResponse(responseText);
             const botMessage: Message = {
               role: 'model',
@@ -4482,13 +6031,22 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               blocks: parsed.blocks,
               currentBlockIndex: 0,
               subject: nextMat.nome,
-              article: 1,
+              article: dayNum,
               sourceType: 'gemini',
               modelName: usedModel,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx
             };
+            persistBlock6(botMessage, {
+              sessionId: currentSessionId,
+              day: dayNum,
+              part: nextMatIdx,
+              subject: nextMat.nome,
+              article: 1
+            });
             
             const finalMessages = [...updatedMessages, botMessage];
+            pendingReadingStartRef.current = finalMessages.length - 1;
             setMessages(finalMessages);
 
             const updatedSessionsSkip = sessions.map(s => {
@@ -4516,11 +6074,12 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             const errorMessage = err?.message || err?.toString() || "Erro na conexão com ATHENA";
             const botErrorMessage: Message = {
               role: 'model',
-              content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
-              blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para a Parte ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
+              content: `⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para o Bloco ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro:** \`${errorMessage}\`\n\n*Clique em **Recarregar Lição** para tentar novamente.*`,
+              blocks: [`⚠️ **Ocorreu um problema na conexão com ATHENA**\n\nNão foi possível obter uma resposta do mentor para o Bloco ${nextMatIdx + 1} (${nextMat.nome}).\n\n**Detalhes do Erro de Conexão:** \`${errorMessage}\``],
               currentBlockIndex: 0,
               subject: nextMat.nome,
-              article: 1,
+              article: dayNum,
+              trilhaDay: dayNum,
               trilhaMaterialIndex: nextMatIdx
             };
             const finalMessages = [...updatedMessages, botErrorMessage];
@@ -4624,51 +6183,36 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
   const saveReview = async (msgIdx: number) => {
     const msg = messages[msgIdx];
-    const targetSubject = msg.subject || guidedSubject || 'Estudo Geral';
-    const targetArticle = msg.article || currentArticle || 0;
-    
-    if (!msg.blocks || !currentSessionId) return;
-    
-    // Try to find the review block
-    let reviewText = msg.blocks[msg.blocks.length - 1];
-    
-    if (msg.blocks.length >= 6) {
-      reviewText = msg.blocks[5];
-    } else {
-      const likelyReview = msg.blocks.find(b => 
-        b.toLowerCase().includes('revisão') || 
-        (b.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('•')).length >= 5)
-      );
-      if (likelyReview) reviewText = likelyReview;
-    }
-    
-    if (!reviewText || reviewText.length < 20) return;
-
+    if (!msg) return;
     const session = sessions.find(s => s.id === currentSessionId);
-    if (!session) return;
-    
-    const currentReviews = session.reviews || [];
-    
-    // Check if duplicate in this session
-    const isDuplicate = currentReviews.some(r => 
-      r.subject === targetSubject && 
-      r.article === targetArticle && 
-      r.content === reviewText
-    );
-    
-    if (isDuplicate) return;
+    const day = msg.trilhaDay ?? session?.trilhaDay;
+    let part = msg.trilhaMaterialIndex ?? session?.trilhaMaterialIndex;
+    if (day !== undefined && (part === undefined || part < 0 || part >= 5)) {
+      const detected = detectPartFromContent(day, msg.content);
+      if (detected !== null) part = detected;
+    }
+    const canonical = canonicalSubjectForDayPart(day, part);
+    const targetSubject = canonical || msg.subject || guidedSubject || session?.guidedSubject || 'Estudo Geral';
+    const targetArticle = msg.article || currentArticle || day || 0;
+    const reviewText = extractReviewBlock(msg.content, msg.blocks);
+    if (!reviewText || !user) return;
 
-    const newReview: Review = {
-      id: crypto.randomUUID(),
-      sessionId: currentSessionId,
+    const newReview = buildCompressedReview({
+      content: reviewText,
       subject: targetSubject,
       article: targetArticle,
-      content: reviewText,
-      timestamp: Date.now()
-    };
+      sessionId: currentSessionId || undefined,
+      day,
+      part
+    });
+    setCompressedReviews(upsertCompressedReview(user.uid, newReview));
 
-    await saveSession({ reviews: [...currentReviews, newReview] });
-    // Save to local IndexedDB cache
+    if (session) {
+      const currentReviews = session.reviews || [];
+      if (!currentReviews.some((r) => r.id === newReview.id)) {
+        await saveSession({ reviews: [...currentReviews, newReview] });
+      }
+    }
     cacheArticle(targetSubject, targetArticle, reviewText);
   };
 
@@ -4700,14 +6244,33 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
   }, [messages, lastModelMsgWithBlocks]);
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-50 font-sans athena-gradient overflow-hidden">
+    <div className="athena-shell flex flex-col h-screen text-slate-50 font-sans athena-gradient overflow-hidden">
       {/* Top Header */}
-      <header className="h-16 border-b border-white/5 flex items-center px-4 lg:px-8 justify-between bg-slate-950/80 backdrop-blur-md sticky top-0 z-20 shrink-0">
-        <div className="flex items-center gap-3 lg:gap-4">
-          <div className="flex -space-x-2">
-            <div className="w-8 h-8 rounded-full bg-brand-gold border-2 border-slate-950 flex items-center justify-center shadow-lg">
-              <Scale size={16} className="text-slate-950 w-3.5 h-3.5" />
-            </div>
+      <header ref={headerRef} className="athena-ui h-16 border-b border-white/5 flex items-center px-4 lg:px-8 justify-between bg-slate-950/80 backdrop-blur-md sticky top-0 z-20 shrink-0">
+        <button
+          type="button"
+          onClick={() => {
+            if (!user) return;
+            setGuidedSubject(null);
+            setCurrentArticle(1);
+            setActiveTab('chat');
+            if (window.innerWidth < 1024) setIsSidebarOpen(false);
+          }}
+          disabled={!user}
+          aria-label="Ir para a página inicial"
+          className={cn(
+            "flex items-center gap-3 lg:gap-4 text-left transition-transform bg-transparent border-none p-0 outline-none",
+            user ? "cursor-pointer hover:opacity-90 active:scale-95" : "cursor-default"
+          )}
+        >
+          <div className="flex items-center shrink-0">
+            <img
+              src="/athena-icon.png"
+              alt="ATHENA"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl border border-brand-gold/30 shadow-md shadow-brand-gold/15 object-contain"
+              width={36}
+              height={36}
+            />
           </div>
           <div>
             <p className="text-xs text-slate-100 font-serif font-bold tracking-tight">ATHENA</p>
@@ -4724,9 +6287,10 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               </div>
             </div>
           </div>
-        </div>
+        </button>
         
         <div className="flex items-center gap-3 lg:gap-6">
+           <ThemeSelector />
            {guidedSubject && activeTab === 'chat' && (
              <button 
               onClick={() => setGuidedSubject(null)}
@@ -4740,26 +6304,39 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               <button
                 onClick={() => setIsAiSettingsOpen(true)}
                 className="px-2.5 py-1.5 text-brand-gold hover:text-white transition-all rounded-xl bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/25 flex items-center gap-1.5 active:scale-95 text-[10px] font-bold cursor-pointer shadow-sm"
-                title="Status e Diagnóstico da IA Gemini"
+                title="Escolher Gemini ou ChatGPT"
               >
                 <Cpu size={14} className="animate-pulse text-brand-gold shrink-0" />
-                <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">IA Status</span>
+                <span className="font-mono text-[9px] sm:text-[10px] tracking-wider uppercase">
+                  {contentProvider === 'chatgpt' ? 'ChatGPT' : 'Gemini'}
+                </span>
               </button>
             )}
 
            {user && (
              <div className="flex items-center gap-2 sm:gap-3 pl-2 border-l border-white/10">
-               <div className="hidden sm:flex flex-col items-end">
-                 <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                   {isCEO && (
-                     <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-brand-gold/20 text-brand-gold border border-brand-gold/30 rounded-md shadow-sm">
-                       👑 CEO
-                     </span>
-                   )}
-                   {user.displayName || (isCEO ? 'Jhonny' : 'Aluno')}
-                 </span>
-                 <span className="text-[9px] text-slate-500 font-mono truncate max-w-[140px]">{user.email}</span>
-               </div>
+               <button
+                 type="button"
+                 onClick={() => setIsProfileModalOpen(true)}
+                 className="flex items-center gap-2 sm:gap-2.5 text-left p-1.5 rounded-xl hover:bg-white/5 transition-all cursor-pointer group"
+                 title="Abrir perfil e convites de teste"
+                 aria-label="Abrir perfil de usuário"
+               >
+                 <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-brand-gold/10 border border-brand-gold/30 flex items-center justify-center text-brand-gold group-hover:bg-brand-gold group-hover:text-slate-950 transition-colors shrink-0">
+                   <UserIcon size={16} />
+                 </div>
+                 <div className="hidden sm:flex flex-col items-start">
+                   <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5 group-hover:text-white transition-colors">
+                     {isCEO && (
+                       <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-brand-gold/20 text-brand-gold border border-brand-gold/30 rounded-md shadow-sm">
+                         👑 CEO
+                       </span>
+                     )}
+                     {user.displayName || (isCEO ? 'Jhonny' : 'Aluno')}
+                   </span>
+                   <span className="text-[9px] text-slate-500 font-mono truncate max-w-[140px]">{user.email}</span>
+                 </div>
+               </button>
                <button 
                 onClick={() => handleLogout()}
                 className="p-2 text-slate-400 hover:text-red-400 transition-colors rounded-xl hover:bg-red-500/10 active:scale-95"
@@ -4773,6 +6350,8 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
            {/* Mobile Sidebar Toggle - Positioned within header now */}
            <button 
             onClick={() => setIsSidebarOpen(true)}
+            aria-expanded={isSidebarOpen}
+            aria-controls="study-sidebar"
             className="lg:hidden p-2 bg-slate-900 border border-brand-gold/30 rounded-xl text-brand-gold ml-1 shadow-lg active:scale-95 transition-transform"
             title="Abrir Menu e Histórico"
            >
@@ -4780,6 +6359,48 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
            </button>
         </div>
       </header>
+
+      {deleteAccountOpen && (
+        <div className="athena-ui fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4" role="dialog" aria-modal="true" aria-label="Excluir conta">
+          <div className="w-full max-w-sm bg-slate-900 border border-red-500/40 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
+            <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/30 text-red-300 mx-auto flex items-center justify-center">
+              <Trash2 size={26} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="font-serif font-bold text-lg text-slate-100">Excluir conta</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                A exclusão é imediata e permanente. Saem a conta, a senha, o progresso da trilha e o histórico de estudo deste usuário.
+              </p>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Também dá para excluir em{' '}
+                <a href="https://projetoathena.app.br/excluir-conta.html" target="_blank" rel="noopener noreferrer" className="text-brand-gold underline">
+                  projetoathena.app.br/excluir-conta.html
+                </a>
+                .
+              </p>
+            </div>
+            {deleteAccountError && (
+              <p className="text-[11px] text-amber-300">{deleteAccountError}</p>
+            )}
+            <button
+              type="button"
+              disabled={deleteAccountBusy}
+              onClick={() => handleDeleteAccount()}
+              className="w-full px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold uppercase tracking-wider text-[11px] rounded-xl disabled:opacity-60"
+            >
+              {deleteAccountBusy ? 'Excluindo...' : 'Excluir permanentemente'}
+            </button>
+            <button
+              type="button"
+              disabled={deleteAccountBusy}
+              onClick={() => setDeleteAccountOpen(false)}
+              className="w-full px-4 py-2.5 text-slate-300 text-[11px] uppercase tracking-wider"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Resilient Quota Notification Banner */}
       {firestoreQuotaReached && (
@@ -4833,19 +6454,131 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
         )}
       </AnimatePresence>
 
+    {/* Modal de Revisão Programada Pré-Estudo (Dia N > 1) */}
+    <AnimatePresence>
+      {preStudyPrompt && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md"
+        >
+          <motion.div
+            initial={{ scale: 0.95, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 20 }}
+            className="bg-slate-900 border border-brand-gold/30 p-6 md:p-8 rounded-[2.5rem] max-w-lg w-full relative shadow-[0_20px_60px_rgba(0,0,0,0.8)] text-left space-y-6"
+          >
+            <div className="flex items-center justify-between pb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-brand-gold/10 rounded-2xl border border-brand-gold/20 text-brand-gold">
+                  <Sparkles size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-serif font-bold text-slate-100">Revisão Programada</h3>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">Retenção Ativa do Conhecimento</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreStudyPrompt(null)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
+                title="Fechar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-950/60 rounded-2xl border border-white/5 space-y-3">
+                <p className="text-sm font-semibold text-slate-200 leading-relaxed">
+                  Antes de começar o Dia {preStudyPrompt.dayNum}, que tal revisar o Dia {preStudyPrompt.dayNum - 1}?
+                </p>
+                {(() => {
+                  const scheduled = getScheduledReviewsForDay(preStudyPrompt.dayNum);
+                  const extraCoincidences = scheduled.filter(s => s.type !== 'diaria');
+                  if (extraCoincidences.length > 0) {
+                    return (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 block">
+                          Coincidência de Revisões no Cronograma
+                        </span>
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                          Este marco também inclui: <strong>{extraCoincidences.map(c => c.label).join(' • ')}</strong>. Os tópicos consolidados dos dias anteriores estão prontos na sua Revisão Comprimida.
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+                <p className="text-xs text-slate-400">
+                  A revisão comprimida reforça a memória de longo prazo e consolida as matérias estudadas antes do avanço para novos temas.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetDay = preStudyPrompt.dayNum;
+                    setReturnToDayAfterReview(targetDay);
+                    setReviewFilterDays([targetDay - 1]);
+                    setActiveTab('reviews');
+                    setPreStudyPrompt(null);
+                  }}
+                  className="py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-white/5 hover:bg-white/10 text-brand-gold border border-brand-gold/30 hover:border-brand-gold/60 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <BookOpen size={14} />
+                  <span>Revisar dia anterior</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const { dayNum, sessionType, targetMaterialIndex } = preStudyPrompt;
+                    setPreStudyPrompt(null);
+                    void executeStartTrilhaStudy(dayNum, sessionType, targetMaterialIndex);
+                  }}
+                  className="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold text-slate-950 hover:brightness-110 transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <span>Começar aula</span>
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Modal de Perfil e Convite */}
+    {user && (
+      <ProfileModal
+        user={user}
+        isCEO={Boolean(isCEO)}
+        access={studyAccess}
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        onLogout={handleLogout}
+      />
+    )}
+
       {/* Edge Swipe Handle (Mobile Only) - Allows swiping from edge to open sidebar */}
       {!isSidebarOpen && (
         <motion.div 
-          className="lg:hidden fixed inset-y-0 left-0 w-8 z-50 cursor-e-resize"
+          className="lg:hidden fixed inset-y-0 left-0 w-2 z-50 cursor-e-resize"
           onPan={(_, info) => {
             if (info.offset.x > 20) setIsSidebarOpen(true);
           }}
-          style={{ touchAction: 'none' }}
+          style={{ touchAction: 'pan-y' }}
         />
       )}
 
       {/* Sidebar */}
       <motion.aside 
+        id="study-sidebar"
+        ref={sidebarRef}
+        aria-label="Menu e histórico de estudo"
+        inert={!desktop && !isSidebarOpen}
         drag="x"
         dragDirectionLock
         dragConstraints={{ left: 0, right: 0 }}
@@ -4855,14 +6588,14 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
           if (info.offset.x > 50) setIsSidebarOpen(true);
         }}
         initial={false}
-        animate={isSidebarOpen ? { x: 0 } : { x: window.innerWidth < 1024 ? "-100%" : 0 }}
+        animate={{ x: desktop || isSidebarOpen ? 0 : '-100%' }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm bg-slate-900 shadow-[20px_0_60px_rgba(0,0,0,0.5)] border-r border-brand-gold/10 lg:relative lg:w-72 lg:shadow-none lg:bg-slate-900/80 lg:backdrop-blur-xl lg:translate-x-0",
+          "athena-ui fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm bg-slate-900 shadow-[20px_0_60px_rgba(0,0,0,0.5)] border-r border-brand-gold/10 lg:relative lg:h-full lg:min-h-0 lg:overflow-hidden lg:w-72 lg:shadow-none lg:bg-slate-900/80 lg:backdrop-blur-xl lg:translate-x-0",
           !isSidebarOpen && "pointer-events-none lg:pointer-events-auto"
         )}
       >
-        <div className="flex flex-col h-full overflow-y-auto scrollbar-thin scrollbar-thumb-brand-gold/15 p-6 pointer-events-auto">
+        <div className="flex flex-col h-full min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-brand-gold/15 p-6 pointer-events-auto">
           <div className="flex items-center justify-between mb-10 shrink-0">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-brand-gold/10 rounded-xl border border-brand-gold/20">
@@ -4875,6 +6608,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
             </div>
             <button 
               onClick={() => setIsSidebarOpen(false)}
+              aria-label="Fechar menu"
               className="lg:hidden p-2 bg-slate-800/80 rounded-full text-slate-400 hover:text-white transition-colors"
             >
               <X size={20} />
@@ -4905,7 +6639,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <Zap size={10} className="text-brand-gold" />
-                      <span className="text-[10px] font-bold text-slate-300">{gamification.streak} Dias Siga</span>
+                      <span className="text-[10px] font-bold text-slate-300">
+                        {gamification.streak === 0
+                          ? '0 dias seguidos'
+                          : gamification.streak === 1
+                            ? '1 dia seguido'
+                            : `${gamification.streak} dias seguidos`}
+                      </span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Trophy size={10} className="text-brand-gold" />
@@ -4935,7 +6675,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                       Perfil Automático (Ativo)
                     </span>
                     <span className="text-[9px] text-slate-500 leading-none mt-0.5 block">
-                      A Athena inteligente alternará dinamicamente entre Lei Seca, Doutrina e Jurisprudência conforme a incidência do tema.
+                      A Athena alterna o foco de leitura entre Lei Seca, Doutrina e Jurisprudência.
                     </span>
                   </div>
                 </div>
@@ -5061,6 +6801,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                  { icon: Trophy, label: 'Trilha 100 Dias', id: 'trilha' },
                  { icon: Target, label: 'Cronogramas', id: 'schedules' },
                  { icon: BarChart2, label: 'Estatística', id: 'stats' },
+                 { icon: AlertCircle, label: 'Caderno de Erros', id: 'errors' },
                  { icon: Zap, label: 'Revisão Comprimida', id: 'reviews' },
                  // Biblioteca Offline removed
                  { icon: Users, label: 'Mentorandos', id: 'mentees' },
@@ -5068,6 +6809,15 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 <button
                   key={item.label}
                   onClick={() => {
+                    if (item.id === 'chat' && (!currentSessionId || messages.length === 0) && sessions.length > 0) {
+                      const active = sessions.find(s => s.id === currentSessionId) || sessions[0];
+                      if (active && active.messages && active.messages.length > 0) {
+                        setCurrentSessionId(active.id);
+                        setMessages(active.messages);
+                        setGuidedSubject(active.guidedSubject || null);
+                        setCurrentArticle(active.currentArticle || 1);
+                      }
+                    }
                     setActiveTab(item.id as any);
                     if (window.innerWidth < 1024) setIsSidebarOpen(false);
                   }}
@@ -5079,181 +6829,132 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                   )}
                 >
                   <item.icon size={18} className={cn(activeTab === item.id ? "text-brand-gold" : "text-slate-500 group-hover:text-brand-gold/70")} />
-                  {item.label}
+                  <span className="flex-1 text-left">{item.label}</span>
+                  {item.id === 'reviews' && reviews.length > 0 && (
+                    <span className="text-[10px] font-black text-brand-gold bg-brand-gold/10 px-2 py-0.5 rounded-full">
+                      {reviews.length}
+                    </span>
+                  )}
+                  {item.id === 'errors' && failedQuestions.filter(q => !q.resolved).length > 0 && (
+                    <span className="text-[10px] font-black text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
+                      {failedQuestions.filter(q => !q.resolved).length}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
 
-            <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex items-center justify-between px-4 mb-3">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Histórico de Mentoria</span>
-                <History size={12} className="text-slate-600" />
-              </div>
-              
-              <div className="flex-1 overflow-y-auto max-h-52 lg:max-h-none space-y-1.5 scrollbar-thin pr-1">
-                {sessions.length === 0 ? (
-                  <div className="px-4 py-8 text-center border border-dashed border-white/5 rounded-2xl">
-                    <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest leading-relaxed">Nenhuma sessão anterior encontrada.</p>
-                  </div>
-                ) : (
-                  sessions.map((session) => (
-                    <div
-                      key={session.id}
-                      onClick={() => switchSession(session.id)}
-                      className={cn(
-                        "w-full text-left p-3 rounded-xl transition-all duration-300 group relative flex items-center justify-between gap-3 border cursor-pointer overflow-hidden",
-                        currentSessionId === session.id 
-                          ? "bg-slate-800/90 shadow-[0_10px_20px_rgba(0,0,0,0.3)] border-brand-gold/30 ring-1 ring-brand-gold/10" 
-                          : "bg-slate-900/40 border-white/5 hover:bg-slate-800/60 hover:border-white/10"
-                      )}
-                    >
-                      {currentSessionId === session.id && (
-                        <motion.div 
-                          layoutId="active-indicator"
-                          className="absolute left-0 top-0 bottom-0 w-1 bg-brand-gold shadow-[2px_0_10px_rgba(212,175,55,0.4)]"
-                        />
-                      )}
-                      <div className="flex-1 min-w-0 pl-1">
-                        <p className={cn(
-                          "text-xs font-bold truncate transition-colors",
-                          currentSessionId === session.id ? "text-brand-gold" : "text-slate-300 group-hover:text-slate-100"
-                        )}>
-                          {session.title}
-                        </p>
-                        <p className={cn(
-                          "text-[9px] font-bold uppercase tracking-widest mt-0.5 transition-colors",
-                          currentSessionId === session.id ? "text-slate-400" : "text-slate-600"
-                        )}>
-                          {new Date(session.lastUpdatedAt).toLocaleDateString()}
-                        </p>
-                      </div>
-                      
-                      <div className="flex items-center gap-1 shrink-0 relative z-10" onClick={(e) => e.stopPropagation()}>
-                        <AnimatePresence mode="wait">
-                          {sessionToDelete === session.id ? (
-                            <motion.div 
-                              key="confirm"
-                              initial={{ opacity: 0, x: 10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              exit={{ opacity: 0, x: 10 }}
-                              className="flex items-center gap-1"
-                            >
-                              <button 
-                                onClick={(e) => deleteSession(e, session.id)}
-                                className="p-1.5 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-lg shadow-red-500/10"
-                                title="Confirmar Exclusão"
-                              >
-                                <X size={12} />
-                              </button>
-                              <button 
-                                onClick={() => setSessionToDelete(null)}
-                                className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 transition-all"
-                                title="Cancelar"
-                              >
-                                <History size={12} />
-                              </button>
-                            </motion.div>
-                          ) : (
-                            <motion.button 
-                              key="trash"
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: sessions.length > 0 ? 1 : 0 }}
-                              exit={{ opacity: 0 }}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setSessionToDelete(session.id);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
-                              title="Excluir Mentoria"
-                            >
-                              <Trash2 size={14} />
-                            </motion.button>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {guidedSubject && !guidedSubject.includes('Edital') && (
-              <div className="pt-4 flex flex-col h-[300px] border-t border-white/5">
-                <div className="px-4 mb-4 flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold block mb-1">Sumário Nobre</span>
-                    <h3 className="text-xs font-serif font-bold text-slate-100">{guidedSubject}</h3>
-                    <div className="mt-2 flex items-center gap-3">
-                      <div className="flex-1 bg-white/5 h-1 rounded-full overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${progress}%` }}
-                          className="h-full bg-brand-gold shadow-[0_0_10px_rgba(212,175,55,0.4)]"
-                        />
-                      </div>
-                      <span className="text-[9px] font-black text-brand-gold/80 tabular-nums">{Math.round(progress)}%</span>
-                    </div>
-                  </div>
-                  <div className="p-2 bg-brand-gold/10 rounded-xl border border-brand-gold/20 text-brand-gold">
-                    <History size={14} />
-                  </div>
+            {isCEO && (
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex items-center justify-between px-4 mb-3">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Histórico de Mentoria</span>
+                  <History size={12} className="text-slate-600" />
                 </div>
+                
+                <div className="flex-1 overflow-y-auto max-h-52 lg:max-h-none space-y-1.5 scrollbar-thin pr-1">
+                  {sessions.length === 0 ? (
+                    <div className="px-4 py-8 text-center border border-dashed border-white/5 rounded-2xl">
+                      <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest leading-relaxed">Nenhuma sessão anterior encontrada.</p>
+                    </div>
+                  ) : (
+                    sessions.map((session) => (
+                      <div
+                        key={session.id}
+                        onClick={() => switchSession(session.id)}
+                        className={cn(
+                          "w-full text-left p-3 rounded-xl transition-all duration-300 group relative flex items-center justify-between gap-3 border cursor-pointer overflow-hidden",
+                          currentSessionId === session.id 
+                            ? "bg-slate-800/90 shadow-[0_10px_20px_rgba(0,0,0,0.3)] border-brand-gold/30 ring-1 ring-brand-gold/10" 
+                            : "bg-slate-900/40 border-white/5 hover:bg-slate-800/60 hover:border-white/10"
+                        )}
+                      >
+                        {currentSessionId === session.id && (
+                          <motion.div 
+                            layoutId="active-indicator"
+                            className="absolute left-0 top-0 bottom-0 w-1 bg-brand-gold shadow-[2px_0_10px_rgba(212,175,55,0.4)]"
+                          />
+                        )}
+                        <div className="flex-1 min-w-0 pl-1">
+                          <p className={cn(
+                            "text-xs font-bold truncate transition-colors",
+                            currentSessionId === session.id ? "text-brand-gold" : "text-slate-300 group-hover:text-slate-100"
+                          )}>
+                            {session.title}
+                          </p>
+                          <p className={cn(
+                            "text-[9px] font-bold uppercase tracking-widest mt-0.5 transition-colors",
+                            currentSessionId === session.id ? "text-slate-400" : "text-slate-600"
+                          )}>
+                            {new Date(session.lastUpdatedAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        
+                        <div className="flex items-center gap-1 shrink-0 relative z-10" onClick={(e) => e.stopPropagation()}>
+                          <AnimatePresence mode="wait">
+                            {sessionToDelete === session.id ? (
+                              <motion.div 
+                                key="confirm"
+                                initial={{ opacity: 0, x: 10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: 10 }}
+                                className="flex items-center gap-1"
+                              >
+                                <button 
+                                  onClick={(e) => deleteSession(e, session.id)}
+                                  className="p-1.5 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-lg shadow-red-500/10"
+                                  title="Confirmar Exclusão"
+                                >
+                                  <X size={12} />
+                                </button>
+                                <button 
+                                  onClick={() => setSessionToDelete(null)}
+                                  className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 transition-all"
+                                  title="Cancelar"
+                                >
+                                  <History size={12} />
+                                </button>
+                              </motion.div>
+                            ) : (
+                              <motion.button 
+                                key="trash"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: sessions.length > 0 ? 1 : 0 }}
+                                exit={{ opacity: 0 }}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setSessionToDelete(session.id);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
+                                title="Excluir Mentoria"
+                              >
+                                <Trash2 size={14} />
+                              </motion.button>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
 
-                <div 
-                  ref={articleGridRef}
-                  className="flex-1 overflow-y-auto max-h-52 lg:max-h-none px-4 lg:px-4 pr-2 mt-2 space-y-6 scroll-smooth scrollbar-thin"
+            {user && (
+              <div className="pt-6 mt-2 border-t border-white/5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteAccountError(null);
+                    setDeleteAccountOpen(true);
+                    if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200 text-[11px] font-bold uppercase tracking-wider"
+                  aria-label="Excluir conta"
                 >
-                  <div className="grid grid-cols-5 lg:grid-cols-4 gap-2 pb-10">
-                    {Array.from({ length: subjects.find(s => s.name === guidedSubject)?.maxArticles || 0 }, (_, i) => i + 1).map((artNum) => {
-                      const isCurrent = currentArticle === artNum;
-                      const isStudied = currentArticle > artNum;
-                      
-                      return (
-                        <button
-                          key={artNum}
-                          onClick={() => jumpToArticle(artNum)}
-                          data-active={isCurrent}
-                          className={cn(
-                            "aspect-square flex items-center justify-center rounded-xl text-xs transition-all font-black border",
-                            isCurrent 
-                              ? "bg-brand-gold text-slate-950 shadow-[0_0_20px_rgba(212,175,55,0.5)] border-brand-gold scale-110 z-10" 
-                              : isStudied
-                                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:border-emerald-500/60"
-                                : "bg-slate-950 text-slate-500 hover:text-brand-gold hover:bg-slate-800 border-white/10"
-                          )}
-                        >
-                          {artNum}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Quick Navigation Input */}
-                <div className="px-4 pt-4 mt-auto border-t border-white/5 bg-slate-900/50 pb-2">
-                  <div className="flex gap-2 mb-2">
-                    <div className="relative flex-1">
-                      <input 
-                        type="number"
-                        value={navInput}
-                        onChange={(e) => setNavInput(e.target.value)}
-                        placeholder="Saltar p/ Art."
-                        className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-[10px] focus:border-brand-gold/50 outline-none text-slate-100 placeholder:text-slate-700"
-                        onKeyDown={(e) => e.key === 'Enter' && jumpToArticle(parseInt(navInput))}
-                      />
-                    </div>
-                    <button 
-                      onClick={() => jumpToArticle(parseInt(navInput))}
-                      className="p-2 bg-brand-gold rounded-xl text-slate-950 hover:scale-105 transition-transform"
-                    >
-                      <ChevronRight size={14} />
-                    </button>
-                  </div>
-                  <p className="text-[9px] text-slate-600 text-center font-bold uppercase tracking-tight">
-                    Total: {subjects.find(s => s.name === guidedSubject)?.maxArticles} Artigos
-                  </p>
-                </div>
+                  <Trash2 size={16} />
+                  Excluir conta
+                </button>
               </div>
             )}
           </nav>
@@ -5261,9 +6962,9 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
       </motion.aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative h-full overflow-hidden">
+      <main ref={mainRef} inert={!desktop && isSidebarOpen} className="athena-ui flex-1 flex flex-col relative h-full overflow-hidden">
         {/* Main Content Area */}
-        <div id="main-scroller" className="flex-1 overflow-y-auto px-4 md:px-8 py-6 lg:py-10 scrollbar-thin pr-1 pb-10">
+        <div id="main-scroller" className={cn("flex-1 overflow-y-auto px-4 md:px-8 py-6 lg:py-10 scrollbar-thin pr-1 pb-10", lastModelMsgWithBlocks && "athena-reading")}>
           <div className="max-w-4xl mx-auto space-y-12">
             {loadingAuth ? (
               <div className="flex flex-col items-center justify-center pt-40">
@@ -5275,14 +6976,21 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                 animate={{ opacity: 1, scale: 1 }}
                 className="flex flex-col items-center justify-center space-y-8 pt-16 max-w-md mx-auto"
               >
-                <div className="p-6 bg-brand-gold/5 rounded-[3rem] border border-brand-gold/20 shadow-2xl relative">
-                   <div className="absolute inset-0 bg-brand-gold/10 blur-3xl rounded-full" />
-                   <Scale className="text-brand-gold relative z-10" size={64} />
+                <div className="relative flex items-center justify-center">
+                   <div className="absolute inset-0 bg-brand-gold/15 blur-2xl rounded-full scale-110 pointer-events-none" />
+                   <img
+                     src="/athena-icon.png"
+                     alt="Projeto ATHENA"
+                     className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl sm:rounded-3xl shadow-xl shadow-brand-gold/15 border border-brand-gold/30 object-contain relative z-10"
+                     width={96}
+                     height={96}
+                     loading="eager"
+                   />
                 </div>
                 <div className="text-center space-y-3">
                   <h2 className="text-3xl font-serif font-bold text-slate-100">Bem-vindo à <span className="text-brand-gold">ATHENA</span></h2>
                   <p className="text-slate-400 text-xs leading-relaxed max-w-sm mx-auto">
-                    Mentoria jurídica de elite com análise de edital, 6 blocos estruturados e simulação de prova oral por inteligência artificial.
+                    Mentoria jurídica de elite com análise de edital, 6 partes estruturadas e simulação de prova oral por inteligência artificial.
                   </p>
                 </div>
 
@@ -5336,56 +7044,64 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                   <div className="p-6 space-y-5">
                     {authMode === 'login' ? (
-                      /* FORMULÁRIO DE LOGIN UNIFICADO (ALUNOS + CEO) */
                       <form onSubmit={handleUnifiedLogin} className="space-y-4">
                         <div className="text-left space-y-1">
                           <h3 className="text-xs font-serif font-bold text-slate-200">Acesso à Plataforma</h3>
-                          <p className="text-[10px] text-slate-400">Insira seu e-mail (ou CPF) e seu Código de Acesso para continuar.</p>
+                          <p className="text-[10px] text-slate-400">Entre com o e-mail e a senha da sua conta.</p>
                         </div>
 
                         <div className="space-y-3">
                           <div className="space-y-1 text-left">
-                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                              E-mail ou CPF:
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="login-email">
+                              E-mail
                             </label>
                             <div className="relative">
                               <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
                               <input
-                                type="text"
+                                id="login-email"
+                                type="email"
+                                autoComplete="email"
+                                required
+                                disabled={authBusy}
                                 value={loginIdentifier}
                                 onChange={(e) => setLoginIdentifier(e.target.value)}
-                                placeholder="Ex: seuemail@gmail.com ou CPF"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
+                                placeholder="seuemail@gmail.com"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
                               />
                             </div>
                           </div>
 
                           <div className="space-y-1 text-left">
                             <div className="flex justify-between items-center">
-                              <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                                Código de Acesso / Senha:
+                              <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="login-password">
+                                Senha
                               </label>
                               <button
                                 type="button"
+                                disabled={authBusy}
                                 onClick={() => {
                                   setShowForgotModal(true);
                                   setForgotError(null);
-                                  setForgotResult(null);
+                                  setForgotSent(false);
                                   setForgotInput(loginIdentifier);
                                 }}
-                                className="text-[10px] text-brand-gold/80 hover:text-brand-gold underline underline-offset-2 transition-colors cursor-pointer"
+                                className="text-[10px] text-brand-gold/80 hover:text-brand-gold underline underline-offset-2 transition-colors cursor-pointer disabled:opacity-60"
                               >
-                                Esqueci meu código
+                                Esqueci minha senha
                               </button>
                             </div>
                             <div className="relative">
                               <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
                               <input
+                                id="login-password"
                                 type="password"
-                                value={loginAccessCode}
-                                onChange={(e) => setLoginAccessCode(e.target.value)}
-                                placeholder="Digite seu código (ex: 6 dígitos ou PIN)"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono tracking-widest"
+                                autoComplete="current-password"
+                                required
+                                disabled={authBusy}
+                                value={loginPassword}
+                                onChange={(e) => setLoginPassword(e.target.value)}
+                                placeholder="Sua senha"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
                               />
                             </div>
                           </div>
@@ -5393,66 +7109,79 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                         <button
                           type="submit"
-                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer"
+                          disabled={authBusy}
+                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer disabled:opacity-60"
                         >
                           <Sparkles size={15} />
-                          <span>Entrar no ATHENA</span>
+                          <span>{authBusy ? 'Entrando...' : 'Entrar no ATHENA'}</span>
                         </button>
                       </form>
                     ) : (
-                      /* FORMULÁRIO DE CADASTRO COM GERAÇÃO DE CÓDIGO */
                       <form onSubmit={handleRegisterStudent} className="space-y-4">
                         <div className="text-left space-y-1">
-                          <h3 className="text-xs font-serif font-bold text-slate-200">Novo Cadastro de Estudante</h3>
-                          <p className="text-[10px] text-slate-400">Preencha seus dados para gerar seu Código de Acesso exclusivo.</p>
+                          <h3 className="text-xs font-serif font-bold text-slate-200">Novo Cadastro</h3>
+                          <p className="text-[10px] text-slate-400">Crie sua senha para entrar. Se deixar em branco, enviamos um e-mail com o link para você criar a senha.</p>
                         </div>
 
                         <div className="space-y-3">
                           <div className="space-y-1 text-left">
-                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                              Nome Completo:
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="register-name">
+                              Nome
                             </label>
                             <div className="relative">
                               <UserIcon size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
                               <input
+                                id="register-name"
                                 type="text"
+                                autoComplete="name"
+                                required
+                                minLength={3}
+                                maxLength={80}
+                                disabled={authBusy}
                                 value={registerName}
                                 onChange={(e) => setRegisterName(e.target.value)}
-                                placeholder="Ex: Dr(a). Lucas Silva"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors"
+                                placeholder="Seu nome"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
                               />
                             </div>
                           </div>
 
                           <div className="space-y-1 text-left">
-                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                              CPF (Apenas números):
-                            </label>
-                            <div className="relative">
-                              <ShieldCheck size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
-                              <input
-                                type="text"
-                                maxLength={14}
-                                value={registerCpf}
-                                onChange={(e) => setRegisterCpf(formatCpf(e.target.value))}
-                                placeholder="000.000.000-00"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1 text-left">
-                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block">
-                              Seu Melhor E-mail:
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="register-email">
+                              E-mail
                             </label>
                             <div className="relative">
                               <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
                               <input
+                                id="register-email"
                                 type="email"
+                                autoComplete="email"
+                                required
+                                disabled={authBusy}
                                 value={registerEmail}
                                 onChange={(e) => setRegisterEmail(e.target.value)}
-                                placeholder="Ex: seuemail@gmail.com"
-                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors font-mono"
+                                placeholder="seuemail@gmail.com"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 text-left">
+                            <label className="text-[9px] uppercase font-black tracking-widest text-slate-400 block" htmlFor="register-password">
+                              Sua senha
+                            </label>
+                            <div className="relative">
+                              <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-gold/70" />
+                              <input
+                                id="register-password"
+                                type="password"
+                                autoComplete="new-password"
+                                maxLength={72}
+                                disabled={authBusy}
+                                value={registerPassword}
+                                onChange={(e) => setRegisterPassword(e.target.value)}
+                                placeholder="Letras e números, no mínimo 10 caracteres"
+                                className="w-full pl-10 pr-3 py-3 bg-slate-950/90 border border-white/10 focus:border-brand-gold rounded-xl text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors disabled:opacity-60"
                               />
                             </div>
                           </div>
@@ -5460,51 +7189,74 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                         <button
                           type="submit"
-                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer"
+                          disabled={authBusy}
+                          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-brand-gold to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider text-xs rounded-xl shadow-lg shadow-brand-gold/20 hover:brightness-105 transition-all active:scale-95 cursor-pointer disabled:opacity-60"
                         >
                           <Zap size={15} />
-                          <span>Cadastrar & Gerar Código de Acesso</span>
+                          <span>{authBusy ? 'Cadastrando...' : 'Criar conta'}</span>
                         </button>
                       </form>
                     )}
 
                     <div className="w-full flex items-center gap-3 pt-1">
                       <div className="flex-1 h-px bg-white/10" />
-                      <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">ou outras opções</span>
+                      <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">ou</span>
                       <div className="flex-1 h-px bg-white/10" />
                     </div>
 
-                    <div className="w-full space-y-2.5">
-                      {/* Botão Oficial Google Sign-In */}
-                      <button 
-                        type="button"
-                        onClick={handleGoogleLogin}
-                        className="w-full flex items-center justify-center gap-2.5 px-6 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold uppercase tracking-wider text-[11px] rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24">
-                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                        </svg>
-                        <span>Entrar com Conta Google</span>
-                      </button>
+                    <button
+                      type="button"
+                      disabled={authBusy}
+                      onClick={handleGoogleLogin}
+                      className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-950 hover:bg-slate-800 text-slate-100 border border-white/10 hover:border-brand-gold/40 font-semibold uppercase tracking-wider text-[10px] rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-60"
+                    >
+                      <ShieldCheck size={13} className="text-brand-gold" />
+                      <span>{authBusy ? 'Aguardando o Google...' : 'Entrar com Google'}</span>
+                    </button>
 
-                      {/* Acesso Rápido Visitante */}
-                      <button 
-                        type="button"
-                        onClick={handleLoginAsGuest}
-                        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 hover:border-white/20 font-semibold uppercase tracking-wider text-[10px] rounded-xl transition-all active:scale-95 cursor-pointer"
-                      >
-                        <UserIcon size={13} className="text-slate-400" />
-                        <span>Acesso Rápido Visitante (Degustação)</span>
-                      </button>
-                    </div>
+                    {/* Atalhos para Contas Sintéticas Isoladas (Emulador Local - Exclusivo para Desenvolvimento / Teste Local) */}
+                    {isLocalHost && (
+                      <div className="pt-2 border-t border-white/10 space-y-2 text-left">
+                        <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-wider font-bold text-amber-400/90">
+                          <Cpu size={12} />
+                          <span>Ambiente Local Emulado (Demonstração Isolada)</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={authBusy}
+                            onClick={() => {
+                              setAuthMode('login');
+                              setLoginIdentifier('aluno.sintetico@athena.local');
+                              setLoginPassword('AthenaDemo2026!');
+                            }}
+                            className="px-2.5 py-2 bg-slate-900 hover:bg-slate-800 border border-amber-500/30 hover:border-amber-500/60 rounded-lg text-[10px] text-slate-200 font-medium transition-all text-center cursor-pointer"
+                          >
+                            👤 Preencher Aluno
+                          </button>
+                          <button
+                            type="button"
+                            disabled={authBusy}
+                            onClick={() => {
+                              setAuthMode('login');
+                              setLoginIdentifier('jhonny.spider@gmail.com');
+                              setLoginPassword('AthenaDemo2026!');
+                            }}
+                            className="px-2.5 py-2 bg-slate-900 hover:bg-slate-800 border border-amber-500/30 hover:border-amber-500/60 rounded-lg text-[10px] text-slate-200 font-medium transition-all text-center cursor-pointer"
+                          >
+                            👑 Preencher CEO
+                          </button>
+                        </div>
+                        <p className="text-[9px] text-slate-500">
+                          Preenche as credenciais sintéticas isoladas no emulador. Clique em "Entrar no ATHENA" para autenticar sem tocar no banco de produção.
+                        </p>
+                      </div>
+                    )}
 
                     {/* Link da Política de Privacidade e LGPD */}
-                    <div className="pt-2 text-center">
+                    <div className="pt-2 text-center space-y-2">
                       <a 
-                        href="https://jh0nnyg4rcia.github.io/athena-app/privacidade.html"
+                        href="https://projetoathena.app.br/privacidade.html"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-[10px] text-slate-500 hover:text-brand-gold transition-colors inline-flex items-center gap-1 underline underline-offset-2"
@@ -5512,106 +7264,102 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                         <ShieldCheck size={12} />
                         <span>Política de Privacidade & LGPD</span>
                       </a>
+                      <a
+                        href="https://projetoathena.app.br/excluir-conta.html"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-[10px] text-slate-500 hover:text-brand-gold transition-colors underline underline-offset-2"
+                      >
+                        Excluir conta e dados
+                      </a>
                     </div>
                   </div>
                 </div>
 
-                {/* MODAL 1: SUCESSO DO CADASTRO COM CÓDIGO GERADO */}
                 {registeredSuccess && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
                     <div className="w-full max-w-sm bg-slate-900 border-2 border-brand-gold/50 rounded-3xl p-6 shadow-2xl space-y-5 text-center">
-                      <div className="w-16 h-16 rounded-full bg-brand-gold/10 border border-brand-gold/30 text-brand-gold mx-auto flex items-center justify-center animate-bounce">
+                      <div className="w-16 h-16 rounded-full bg-brand-gold/10 border border-brand-gold/30 text-brand-gold mx-auto flex items-center justify-center">
                         <Trophy size={32} />
                       </div>
 
-                      <div className="space-y-1">
-                        <h3 className="font-serif font-bold text-lg text-slate-100">🎉 Cadastro Concluído!</h3>
+                      <div className="space-y-2">
+                        <h3 className="font-serif font-bold text-lg text-slate-100">Cadastro concluído</h3>
                         <p className="text-xs text-slate-300">
-                          Olá, <strong>{registeredSuccess.fullName}</strong>. Sua conta foi criada com sucesso na plataforma ATHENA.
+                          Olá, <strong>{registeredSuccess.fullName}</strong>. A conta de {registeredSuccess.email} foi criada.
+                        </p>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          {registeredSuccess.delivery === 'link'
+                            ? 'Enviamos um e-mail com o link para você criar a senha. Abra a mensagem e defina a senha antes de entrar.'
+                            : 'Entre com a senha que você criou. Nenhum e-mail é necessário.'}
                         </p>
                       </div>
-
-                      <div className="p-4 bg-slate-950 rounded-2xl border border-brand-gold/30 space-y-2">
-                        <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">
-                          Seu Código de Acesso (Senha):
-                        </p>
-                        <div className="text-3xl font-mono font-black text-brand-gold tracking-widest py-1 select-all">
-                          {registeredSuccess.accessCode}
-                        </div>
-                        <div className="flex items-center justify-center gap-3 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              try {
-                                navigator.clipboard.writeText(registeredSuccess.accessCode);
-                                setCopiedCode(true);
-                                setTimeout(() => setCopiedCode(false), 3000);
-                              } catch {}
-                            }}
-                            className="text-[11px] text-brand-gold hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Copy size={13} />
-                            <span>{copiedCode ? 'Código Copiado!' : 'Copiar Código'}</span>
-                          </button>
-
-                          <span className="text-slate-600 text-xs">•</span>
-
-                          <a
-                            href={`mailto:${registeredSuccess.email}?subject=Meu%20C%C3%B3digo%20de%20Acesso%20ATHENA&body=Ol%C3%A1%20${encodeURIComponent(registeredSuccess.fullName)}!%0A%0ASeu%20C%C3%B3digo%20de%20Acesso%20exclusivo%20para%20o%20app%20ATHENA%20%C3%A9:%20${registeredSuccess.accessCode}%0A%0AEmail%20de%20Login:%20${registeredSuccess.email}%0A%0ABons%20estudos!`}
-                            className="text-[11px] text-slate-300 hover:text-white hover:underline font-medium inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Mail size={13} className="text-brand-gold" />
-                            <span>Salvar no E-mail</span>
-                          </a>
-                        </div>
-                      </div>
-
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Guarde este código com carinho. Você o utilizará junto ao seu e-mail para fazer login no celular ou computador.
-                      </p>
 
                       <button
                         type="button"
-                        onClick={handleCompleteRegisterLogin}
+                        onClick={() => {
+                          setRegisteredSuccess(null);
+                          setAuthMode('login');
+                          setRegisterName('');
+                          setRegisterEmail('');
+                          setRegisterPassword('');
+                        }}
                         className="w-full py-3.5 bg-gradient-to-r from-brand-gold via-amber-400 to-brand-gold text-slate-950 font-black uppercase text-xs tracking-wider rounded-xl hover:brightness-110 shadow-lg shadow-brand-gold/25 transition-all cursor-pointer"
                       >
-                        Entrar Agora no ATHENA
+                        Ir para o login
                       </button>
                     </div>
                   </div>
                 )}
 
-                {/* MODAL 2: ESQUECI MEU CÓDIGO DE ACESSO */}
                 {showForgotModal && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+                  <div role="dialog" aria-modal="true" aria-label="Recuperar senha" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
                     <div className="w-full max-w-sm bg-slate-900 border border-brand-gold/40 rounded-3xl p-6 shadow-2xl space-y-4 text-left">
                       <div className="flex items-center justify-between pb-3 border-b border-white/10">
                         <div className="flex items-center gap-2 text-brand-gold">
                           <Lock size={18} />
-                          <h3 className="font-serif font-bold text-sm text-slate-100">Recuperar Código de Acesso</h3>
+                          <h3 className="font-serif font-bold text-sm text-slate-100">Nova senha</h3>
                         </div>
-                        <button 
+                        <button
+                          type="button"
                           onClick={() => setShowForgotModal(false)}
+                          aria-label="Fechar recuperação de senha"
                           className="text-slate-400 hover:text-white p-1 rounded-lg"
                         >
                           <X size={18} />
                         </button>
                       </div>
 
-                      {!forgotResult ? (
+                      {forgotSent ? (
+                        <div className="space-y-4">
+                          <p className="text-xs text-slate-300 leading-relaxed">
+                            Se este e-mail tiver cadastro, enviamos um link para você criar uma nova senha.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setShowForgotModal(false)}
+                            className="w-full py-3 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
+                          >
+                            Fechar
+                          </button>
+                        </div>
+                      ) : (
                         <form onSubmit={handleForgotCode} className="space-y-4">
                           <p className="text-xs text-slate-400 leading-relaxed">
-                            Insira seu E-mail ou CPF cadastrado para recuperar seu código de acesso:
+                            Informe o e-mail da conta. Se houver cadastro, enviamos um link para você criar uma nova senha.
                           </p>
 
                           <div>
                             <input
-                              type="text"
+                              type="email"
+                              autoComplete="email"
                               value={forgotInput}
                               onChange={(e) => setForgotInput(e.target.value)}
-                              placeholder="Seu E-mail ou CPF"
+                              placeholder="seuemail@gmail.com"
                               autoFocus
-                              className="w-full px-4 py-3 bg-slate-950 border border-slate-700 focus:border-brand-gold rounded-xl text-xs text-slate-100 outline-none transition-colors font-mono"
+                              required
+                              disabled={authBusy}
+                              className="w-full px-4 py-3 bg-slate-950 border border-slate-700 focus:border-brand-gold rounded-xl text-xs text-slate-100 outline-none transition-colors disabled:opacity-60"
                             />
                             {forgotError && (
                               <p className="text-[11px] text-rose-400 mt-2 font-medium">{forgotError}</p>
@@ -5628,36 +7376,13 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                             </button>
                             <button
                               type="submit"
-                              className="flex-1 py-2.5 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
+                              disabled={authBusy}
+                              className="flex-1 py-2.5 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all disabled:opacity-60"
                             >
-                              Buscar Código
+                              {authBusy ? 'Enviando...' : 'Enviar'}
                             </button>
                           </div>
                         </form>
-                      ) : (
-                        <div className="space-y-4 text-center">
-                          <div className="p-4 bg-slate-950 rounded-2xl border border-brand-gold/40 space-y-2">
-                            <p className="text-xs text-slate-300 font-bold">{forgotResult.fullName}</p>
-                            <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">Seu Código de Acesso é:</p>
-                            <div className="text-3xl font-mono font-black text-brand-gold tracking-widest py-1">
-                              {forgotResult.accessCode}
-                            </div>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setLoginIdentifier(forgotResult.email);
-                                setLoginAccessCode(forgotResult.accessCode);
-                                setShowForgotModal(false);
-                              }}
-                              className="flex-1 py-3 px-4 rounded-xl bg-brand-gold text-slate-950 text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-lg transition-all"
-                            >
-                              Preencher e Entrar
-                            </button>
-                          </div>
-                        </div>
                       )}
                     </div>
                   </div>
@@ -5667,7 +7392,7 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-10"
+                className="athena-stats space-y-10"
               >
                 <div className="text-center space-y-4">
                    <h2 className="text-3xl font-serif font-bold text-slate-100">Suas <span className="text-brand-gold">Estatísticas</span></h2>
@@ -5716,67 +7441,362 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                        </div>
                        
                        <div className="pt-2 flex items-center justify-between border-t border-white/5">
-                          <span className="text-[9px] text-slate-500 uppercase font-black">{stat.correctAnswers} / {stat.totalQuestions} Acertos</span>
-                          {stat.progress >= 100 && (
-                            <span className="flex items-center gap-1 text-[9px] text-emerald-400 font-black uppercase">
-                              <Sparkles size={10} />
-                              Concluído
-                            </span>
-                          )}
-                       </div>
-                     </div>
-                   ))}
-                </div>
-
-                {/* Failed Questions Review Section */}
-                <div className="space-y-6 pt-10 border-t border-white/5">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-red-500/10 rounded-xl border border-red-500/20">
-                      <ShieldAlert className="text-red-400" size={20} />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-serif font-bold text-slate-100">Refazer Questões Incorretas</h3>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Domine seus pontos fracos</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4">
-                    {failedQuestions.length === 0 ? (
-                      <div className="py-12 text-center bg-slate-900 shadow-sm border border-brand-gold/10 rounded-3xl border-dashed">
-                        <Trophy className="text-slate-700 mx-auto mb-3" size={32} />
-                        <p className="text-xs text-slate-500 font-medium">Parabéns! Você não tem questões pendentes para revisão.</p>
+                           <span className="text-[9px] text-slate-400 uppercase font-bold">
+                             {stat.correctAnswers} / {stat.totalQuestions} Acertos (1ª tentativa)
+                           </span>
+                           <span className="text-[9px] text-slate-500 uppercase font-bold">
+                             {stat.totalAttempts || stat.totalQuestions} tentativas
+                           </span>
+                        </div>
+                        {Boolean(stat.evolution?.resolvedErrors) && (
+                          <div className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                            <CheckCircle size={10} />
+                            <span>{stat.evolution?.resolvedErrors} erro(s) superado(s) no Caderno</span>
+                          </div>
+                        )}
+                        {pendingErrorsCount(stat) > 0 && (
+                          <div className="flex items-center gap-1.5 text-[9px] font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+                            <AlertCircle size={10} />
+                            <span>{pendingErrorsCount(stat)} erro(s) pendente(s)</span>
+                          </div>
+                        )}
+                        {stat.progress >= 100 && (
+                          <div className="flex items-center gap-1 text-[9px] text-emerald-400 font-black uppercase">
+                            <Sparkles size={10} />
+                            <span>Módulo Concluído</span>
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      failedQuestions.map((q) => (
-                        <QuizQuestion 
-                          key={q.id}
-                          question={q}
-                          hideExplanationInitially={true}
-                          onAnswer={(answerIndex, correct) => {
-                            if (q.subject) {
-                               updateStats(q.subject, correct, q, answerIndex);
-                            }
-                          }}
-                          onDelete={async () => {
-                            if (q.id && user) {
-                              LocalPersistence.deleteFailedQuestion(user.uid, q.id);
-                              setFailedQuestions(prev => prev.filter(item => item.id !== q.id));
-                              if (!isQuotaExhausted()) {
-                                try {
-                                  await deleteDoc(doc(db, `users/${user.uid}/failed_questions`, q.id));
-                                } catch (err) {
-                                  console.error("Error deleting failed question:", err);
-                                }
-                              }
-                            }
-                          }}
-                        />
-                      ))
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            ) : activeTab === 'reviews' ? (
+                    ))}
+                 </div>
+
+                 {/* Metodologia e Critérios de Desempenho */}
+                 <div className="pt-8 border-t border-white/5 space-y-4">
+                   <div className="flex items-center gap-3">
+                     <div className="p-2 bg-brand-gold/10 rounded-xl border border-brand-gold/20">
+                       <FileText className="text-brand-gold" size={20} />
+                     </div>
+                     <div>
+                       <h3 className="text-xl font-serif font-bold text-slate-100">Critérios de Desempenho & Evolução</h3>
+                       <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Transparência nos cálculos acadêmicos</p>
+                     </div>
+                   </div>
+
+                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                     <div className="p-5 bg-slate-900 border border-white/5 rounded-2xl space-y-2">
+                       <div className="flex items-center gap-2 text-brand-gold text-xs font-bold uppercase tracking-wider">
+                         <Sparkles size={14} />
+                         <span>Questões Únicas</span>
+                       </div>
+                       <p className="text-xs text-slate-400 leading-relaxed">
+                         Contabiliza apenas questões distintas do edital resolvidas pela primeira vez. Refazer questões no Caderno de Erros não infla esta contagem.
+                       </p>
+                     </div>
+
+                     <div className="p-5 bg-slate-900 border border-white/5 rounded-2xl space-y-2">
+                       <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase tracking-wider">
+                         <CheckCircle size={14} />
+                         <span>Precisão na 1ª Tentativa</span>
+                       </div>
+                       <p className="text-xs text-slate-400 leading-relaxed">
+                         Calculada a partir dos acertos imediatos de cada questão inédita, medindo com fidelidade a retenção pedagógica prévia.
+                       </p>
+                     </div>
+
+                     <div className="p-5 bg-slate-900 border border-white/5 rounded-2xl space-y-2">
+                       <div className="flex items-center gap-2 text-rose-400 text-xs font-bold uppercase tracking-wider">
+                         <RotateCw size={14} />
+                         <span>Tentativas & Recuperação</span>
+                       </div>
+                       <p className="text-xs text-slate-400 leading-relaxed">
+                         O volume total de tentativas engloba a Trilha e o Caderno de Erros. Acertos em revisões contam como erros superados na evolução do aluno.
+                       </p>
+                     </div>
+                   </div>
+                 </div>
+               </motion.div>
+             ) : activeTab === 'errors' ? (
+               <motion.div
+                 initial={{ opacity: 0, y: 20 }}
+                 animate={{ opacity: 1, y: 0 }}
+                 className="athena-errors space-y-8"
+               >
+                 <div className="text-center space-y-3">
+                   <div className="inline-flex items-center gap-2 px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full text-[10px] font-black uppercase tracking-widest">
+                     <ShieldAlert size={12} />
+                     Caderno de Erros & Recuperação
+                   </div>
+                   <h2 className="text-3xl font-serif font-bold text-slate-100">
+                     Caderno de <span className="text-rose-400">Erros</span>
+                   </h2>
+                   <p className="text-slate-400 text-sm max-w-xl mx-auto">
+                     Refaça as questões incorretas para fixar os conceitos mais difíceis. Novas tentativas são registradas no seu histórico sem inflar artificialmente o total de questões do edital.
+                   </p>
+                 </div>
+
+                 {/* Metric Summary Cards */}
+                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                   <div className="p-4 bg-slate-900 border border-white/5 rounded-2xl flex items-center justify-between">
+                     <div>
+                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total Registrado</p>
+                       <p className="text-2xl font-serif font-bold text-slate-100">{failedQuestions.length}</p>
+                     </div>
+                     <div className="p-2.5 bg-slate-800 rounded-xl text-slate-400">
+                       <BookOpen size={18} />
+                     </div>
+                   </div>
+                   <div className="p-4 bg-slate-900 border border-white/5 rounded-2xl flex items-center justify-between">
+                     <div>
+                       <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">Pendentes</p>
+                       <p className="text-2xl font-serif font-bold text-amber-400">
+                         {failedQuestions.filter(q => !q.resolved).length}
+                       </p>
+                     </div>
+                     <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                       <AlertCircle size={18} />
+                     </div>
+                   </div>
+                   <div className="p-4 bg-slate-900 border border-white/5 rounded-2xl flex items-center justify-between">
+                     <div>
+                       <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500">Superadas / Resolvidas</p>
+                       <p className="text-2xl font-serif font-bold text-emerald-400">
+                         {failedQuestions.filter(q => q.resolved).length}
+                       </p>
+                     </div>
+                     <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+                       <CheckCircle size={18} />
+                     </div>
+                   </div>
+                 </div>
+
+                 {/* Filter Buttons */}
+                 <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+                   <button
+                     onClick={() => setErrorsFilter('all')}
+                     className={cn(
+                       "px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0",
+                       errorsFilter === 'all'
+                         ? "bg-brand-gold text-slate-950 shadow-md"
+                         : "bg-slate-900 text-slate-400 hover:text-white border border-white/5"
+                     )}
+                   >
+                     Todas ({failedQuestions.length})
+                   </button>
+                   <button
+                     onClick={() => setErrorsFilter('pending')}
+                     className={cn(
+                       "px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5",
+                       errorsFilter === 'pending'
+                         ? "bg-amber-400 text-slate-950 shadow-md"
+                         : "bg-slate-900 text-slate-400 hover:text-white border border-white/5"
+                     )}
+                   >
+                     <AlertCircle size={12} />
+                     Pendentes ({failedQuestions.filter(q => !q.resolved).length})
+                   </button>
+                   <button
+                     onClick={() => setErrorsFilter('resolved')}
+                     className={cn(
+                       "px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5",
+                       errorsFilter === 'resolved'
+                         ? "bg-emerald-400 text-slate-950 shadow-md"
+                         : "bg-slate-900 text-slate-400 hover:text-white border border-white/5"
+                     )}
+                   >
+                     <CheckCircle size={12} />
+                     Resolvidas ({failedQuestions.filter(q => q.resolved).length})
+                   </button>
+                 </div>
+
+                 {/* Questions List */}
+                 <div className="space-y-6">
+                   {filteredErrors.length === 0 ? (
+                     <div className="py-16 text-center bg-slate-900 border border-white/5 rounded-3xl border-dashed">
+                       <Trophy className="text-slate-700 mx-auto mb-3" size={36} />
+                       <p className="text-sm text-slate-400 font-bold">Nenhuma questão encontrada com este filtro.</p>
+                       <p className="text-xs text-slate-600 mt-1">Parabéns pelo seu progresso no domínio dos temas!</p>
+                     </div>
+                   ) : (
+                     filteredErrors.map((fq) => {
+                       const isAllowed = canAccessFailedQuestion(fq);
+                       if (!isAllowed) {
+                         return (
+                           <div key={fq.id} className="p-6 bg-slate-900 border border-amber-500/20 rounded-3xl space-y-3">
+                             <div className="flex items-center justify-between">
+                               <div className="flex items-center gap-2 text-amber-400">
+                                 <Lock size={16} />
+                                 <span className="text-xs font-black uppercase tracking-wider">Conteúdo Restrito · Dia {fq.trilhaDay}</span>
+                               </div>
+                               <span className="text-[10px] font-bold uppercase text-slate-500">{fq.subject}</span>
+                             </div>
+                             <p className="text-sm text-slate-400 font-medium">
+                               Esta questão pertence a um módulo avançado (Dia {fq.trilhaDay}). Para refazê-la e acessar o gabarito comentado, é necessária assinatura ativa ou liberação prévia do cronograma.
+                             </p>
+                           </div>
+                         );
+                       }
+
+                       const { question: effectiveQ, isCatalogUpdated } = resolveUpdatedCatalogQuestion(fq);
+
+                       return (
+                         <div key={fq.id} className="p-6 bg-slate-900 border border-white/5 hover:border-white/10 rounded-3xl space-y-4">
+                           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
+                             <div className="flex items-center gap-2 flex-wrap">
+                               <span className="text-[10px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-2.5 py-1 rounded-full border border-brand-gold/20">
+                                 {fq.subject || 'Estudo Geral'}
+                               </span>
+                               {fq.trilhaDay !== undefined && (
+                                 <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
+                                   Dia {fq.trilhaDay}{fq.trilhaMaterialIndex !== undefined ? ` · Parte ${fq.trilhaMaterialIndex + 1}` : ''}
+                                 </span>
+                               )}
+                               {isCatalogUpdated && (
+                                 <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                   <RefreshCw size={10} />
+                                   Gabarito Atualizado no Catálogo
+                                 </span>
+                               )}
+                               {fq.resolved ? (
+                                 <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                   <CheckCircle size={10} />
+                                   Superada
+                                 </span>
+                               ) : (
+                                 <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                   <AlertCircle size={10} />
+                                   Pendente
+                                 </span>
+                               )}
+                             </div>
+
+                             <button
+                               onClick={() => handleDeleteFailedQuestion(fq.id)}
+                               className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                               title="Remover do Caderno de Erros"
+                             >
+                               <Trash2 size={14} />
+                             </button>
+                           </div>
+
+                            {/* Retry Action & Quiz Question */}
+                            {(() => {
+                              const retryState = activeRetryMap[fq.id];
+                              const isRetryActive = !fq.resolved || Boolean(retryState?.active);
+                              const hasSubmittedRetry = retryState?.submittedAnswer !== undefined;
+
+                              return (
+                                <div className="space-y-4">
+                                  <div className="flex items-center justify-between gap-3 pt-1">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                                      {isRetryActive && !hasSubmittedRetry
+                                        ? 'Nova Tentativa em Andamento (Selecione sua resposta):'
+                                        : fq.attempts?.length
+                                          ? 'Último Resultado Registrado:'
+                                          : 'Responder Questão:'}
+                                    </span>
+                                    {(!isRetryActive || hasSubmittedRetry) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveRetryMap(prev => ({
+                                            ...prev,
+                                            [fq.id]: {
+                                              active: true,
+                                              submittedAnswer: undefined,
+                                              isSubmitting: false,
+                                              retryKey: Date.now()
+                                            }
+                                          }));
+                                        }}
+                                        className="px-3 py-1.5 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold border border-brand-gold/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                                      >
+                                        <RefreshCw size={12} />
+                                        <span>{fq.resolved ? "Praticar Novamente" : "Iniciar Nova Tentativa"}</span>
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <QuizQuestion
+                                    key={isRetryActive ? `retry-${fq.id}-${retryState?.retryKey || 0}` : `static-${fq.id}-${fq.attempts?.length || 0}`}
+                                    question={effectiveQ}
+                                    hideExplanationInitially={isRetryActive ? !hasSubmittedRetry : !fq.resolved}
+                                    isRetry={true}
+                                    savedAnswer={
+                                      isRetryActive
+                                        ? retryState?.submittedAnswer
+                                        : fq.attempts?.length
+                                          ? fq.attempts[fq.attempts.length - 1].selectedOption
+                                          : undefined
+                                    }
+                                    onAnswer={async (answerIndex) => {
+                                      if (retryState?.isSubmitting || hasSubmittedRetry) return;
+                                      setActiveRetryMap(prev => ({
+                                        ...prev,
+                                        [fq.id]: {
+                                          active: true,
+                                          submittedAnswer: answerIndex,
+                                          isSubmitting: true,
+                                          retryKey: prev[fq.id]?.retryKey || Date.now()
+                                        }
+                                      }));
+                                      try {
+                                        await handleRetryFailedQuestion(fq, answerIndex);
+                                      } finally {
+                                        setActiveRetryMap(prev => ({
+                                          ...prev,
+                                          [fq.id]: {
+                                            active: true,
+                                            submittedAnswer: answerIndex,
+                                            isSubmitting: false,
+                                            retryKey: prev[fq.id]?.retryKey || Date.now()
+                                          }
+                                        }));
+                                      }
+                                    }}
+                                  />
+
+                                  {/* Attempts history */}
+                                  {fq.attempts && fq.attempts.length > 0 && (
+                                    <div className="pt-2 border-t border-white/5">
+                                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                        <History size={12} />
+                                        <span>Histórico de Tentativas ({fq.attempts.length}):</span>
+                                      </div>
+                                      {isRetryActive && !hasSubmittedRetry ? (
+                                        <div className="text-[11px] text-slate-500 italic flex items-center gap-2 bg-slate-950/40 p-2.5 rounded-xl border border-white/5">
+                                          <EyeOff size={13} className="text-brand-gold/70 shrink-0" />
+                                          <span>O histórico anterior foi ocultado durante a resolução para não revelar o gabarito.</span>
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-wrap gap-2">
+                                          {fq.attempts.map((att, attIdx) => (
+                                            <span
+                                              key={attIdx}
+                                              className={cn(
+                                                "text-[9px] font-mono px-2 py-0.5 rounded-md border flex items-center gap-1",
+                                                att.correct
+                                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                                  : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                                              )}
+                                            >
+                                              {att.correct ? <Check size={10} /> : <X size={10} />}
+                                              {attIdx + 1}ª: {att.correct ? 'Acerto' : 'Erro'} (Opção {String.fromCharCode(65 + att.selectedOption)}) · {new Date(att.timestamp).toLocaleDateString('pt-BR')}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                         </div>
+                       );
+                     })
+                   )}
+                 </div>
+               </motion.div>
+             ) : activeTab === 'reviews' ? (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -5784,28 +7804,74 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
               >
                 <div className="text-center space-y-4">
                    <h2 className="text-3xl font-serif font-bold text-slate-100"><span className="text-brand-gold">Revisão</span> Comprimida</h2>
-                   <p className="text-slate-400 text-sm">Acesse rapidamente os pontos-chave de todos os artigos já estudados.</p>
+                   <p className="text-slate-400 text-sm">As cinco revisões de cada dia que você gerou ao estudar. Só aparece o que você mesmo estudou.</p>
                 </div>
-                <Suspense fallback={<div className="h-48 bg-slate-900 border border-white/5 rounded-[2.5rem] animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Carregando lista de revisões comprimidas...</div>}>
-                  <ReviewList 
-                    reviews={reviews} 
-                    onSelect={(rev) => {
-                      switchSession(rev.sessionId);
-                      // Force a scroll to the specific section after a small delay for DOM updates
-                      setTimeout(() => {
-                        const id = `review-${rev.subject.replace(/\s+/g, '-').toLowerCase()}-${rev.article}`;
-                        const element = document.getElementById(id);
-                        if (element) {
-                          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }
-                      }, 300);
-                    }} 
-                    onDelete={(id) => {
-                      const rev = reviews.find(r => r.id === id);
-                      deleteReview(id, rev?.sessionId);
-                    }}
-                  />
-                </Suspense>
+                {returnToDayAfterReview !== null && (
+                  <div className="p-4 sm:p-5 bg-gradient-to-r from-brand-gold/15 via-amber-500/10 to-brand-gold/5 border border-brand-gold/30 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+                    <div className="flex items-center gap-3 text-left">
+                      <div className="p-2.5 bg-brand-gold/20 rounded-2xl text-brand-gold shrink-0">
+                        <Sparkles size={20} />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-serif font-bold text-slate-100">
+                          Revisão sugerida antes de iniciar o Dia {returnToDayAfterReview}
+                        </h4>
+                        <p className="text-xs text-slate-300">
+                          Ao concluir a revisão dos conteúdos anteriores, continue para o Dia {returnToDayAfterReview}.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                      {reviewFilterDays && reviewFilterDays.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setReviewFilterDays(null)}
+                          className="px-3 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 transition-all cursor-pointer"
+                        >
+                          Ver Todas
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetDay = returnToDayAfterReview;
+                          setReturnToDayAfterReview(null);
+                          setReviewFilterDays(null);
+                          void executeStartTrilhaStudy(targetDay, 'estudo');
+                        }}
+                        className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider bg-brand-gold hover:bg-white text-slate-950 transition-all shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <span>Continuar para o Dia {returnToDayAfterReview}</span>
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {(() => {
+                  const filteredReviewsList = reviews.filter((r) => {
+                    const d = reviewDay(r);
+                    if (d === undefined) return false;
+                    if (!isCEO && studyAccess && !studyAccess.allowedDays.includes(d)) {
+                      return false;
+                    }
+                    if (reviewFilterDays && reviewFilterDays.length > 0) {
+                      return reviewFilterDays.includes(d);
+                    }
+                    return true;
+                  });
+
+                  return (
+                    <Suspense fallback={<div className="h-48 bg-slate-900 border border-white/5 rounded-[2.5rem] animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium">Carregando lista de revisões comprimidas...</div>}>
+                      <ReviewList 
+                        reviews={filteredReviewsList} 
+                        userId={user?.uid}
+                        onDelete={(id) => {
+                          deleteReview(id);
+                        }}
+                      />
+                    </Suspense>
+                  );
+                })()}
               </motion.div>
             ) : activeTab === 'schedules' ? (
               <motion.div
@@ -5890,16 +7956,6 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
 
                         <div className="space-y-4">
                            <h4 className="text-sm font-serif font-bold text-brand-gold flex items-center gap-2">
-                             <BarChart2 size={16} />
-                             Resumo do Raio-X
-                           </h4>
-                           <Suspense fallback={<div className="h-44 bg-slate-950/40 rounded-3xl border border-white/5 animate-pulse flex items-center justify-center text-xs text-slate-500 font-medium whitespace-normal">Processando mapa estocástico de incidência...</div>}>
-                             <IncidenceChart data={schedule.raioX} />
-                           </Suspense>
-                        </div>
-
-                        <div className="space-y-4">
-                           <h4 className="text-sm font-serif font-bold text-brand-gold flex items-center gap-2">
                              <Target size={16} />
                              Cronograma Semanal
                            </h4>
@@ -5953,6 +8009,28 @@ Faça um estudo extremamente aprofundado, completo e detalhado deste conteúdo e
                                            isCompleted ? "text-slate-500 line-through opacity-50" : "text-slate-400"
                                          )}>
                                            <div className="font-semibold text-slate-200">{item.topico}</div>
+                                            {(() => {
+                                              const dNum = parseInt(String(item.dia).replace(/[^0-9]/g, '')) || (idx + 1);
+                                              const scheduled = getScheduledReviewsForDay(dNum);
+                                              if (scheduled.length === 0) return null;
+                                              return (
+                                                <div className="mt-2 pt-2 border-t border-dashed border-amber-500/20">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setReturnToDayAfterReview(dNum);
+                                                      setReviewFilterDays([dNum - 1]);
+                                                      setActiveTab('reviews');
+                                                    }}
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[10px] font-bold transition-all cursor-pointer"
+                                                    title="Abrir Revisão Comprimida correspondente"
+                                                  >
+                                                    <Sparkles size={11} className="text-amber-400 shrink-0" />
+                                                    <span>{scheduled.map(s => s.label).join(' • ')}</span>
+                                                  </button>
+                                                </div>
+                                              );
+                                            })()}
                                            {item.reviews && item.reviews.length > 0 && (
                                              <div className="mt-3.5 space-y-2 border-t border-dashed border-brand-gold/15 pt-2.5">
                                                <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider font-extrabold text-amber-400">
@@ -6019,7 +8097,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                              onClick={() => {
                                                setActiveTab('chat');
                                                setActiveStudyItem({ scheduleId: schedule.id, itemIndex: idx });
-                                               handleSendMessageRequest(`ATHENA, conforme nosso cronograma do edital "${schedule.title}", vamos iniciar o estudo EXAUSTIVO do tema: "${item.topico}" da disciplina "${item.disciplina}". Siga rigorosamente o fluxo de 6 blocos, fornecendo profundidade máxima para nível de MP/Magistratura e gerando exatamente ${Math.max(10, item.questoes)} questões desafiadoras no final.`, false);
+                                               handleSendMessageRequest(`ATHENA, conforme nosso cronograma do edital "${schedule.title}", vamos iniciar o estudo EXAUSTIVO do tema: "${item.topico}" da disciplina "${item.disciplina}". Siga rigorosamente o fluxo de 6 partes, fornecendo profundidade máxima para Magistratura, Ministério Público e Defensoria Pública, sem percentual de incidência, e gerando exatamente ${Math.max(10, item.questoes)} questões desafiadoras no final.`, false);
                                              }}
                                              className={cn(
                                                "text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ml-auto justify-end transition-all",
@@ -6048,7 +8126,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-8 text-left"
+                className="athena-trilha space-y-8 text-left"
               >
                 {/* Header Section */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-slate-900/40 p-8 rounded-[2.5rem] border border-white/5 backdrop-blur-md">
@@ -6140,8 +8218,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   <div className="grid grid-cols-1 gap-6 text-slate-100">
                     {TRILHA_JURIDICA_DATA.filter(d => d.semana === selectedTrilhaWeek).map((dayItem) => {
                       const isCompleted = trilhaCompletedDays.includes(dayItem.dia);
-                      const incidencia = calcularIncidenciaParaMaterias(dayItem.dia, dayItem.materias);
-                      
+
                       return (
                         <div
                           key={dayItem.dia}
@@ -6164,6 +8241,25 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 )}>
                                   DIA {dayItem.dia}
                                 </span>
+                                {(() => {
+                                  const scheduled = getScheduledReviewsForDay(dayItem.dia);
+                                  if (scheduled.length === 0) return null;
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReturnToDayAfterReview(dayItem.dia);
+                                        setReviewFilterDays([dayItem.dia - 1]);
+                                        setActiveTab('reviews');
+                                      }}
+                                      className="text-[10px] font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 px-2.5 py-1 rounded-xl flex items-center gap-1.5 font-mono cursor-pointer transition-all"
+                                      title="Abrir Revisões Programadas deste dia"
+                                    >
+                                      <Sparkles size={11} className="text-amber-400 shrink-0" />
+                                      <span>{scheduled.map(s => s.label).join(' • ')}</span>
+                                    </button>
+                                  );
+                                })()}
                                 {false && dayItem.fonteCompleta && (
                                   <button
                                     onClick={() => setInspectedTrilhaFonte({
@@ -6191,18 +8287,36 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
 
                               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 w-full">
                                 {dayItem.materias.map((mat, mIdx) => (
-                                  <div key={mIdx} className="bg-slate-950/40 p-3 rounded-2xl border border-white/5 flex flex-col justify-center min-h-[56px]">
-                                    <span className="text-[10px] font-black uppercase text-brand-gold/70 tracking-tight block leading-tight truncate">{mat.nome}</span>
-                                    <span className={cn("text-xs font-medium text-slate-200 mt-1 block leading-tight", isCompleted && "line-through opacity-40 text-slate-500")}>
+                                  <button
+                                    key={mIdx}
+                                    type="button"
+                                    onClick={() => handleStartTrilhaStudy(dayItem.dia, 'estudo', mIdx)}
+                                    className={cn(
+                                      "text-left p-3 rounded-2xl border transition-all flex flex-col justify-center min-h-[56px] cursor-pointer",
+                                      isCompleted
+                                        ? "bg-slate-950/40 border-emerald-500/20 hover:border-emerald-500/40 hover:bg-slate-900/60"
+                                        : "bg-slate-950/40 border-white/5 hover:border-brand-gold/30 hover:bg-slate-900/60"
+                                    )}
+                                    title={isCompleted ? `Acessar Matéria ${mIdx + 1} (${mat.nome}) diretamente` : `Estudar ${mat.nome}`}
+                                  >
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-[10px] font-black uppercase text-brand-gold/80 tracking-tight block leading-tight truncate">
+                                        {mat.nome}
+                                      </span>
+                                      {isCompleted && (
+                                        <span className="text-[9px] font-bold text-emerald-400 font-mono">P{mIdx + 1}</span>
+                                      )}
+                                    </div>
+                                    <span className={cn("text-xs font-medium text-slate-200 mt-1 block leading-tight", isCompleted && "opacity-70 text-slate-300")}>
                                       {mat.conteudo}
                                     </span>
-                                  </div>
+                                  </button>
                                 ))}
                               </div>
                             </div>
 
                             <div className="flex flex-row sm:flex-row lg:flex-col lg:items-end justify-between lg:justify-center w-full lg:w-auto gap-4 pt-4 lg:pt-0 border-t lg:border-t-0 border-white/5 shrink-0">
-                              <button
+                              {isCEO && (<button
                                 onClick={() => toggleTrilhaDayComplete(dayItem.dia)}
                                 className={cn(
                                   "flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border w-full sm:w-auto lg:w-full justify-center",
@@ -6218,7 +8332,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                   {isCompleted && <Zap size={8} className="text-slate-950" />}
                                 </div>
                                 {isCompleted ? "Desmarcar Dia" : "Concluir Dia"}
-                              </button>
+                              </button>)}
 
                               <button
                                 onClick={() => {
@@ -6229,60 +8343,6 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 <Scale size={13} />
                                 Estudar Agora
                               </button>
-                            </div>
-                          </div>
-
-                          {/* Estatística de Incidência do Dia */}
-                          <div className="bg-slate-950/20 rounded-2xl p-4 border border-white/5 flex flex-col md:flex-row gap-4 items-stretch justify-between">
-                            <div className="space-y-1.5 flex-1 min-w-[200px]">
-                              <div className="flex items-center gap-2">
-                                <span className={cn(
-                                  "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded font-mono",
-                                  incidencia.prioridade === 'lei_seca' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                                  incidencia.prioridade === 'doutrina' ? "bg-brand-gold/10 text-brand-gold border border-brand-gold/20" :
-                                  "bg-sky-500/10 text-sky-400 border border-sky-500/20"
-                                )}>
-                                  Foco Inteligente: {incidencia.label}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-slate-450 leading-relaxed font-sans">
-                                💡 <strong className="text-slate-350">Análise das Bancas:</strong> {incidencia.justificativa}
-                              </p>
-                              <p className="text-[10px] text-slate-500 font-mono">
-                                🎯 <strong className="text-slate-400">Referência Histórica:</strong> {incidencia.concursoHistorico}
-                              </p>
-                            </div>
-                            
-                            <div className="flex flex-row md:flex-col justify-around gap-4 items-center md:items-stretch min-w-[200px] border-t md:border-t-0 md:border-l border-white/5 pt-2 md:pt-0 md:pl-4">
-                              <div className="space-y-1 w-full text-left">
-                                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                                  <span>Lei Seca</span>
-                                  <span className="text-emerald-400 font-bold">{incidencia.porcentagens.leiSeca}%</span>
-                                </div>
-                                <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-emerald-450 h-full rounded-full" style={{ width: `${incidencia.porcentagens.leiSeca}%` }} />
-                                </div>
-                              </div>
-                              
-                              <div className="space-y-1 w-full text-left">
-                                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                                  <span>Doutrina</span>
-                                  <span className="text-brand-gold font-bold">{incidencia.porcentagens.doutrina}%</span>
-                                </div>
-                                <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-brand-gold h-full rounded-full" style={{ width: `${incidencia.porcentagens.doutrina}%` }} />
-                                </div>
-                              </div>
-                              
-                              <div className="space-y-1 w-full text-left">
-                                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                                  <span>Jurisprudência</span>
-                                  <span className="text-sky-400 font-bold">{incidencia.porcentagens.jurisprudencia}%</span>
-                                </div>
-                                <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-sky-400 h-full rounded-full" style={{ width: `${incidencia.porcentagens.jurisprudencia}%` }} />
-                                </div>
-                              </div>
                             </div>
                           </div>
 
@@ -6396,7 +8456,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                      <Sparkles className="text-brand-gold" size={40} />
                   </div>
                   <div className="space-y-4">
-                    <h2 className="text-4xl font-serif font-bold text-slate-100 tracking-tight">O que vamos <span className="text-brand-gold">dominar</span> hoje, {user.displayName?.split(' ')[0]}?</h2>
+                    <h2 className="text-4xl font-serif font-bold text-slate-100 tracking-tight">O que vamos <span className="text-brand-gold athena-home-emphasis">dominar</span> hoje, {user.displayName?.split(' ')[0]}?</h2>
                     <p className="text-slate-400 max-w-lg mx-auto leading-relaxed text-sm">
                       {isCEO 
                         ? "Envie sua consulta jurídica, dúvida de doutrina ou tema de estudo abaixo para a mentoria ativa da ATHENA."
@@ -6417,6 +8477,9 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   </div>
                 </div>
 
+                <StudyLegend />
+
+                {!isCEO && legacyStudyDays.length>0 && <p role="status" className="text-sm text-amber-300">Histórico anterior preservado: {legacyStudyDays.length} dias registrados. A importação será conferida e autorizada separadamente; esses registros não representam assinatura ou novas conclusões verificadas.</p>}
                 {/* Módulo de Trilha Jurídica - Página Inicial */}
                 {(() => {
                   const nextUncompletedTrilhaDayNum = Array.from({ length: 100 }, (_, idx) => idx + 1).find(d => !trilhaCompletedDays.includes(d)) || 100;
@@ -6427,7 +8490,6 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   const totalPercent = Math.round((completedDaysInTrilha / TRILHA_JURIDICA_DATA.length) * 100);
 
                   const isInspectedCompleted = trilhaCompletedDays.includes(activeInspectedDayNum);
-                  const activeIncidencia = calcularIncidenciaParaMaterias(activeInspectedDayNum, activeTrilhaDayItem.materias);
 
                   return (
                     <motion.div
@@ -6460,6 +8522,18 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                               )}
                             </div>
 
+                            <button
+                              onClick={() => {
+                                handleStartTrilhaStudy(activeInspectedDayNum, 'estudo');
+                              }}
+                              className="athena-start-day w-full flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-widest transition-all bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 shadow-[0_8px_25px_rgba(212,175,55,0.4)] hover:shadow-[0_12px_35px_rgba(212,175,55,0.6)] hover:brightness-110 active:scale-95 cursor-pointer border border-amber-300/80 group"
+                              title="Iniciar estudo teórico guiado dividido em partes"
+                            >
+                              <Sparkles size={16} className="text-slate-950 group-hover:scale-125 transition-transform" />
+                              <span className="font-extrabold tracking-wider">ESTUDAR DIA {activeInspectedDayNum}</span>
+                              <ChevronRight size={16} className="text-slate-950 group-hover:translate-x-1 transition-transform stroke-[2.5]" />
+                            </button>
+
                             <div className="space-y-1">
                               <div className="flex items-baseline gap-2">
                                 <h3 className="text-2xl font-serif font-bold text-slate-100">
@@ -6482,93 +8556,40 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                             {/* List of study areas of the selected day */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full pt-1">
                               {activeTrilhaDayItem.materias.map((mat, mIdx) => (
-                                <div 
+                                <button 
                                   key={mIdx} 
+                                  type="button"
+                                  onClick={() => handleStartTrilhaStudy(activeInspectedDayNum, 'estudo', mIdx)}
                                   className={cn(
-                                    "p-3 rounded-2xl border transition-all flex flex-col justify-center min-h-[52px]",
+                                    "text-left p-3 rounded-2xl border transition-all flex flex-col justify-center min-h-[52px] cursor-pointer",
                                     isInspectedCompleted 
-                                      ? "bg-slate-950/20 border-emerald-500/10 opacity-70" 
-                                      : "bg-slate-950/50 border-white/5 hover:border-white/10"
+                                      ? "bg-slate-950/30 border-emerald-500/20 hover:border-emerald-500/40 hover:bg-slate-900/50" 
+                                      : "bg-slate-950/50 border-white/5 hover:border-brand-gold/30 hover:bg-slate-900/60"
                                   )}
+                                  title={isInspectedCompleted ? `Acessar Matéria ${mIdx + 1} (${mat.nome}) diretamente` : `Estudar ${mat.nome}`}
                                 >
-                                  <span className="text-[9px] font-black uppercase text-brand-gold/80 tracking-tight block leading-tight">{mat.nome}</span>
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="text-[9px] font-black uppercase text-brand-gold/80 tracking-tight block leading-tight truncate">{mat.nome}</span>
+                                    {isInspectedCompleted && (
+                                      <span className="text-[8px] font-bold text-emerald-400 font-mono">P{mIdx + 1}</span>
+                                    )}
+                                  </div>
                                   <span className={cn(
                                     "text-xs font-semibold text-slate-300 mt-0.5 block leading-tight",
-                                    isInspectedCompleted && "line-through text-slate-550"
+                                    isInspectedCompleted && "opacity-70 text-slate-400"
                                   )}>
                                     {mat.conteudo}
                                   </span>
-                                </div>
+                                </button>
                               ))}
-                            </div>
-
-                            {/* Bloco de Priorização de Incidência na Home */}
-                            <div className="bg-slate-950/40 border border-white/5 rounded-2xl p-3.5 space-y-2 mt-3">
-                              <div className="flex items-center justify-between">
-                                <span className={cn(
-                                  "text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded font-mono",
-                                  activeIncidencia.prioridade === 'lei_seca' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                                  activeIncidencia.prioridade === 'doutrina' ? "bg-brand-gold/10 text-brand-gold border border-brand-gold/20" :
-                                  "bg-sky-500/10 text-sky-400 border border-sky-500/20"
-                                )}>
-                                  Foco de Banca: {activeIncidencia.label}
-                                </span>
-                                <span className="text-[9px] font-bold font-mono text-slate-500">Mapeamento Estatístico</span>
-                              </div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                💡 <strong className="text-slate-300">Análise de Incidência:</strong> {activeIncidencia.justificativa}
-                              </p>
-                              <p className="text-[9px] text-slate-500 font-mono">
-                                🏛️ <strong className="text-slate-450">Referência Prova:</strong> {activeIncidencia.concursoHistorico}
-                              </p>
-                              
-                              <div className="grid grid-cols-3 gap-3 pt-2.5 border-t border-white/5">
-                                <div>
-                                  <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
-                                    <span>Lei Seca</span>
-                                    <span className="text-emerald-400 font-bold">{activeIncidencia.porcentagens.leiSeca}%</span>
-                                  </div>
-                                  <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-emerald-400 h-full" style={{ width: `${activeIncidencia.porcentagens.leiSeca}%` }} />
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
-                                    <span>Doutrina</span>
-                                    <span className="text-brand-gold font-bold">{activeIncidencia.porcentagens.doutrina}%</span>
-                                  </div>
-                                  <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-brand-gold h-full" style={{ width: `${activeIncidencia.porcentagens.doutrina}%` }} />
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="flex justify-between text-[8px] font-mono text-slate-450 leading-tight">
-                                    <span>Jurisprudência</span>
-                                    <span className="text-sky-450 font-bold">{activeIncidencia.porcentagens.jurisprudencia}%</span>
-                                  </div>
-                                  <div className="w-full bg-slate-900 h-0.5 mt-0.5 rounded-full overflow-hidden">
-                                    <div className="bg-sky-400 h-full" style={{ width: `${activeIncidencia.porcentagens.jurisprudencia}%` }} />
-                                  </div>
-                                </div>
-                              </div>
                             </div>
                           </div>
 
                           {/* Quick action buttons for the inspected day */}
                           <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-white/5">
-                            <button
-                              onClick={() => {
-                                handleStartTrilhaStudy(activeInspectedDayNum, 'estudo');
-                              }}
-                              className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-widest transition-all bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 shadow-[0_8px_25px_rgba(212,175,55,0.4)] hover:shadow-[0_12px_35px_rgba(212,175,55,0.6)] hover:brightness-110 active:scale-95 cursor-pointer border border-amber-300/80 group"
-                              title="Iniciar estudo teórico guiado dividido em blocos"
-                            >
-                              <Sparkles size={16} className="text-slate-950 group-hover:scale-125 transition-transform" />
-                              <span className="font-extrabold tracking-wider">ESTUDAR DIA {activeInspectedDayNum}</span>
-                              <ChevronRight size={16} className="text-slate-950 group-hover:translate-x-1 transition-transform stroke-[2.5]" />
-                            </button>
 
-                            <button
+
+                            {isCEO && (<button
                               onClick={() => toggleTrilhaDayComplete(activeInspectedDayNum)}
                               className={cn(
                                 "flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border",
@@ -6584,7 +8605,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 {isInspectedCompleted && <Zap size={8} className="text-slate-950" />}
                               </div>
                               {isInspectedCompleted ? "Desmarcar Dia" : "Concluir Dia"}
-                            </button>
+                            </button>)}
 
                             <button
                               disabled={!isCEO && !hasCompletedDay50}
@@ -6750,9 +8771,106 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                     <AnimatePresence mode="popLayout">
                       {(() => {
                         const activeSess = sessions.find(s => s.id === currentSessionId);
-                        const tDay = activeSess?.trilhaDay;
-                        const tMatIdx = activeSess?.trilhaMaterialIndex;
-                        const tTotal = tDay ? (TRILHA_JURIDICA_DATA.find(d => d.dia === tDay)?.materias?.length || 0) : 0;
+                        const inferredTrilha = inferTrilhaContext(activeSess, messages);
+                        const tDay = inferredTrilha.day;
+                        const tMatIdx = inferredTrilha.part;
+                        const tTotal = inferredTrilha.total || (tDay ? 5 : 0);
+                        const visibleLesson = (messages || []).slice().reverse().find((m) => m.role === 'model' && (m.content || m.blocks?.length));
+                        const cacheCurrent = Boolean(
+                          tDay !== undefined &&
+                          cacheHoldsText(
+                            homologatedLessonState &&
+                            homologatedLessonState.day === tDay &&
+                            homologatedLessonState.part === (tMatIdx ?? 0)
+                              ? homologatedLessonState
+                              : null,
+                            visibleLesson?.content
+                          )
+                        );
+                        const reviewReady = homologatedReviewReady(homologatedLessonState, tDay, tMatIdx ?? 0);
+                        const isDayAlreadyCompleted = tDay !== undefined && trilhaCompletedDays.includes(tDay);
+
+                        if (isDayAlreadyCompleted && reviewingCompletedDay !== tDay) {
+                          return (
+                            <motion.div
+                              key="day-completed-state"
+                              initial={{ opacity: 0, y: 15 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="p-8 mx-auto max-w-2xl bg-slate-900/90 border border-brand-gold/30 rounded-[2.5rem] shadow-2xl relative overflow-hidden backdrop-blur-md text-center w-full space-y-6"
+                            >
+                              <div className="w-16 h-16 rounded-2xl bg-brand-gold/15 border border-brand-gold/30 text-brand-gold mx-auto flex items-center justify-center">
+                                <Trophy size={32} />
+                              </div>
+
+                              <div className="space-y-2">
+                                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full inline-block">
+                                  Conclusão Confirmada pelo Servidor
+                                </span>
+                                <h2 className="text-2xl sm:text-3xl font-serif font-bold text-slate-100">
+                                  Dia {tDay} Concluído com Sucesso!
+                                </h2>
+                                <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
+                                  Todas as matérias e partes deste dia foram vencidas e validadas. O histórico e o progresso estão preservados com segurança.
+                                </p>
+                              </div>
+
+                              {/* Navegação Direta entre os Blocos do Dia */}
+                              {(() => {
+                                const dayObj = TRILHA_JURIDICA_DATA.find(d => d.dia === tDay);
+                                if (!dayObj?.materias || dayObj.materias.length === 0) return null;
+                                return (
+                                  <div className="pt-2 text-left w-full">
+                                    <p className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-2.5 text-center">
+                                      Acessar Bloco / Matéria Homologada:
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+                                      {dayObj.materias.map((mat, mIdx) => (
+                                        <button
+                                          key={mIdx}
+                                          type="button"
+                                          onClick={() => {
+                                            setReviewingCompletedDay(tDay);
+                                            handleStartTrilhaStudy(tDay, 'estudo', mIdx);
+                                          }}
+                                          className="p-3 rounded-2xl bg-slate-800/80 hover:bg-slate-700/90 text-left border border-white/10 hover:border-brand-gold/40 transition-all flex items-center justify-between gap-2 cursor-pointer group"
+                                        >
+                                          <div className="min-w-0">
+                                            <span className="text-[10px] font-mono font-bold text-brand-gold uppercase block">
+                                              Bloco {mIdx + 1} de {dayObj.materias.length}
+                                            </span>
+                                            <span className="text-xs font-semibold text-slate-200 group-hover:text-white truncate block">
+                                              {mat.nome}
+                                            </span>
+                                          </div>
+                                          <ChevronRight size={14} className="text-slate-400 group-hover:text-brand-gold group-hover:translate-x-0.5 transition-all shrink-0" />
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
+                              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
+                                <button
+                                  type="button"
+                                  onClick={handleGoHome}
+                                  className="w-full sm:w-auto min-w-[200px] flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-amber-400 via-brand-gold to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black uppercase tracking-widest text-xs rounded-xl shadow-lg border border-amber-300/80 transition-all cursor-pointer active:scale-95"
+                                >
+                                  <Home size={15} strokeWidth={2.5} />
+                                  <span>Voltar à página inicial</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setReviewingCompletedDay(tDay)}
+                                  className="w-full sm:w-auto min-w-[200px] flex items-center justify-center gap-2 px-6 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold uppercase tracking-wider text-xs rounded-xl border border-white/10 transition-all cursor-pointer active:scale-95"
+                                >
+                                  <BookOpen size={15} className="text-brand-gold" />
+                                  <span>Revisar o Dia concluído</span>
+                                </button>
+                              </div>
+                            </motion.div>
+                          );
+                        }
                         
                         const visibleMessages = (messages || []).filter(m => !getIsInstructionMessage(m));
                         
@@ -6782,7 +8900,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
 
                                 <p className="text-xs text-slate-300 leading-relaxed font-sans">
                                   {tDay ? (
-                                    <>Sessão de estudos pronta para o <strong>Dia {tDay} ({guidedSubject})</strong>. Clique abaixo para gerar sua mentoria analítica em 6 blocos com o Princípio de Pareto (80/20).</>
+                                    <>Sessão de estudos pronta para o <strong>Dia {tDay} ({guidedSubject})</strong>. Clique abaixo para gerar sua mentoria analítica em 6 partes.</>
                                   ) : (
                                     <>Sessão pronta para <strong>{guidedSubject}</strong>. Clique no botão abaixo para iniciar a mentoria guiada.</>
                                   )}
@@ -6831,7 +8949,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                   <p className="text-xs text-slate-400 leading-relaxed font-sans">
                                     {tDay ? (
                                       <>
-                                        Iniciando a sessão de estudos para a <strong>Parte {(tMatIdx !== undefined) ? tMatIdx + 1 : 1} de {tTotal}</strong> do seu cronograma. ATHENA está processando a fonte, jurisprudências e regulamentos doutrinários para moldar um material otimizado.
+                                        Iniciando a sessão de estudos para o <strong>Bloco {(tMatIdx !== undefined) ? tMatIdx + 1 : 1} de {tTotal}</strong> do seu cronograma. ATHENA está processando a fonte, jurisprudências e regulamentos doutrinários para moldar um material otimizado.
                                       </>
                                     ) : (
                                       <>
@@ -6870,18 +8988,54 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                         
                         return (
                           <>
+                            {/* Banner de Modo Revisão de Dia Concluído */}
+                            {tDay !== undefined && isDayAlreadyCompleted && reviewingCompletedDay === tDay && (
+                              <div className="mx-auto max-w-4xl w-full mb-6 p-4 md:p-5 rounded-3xl bg-slate-900/95 border-2 border-emerald-500/30 shadow-[0_10px_35px_rgba(16,185,129,0.1)] backdrop-blur-xl text-left flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3.5">
+                                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                                    <CheckCircle size={20} />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/25 font-mono">
+                                        Modo Revisão
+                                      </span>
+                                      <span className="text-xs font-bold text-slate-200">
+                                        Dia {tDay} concluído • Conteúdo liberado para consulta
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 mt-1">
+                                      Você pode consultar livremente todo o conteúdo deste dia. Nenhuma nova pontuação ou conclusão será gerada.
+                                    </p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handleGoHome}
+                                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                                >
+                                  Voltar ao Início
+                                </button>
+                              </div>
+                            )}
+
                             {/* Banner de Sucesso de Homologação */}
                             {homologationSuccessBanner && (
                               <motion.div
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="mx-auto max-w-4xl w-full mb-6 p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-between gap-3 shadow-lg"
+                                className={cn(
+                                  "mx-auto max-w-4xl w-full mb-6 p-4 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-lg border",
+                                  homologationBannerTone === 'warn'
+                                    ? "bg-amber-500/15 border-amber-500/40 text-amber-200"
+                                    : "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                                )}
                               >
                                 <div className="flex items-center gap-2.5">
-                                  <CheckCircle size={18} className="text-emerald-400 shrink-0" />
+                                  <CheckCircle size={18} className={homologationBannerTone === 'warn' ? "text-amber-300 shrink-0" : "text-emerald-400 shrink-0"} />
                                   <span>{homologationSuccessBanner}</span>
                                 </div>
-                                <button onClick={() => setHomologationSuccessBanner(null)} className="text-emerald-400 hover:text-white text-xs p-1 cursor-pointer">✕</button>
+                                <button onClick={() => setHomologationSuccessBanner(null)} className="hover:text-white text-xs p-1 cursor-pointer">✕</button>
                               </motion.div>
                             )}
 
@@ -6898,33 +9052,94 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                         <span className="text-[10px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-2.5 py-0.5 rounded-full border border-brand-gold/25 font-mono">
                                           👑 Curadoria do CEO
                                         </span>
-                                        {homologatedLessonState?.status === 'approved' ? (
+                                        {cacheCurrent ? (
                                           <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
                                             <CheckCircle size={10} /> Homologado e Publicado
                                           </span>
                                         ) : (
                                           <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                            🟡 Rascunho / Aguardando Aprovação
+                                            🟡 Tema novo aguardando o cache
                                           </span>
                                         )}
                                       </div>
                                       <h4 className="text-sm font-bold text-slate-100 mt-1">
-                                        Dia {tDay} • Parte {(tMatIdx ?? 0) + 1} de {tTotal} ({guidedSubject})
+                                        Dia {tDay} • Bloco {(tMatIdx ?? 0) + 1} de {tTotal} ({guidedSubject})
                                       </h4>
-                                      {homologatedLessonState?.status === 'approved' && homologatedLessonState.approvedAt && (
+                                      {cacheCurrent && homologatedLessonState?.approvedAt && (
                                         <p className="text-[11px] text-slate-400 mt-0.5">
                                           Aprovado por <span className="text-brand-gold font-mono font-bold">{homologatedLessonState.approvedBy}</span> em {new Date(homologatedLessonState.approvedAt).toLocaleDateString('pt-BR')} às {new Date(homologatedLessonState.approvedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.
                                         </p>
                                       )}
+                                      {/* Seletor Rápido de Blocos do Dia para Curadoria do CEO */}
+                                      {(() => {
+                                        const curDayObj = TRILHA_JURIDICA_DATA.find(d => d.dia === tDay);
+                                        if (!curDayObj?.materias || curDayObj.materias.length <= 1) return null;
+                                        return (
+                                          <div className="flex items-center gap-1.5 flex-wrap mt-2.5 pt-2 border-t border-white/10">
+                                            <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mr-1">Blocos:</span>
+                                            {curDayObj.materias.map((mat, bIdx) => {
+                                              const isCurrent = bIdx === (tMatIdx ?? 0);
+                                              return (
+                                                <button
+                                                  key={bIdx}
+                                                  type="button"
+                                                  onClick={() => handleStartTrilhaStudy(tDay, 'estudo', bIdx)}
+                                                  className={cn(
+                                                    "px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer",
+                                                    isCurrent
+                                                      ? "bg-brand-gold text-slate-950 font-black shadow-[0_2px_10px_rgba(212,175,55,0.4)]"
+                                                      : "bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10"
+                                                  )}
+                                                  title={`Navegar para o Bloco ${bIdx + 1} (${mat.nome})`}
+                                                >
+                                                  <span>B{bIdx + 1}: {mat.nome.length > 20 ? mat.nome.slice(0, 18) + '...' : mat.nome}</span>
+                                                  {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
 
                                   <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
+                                    {legalReviewTestButtonVisible(Boolean(isCEO)) && (
+                                      <button
+                                        type="button"
+                                        onClick={openLegalReviewTest}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                        title="Testa o revisor com material sintético. O catálogo dos alunos não é alterado."
+                                      >
+                                        Testar Revisor Jurídico
+                                      </button>
+                                    )}
+                                    {legalReviewButtonVisible(Boolean(isCEO), reviewReady) && tDay !== undefined && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openLegalReview(tDay, tMatIdx ?? 0)}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                        title="Revisão jurídica editorial integral da aula em cache com qualidade técnica aprofundada."
+                                      >
+                                        <Search size={14} />
+                                        Revisar
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={handleCeoRegenerateQuestions}
+                                      disabled={isLoading || isRegeneratingQuestions}
+                                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                      title="Regerar somente as questões objetivas e manter o resto da aula"
+                                    >
+                                      <Target size={14} className={cn(isRegeneratingQuestions && "animate-pulse")} />
+                                      {isRegeneratingQuestions ? 'Gerando questões...' : 'Regerar questões'}
+                                    </button>
+
                                     <button
                                       onClick={handleCeoRegenerateLesson}
-                                      disabled={isLoading}
+                                      disabled={isLoading || isRegeneratingQuestions}
                                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                                      title="Regerar lição do zero com a IA Gemini"
+                                      title={`Regerar a aula inteira com a IA ${regenerateEngineName(contentProvider)}`}
                                     >
                                       <RotateCw size={14} className={cn(isLoading && "animate-spin")} />
                                       Regerar IA
@@ -6940,7 +9155,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                       Editar Texto
                                     </button>
 
-                                    {homologatedLessonState?.status === 'approved' ? (
+                                    {cacheCurrent ? (
                                       <button
                                         onClick={handleCeoRevokeLesson}
                                         disabled={isSavingHomologation}
@@ -6987,8 +9202,8 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 guidedSubject={guidedSubject}
                                 markScheduleItemComplete={markScheduleItemComplete}
                                 saveToSchedules={saveToSchedules}
-                                trilhaDay={tDay}
-                                trilhaMaterialIndex={tMatIdx}
+                                trilhaDay={msg.trilhaDay ?? tDay}
+                                trilhaMaterialIndex={msg.trilhaMaterialIndex !== undefined ? msg.trilhaMaterialIndex : tMatIdx}
                                 trilhaTotalMaterials={tTotal}
                                 skipTrilhaLesson={skipTrilhaLesson}
                                 retryMessage={retryMessage}
@@ -6996,10 +9211,13 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                                 onApproveLesson={handleCeoApproveLesson}
                                 onApproveAndAdvance={handleCeoApproveAndAdvance}
                                 onEditLesson={handleCeoEditOpen}
+                                onReviewLesson={openLegalReview}
                                 isSavingHomologation={isSavingHomologation}
                                 homologatedLessonState={homologatedLessonState}
                                 onGoHome={handleGoHome}
+                                onReviewDay={() => setReviewingCompletedDay(tDay)}
                                 isDayCompleted={tDay ? trilhaCompletedDays.includes(tDay) : false}
+                                onNavigateBlock={(d, b) => handleStartTrilhaStudy(d, 'estudo', b)}
                               />
                             ))}
                           </>
@@ -7029,126 +9247,122 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
           </div>
         </div>
 
-        {/* Input Bar */}
-        {user && activeTab === 'chat' && (
-          <div className="p-4 lg:p-6 bg-slate-950/80 backdrop-blur-xl border-t border-white/5 relative z-30 pb-6">
-            
-            {/* Scroll to Top FAB */}
-            <AnimatePresence>
-              {showScrollTop && (
-                <motion.button
-                  initial={{ opacity: 0, scale: 0.8, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.8, y: 20 }}
-                  onClick={scrollToTop}
-                  className="absolute -top-16 right-4 sm:right-8 p-3 bg-brand-gold text-slate-950 rounded-full shadow-[0_10px_30px_rgba(212,175,55,0.4)] hover:scale-110 active:scale-95 transition-all z-30 mb-0"
-                  title="Voltar ao Topo"
-                >
-                  <ChevronRight size={20} className="-rotate-90" />
-                </motion.button>
-              )}
-            </AnimatePresence>
 
-            {/* Attachment Preview */}
-            <AnimatePresence>
-              {attachedFile && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="max-w-4xl mx-auto mb-4"
-                >
-                  <div className="inline-flex items-center gap-3 bg-brand-gold/10 border border-brand-gold/30 rounded-2xl px-4 py-2 ring-1 ring-white/5">
-                    <FileText size={16} className="text-brand-gold" />
-                    <span className="text-xs font-bold text-slate-200 truncate max-w-[150px]">{attachedFile.name}</span>
-                    <button 
-                      onClick={() => setAttachedFile(null)}
-                      type="button"
-                      className="p-1 hover:bg-brand-gold/20 rounded-full text-slate-400 hover:text-white transition-colors"
+
+        {user && activeTab === 'chat' && isCEO && (
+          <div className="p-3 lg:p-4 bg-slate-950/80 backdrop-blur-xl border-t border-white/5 relative z-30 flex flex-col items-center">
+            <div className="w-full max-w-4xl flex items-center justify-between pb-1">
+              <button
+                type="button"
+                onClick={() => setIsCeoQueryBarOpen(!isCeoQueryBarOpen)}
+                className="text-[11px] font-bold tracking-wider uppercase text-brand-gold/80 hover:text-brand-gold flex items-center gap-2 px-3 py-1.5 rounded-xl bg-brand-gold/10 hover:bg-brand-gold/15 border border-brand-gold/20 transition-all cursor-pointer"
+                aria-label={isCeoQueryBarOpen ? "Recolher consulta" : "Abrir consulta"}
+              >
+                <MessageSquare size={13} />
+                <span>{isCeoQueryBarOpen ? "Recolher consulta" : "Abrir consulta"}</span>
+                {(input.trim() || attachedFile) && (
+                  <span className="w-2 h-2 rounded-full bg-brand-gold animate-pulse" title="Consulta rascunhada preservada" />
+                )}
+              </button>
+              {isCeoQueryBarOpen && (
+                <span className="text-[10px] text-slate-500 font-mono">Modo CEO · Consulta livre</span>
+              )}
+            </div>
+
+            {isCeoQueryBarOpen && (
+              <div className="w-full max-w-4xl pt-3 pb-2">
+                {/* Attachment Preview */}
+                <AnimatePresence>
+                  {attachedFile && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="mb-4"
                     >
-                      <X size={14} />
+                      <div className="inline-flex items-center gap-3 bg-brand-gold/10 border border-brand-gold/30 rounded-2xl px-4 py-2 ring-1 ring-white/5">
+                        <FileText size={16} className="text-brand-gold" />
+                        <span className="text-xs font-bold text-slate-200 truncate max-w-[150px]">{attachedFile.name}</span>
+                        <button 
+                          onClick={() => setAttachedFile(null)}
+                          type="button"
+                          className="p-1 hover:bg-brand-gold/20 rounded-full text-slate-400 hover:text-white transition-colors"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }}
+                  className="relative group flex items-stretch gap-2 lg:gap-4"
+                >
+                  <div className="relative flex-1">
+                    <motion.div
+                      animate={showSendFeedback ? {
+                        boxShadow: ["0 0 0px rgba(212,175,55,0)", "0 0 20px rgba(212,175,55,0.4)", "0 0 0px rgba(212,175,55,0)"],
+                        scale: [1, 0.98, 1]
+                      } : {}}
+                      transition={{ duration: 0.6 }}
+                      className="relative w-full rounded-2xl lg:rounded-3xl"
+                    >
+                      <input
+                        id="message-input"
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        placeholder={guidedSubject === 'Estudo pelo Edital' ? "Anexe o edital ou mande um tema..." : "Tema, artigo ou súmula..."}
+                        className="w-full bg-slate-900/50 text-slate-100 pl-5 pr-14 py-4 lg:pl-6 lg:pr-16 lg:py-5 rounded-2xl lg:rounded-3xl border border-white/10 focus:border-brand-gold/50 outline-none transition-all shadow-inner placeholder:text-slate-600 font-medium text-sm lg:text-base"
+                      />
+                    </motion.div>
+
+                    <input 
+                      type="file" 
+                      ref={fileInputRef}
+                      className="hidden"
+                      accept=".pdf,.doc,.docx,.txt"
+                      onChange={handleFileUpload}
+                    />
+                    
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className={cn(
+                        "absolute right-4 top-1/2 -translate-y-1/2 p-2 hover:bg-white/5 rounded-xl transition-all",
+                        attachedFile ? "text-brand-gold" : "text-slate-500"
+                      )}
+                      title="Anexar Edital (PDF)"
+                    >
+                      <Paperclip size={20} />
                     </button>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
-
-
-            {isCEO ? (
-              <form 
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleSendMessage();
-                }}
-                className="max-w-4xl mx-auto relative group flex items-stretch gap-2 lg:gap-4"
-              >
-                <div className="relative flex-1">
-                  <motion.div
-                    animate={showSendFeedback ? {
-                      boxShadow: ["0 0 0px rgba(212,175,55,0)", "0 0 20px rgba(212,175,55,0.4)", "0 0 0px rgba(212,175,55,0)"],
-                      scale: [1, 0.98, 1]
-                    } : {}}
-                    transition={{ duration: 0.6 }}
-                    className="relative w-full rounded-2xl lg:rounded-3xl"
-                  >
-                    <input
-                      id="message-input"
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      placeholder={guidedSubject === 'Estudo pelo Edital' ? "Anexe o edital ou mande um tema..." : "Tema, artigo ou súmula..."}
-                      className="w-full bg-slate-900/50 text-slate-100 pl-5 pr-14 py-4 lg:pl-6 lg:pr-16 lg:py-5 rounded-2xl lg:rounded-3xl border border-white/10 focus:border-brand-gold/50 outline-none transition-all shadow-inner placeholder:text-slate-600 font-medium text-sm lg:text-base"
-                    />
-                  </motion.div>
-
-                  <input 
-                    type="file" 
-                    ref={fileInputRef}
-                    className="hidden"
-                    accept=".pdf,.doc,.docx,.txt"
-                    onChange={handleFileUpload}
-                  />
-                  
                   <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className={cn(
-                      "absolute right-4 top-1/2 -translate-y-1/2 p-2 hover:bg-white/5 rounded-xl transition-all",
-                      attachedFile ? "text-brand-gold" : "text-slate-500"
-                    )}
-                    title="Anexar Edital (PDF)"
+                    id="send-button"
+                    disabled={isLoading || (!input.trim() && !attachedFile)}
+                    className="p-3.5 lg:p-4 bg-brand-gold hover:bg-white text-slate-950 rounded-2xl lg:rounded-3xl transition-all shadow-[0_4px_20px_rgba(212,175,55,0.4)] active:scale-90 disabled:opacity-50 disabled:shadow-none group shrink-0"
                   >
-                    <Paperclip size={20} />
+                    <Send size={20} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
                   </button>
-                </div>
-
-                <button
-                  id="send-button"
-                  disabled={isLoading || (!input.trim() && !attachedFile)}
-                  className="p-3.5 lg:p-4 bg-brand-gold hover:bg-white text-slate-950 rounded-2xl lg:rounded-3xl transition-all shadow-[0_4px_20px_rgba(212,175,55,0.4)] active:scale-90 disabled:opacity-50 disabled:shadow-none group shrink-0"
-                >
-                  <Send size={20} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                </button>
-              </form>
-            ) : (
-              <div className="max-w-4xl mx-auto p-4 lg:p-5 rounded-2xl lg:rounded-3xl bg-slate-900/70 border border-brand-gold/25 flex items-center justify-center gap-3.5 text-center backdrop-blur-md shadow-lg">
-                <div className="w-8 h-8 rounded-xl bg-brand-gold/10 border border-brand-gold/30 flex items-center justify-center text-brand-gold shrink-0">
-                  <Lock size={15} />
-                </div>
-                <p className="text-xs text-slate-300 font-medium leading-relaxed">
-                  A consulta avulsa por chat está temporariamente desativada. Concentre-se nos estudos da sua <strong className="text-brand-gold">Trilha Diária 80/20</strong>!
-                </p>
+                </form>
               </div>
             )}
           </div>
         )}
 
+        {activeTab === 'chat' && ((lastModelMsgWithBlocks && activeBlockCount > 0) || showScrollTop) && (
+        <div className="athena-reading-controls" role="group" aria-label="Navegação da leitura">
         {/* Vertical Stage Scroller/Elevator ("Barra de Rodagem Lateral de Etapas") */}
         {activeTab === 'chat' && lastModelMsgWithBlocks && activeBlockCount > 0 && (
           <motion.div 
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="fixed right-2.5 bottom-24 md:right-4 md:top-1/2 md:-translate-y-1/2 md:bottom-auto z-30 flex flex-col items-center gap-2 p-2 bg-slate-900/95 backdrop-blur-md rounded-2xl border border-brand-gold/30 shadow-[0_15px_40px_rgba(0,0,0,0.6)] max-w-[48px]"
+            role="navigation" aria-label="Blocos da aula" tabIndex={0}
+            className="athena-block-nav z-30 flex flex-col items-center gap-2 p-2 bg-slate-900/95 backdrop-blur-md rounded-2xl border border-brand-gold/30 shadow-[0_15px_40px_rgba(0,0,0,0.6)]"
           >
             <div className="text-[8px] font-black text-brand-gold select-none pb-1 border-b border-white/5 uppercase tracking-tighter text-center leading-none">
               Bloco
@@ -7177,6 +9391,8 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                     onClick={handleScrollToBlock}
                     className="relative z-10 group/dot flex flex-col items-center outline-none active:scale-90 transition-transform"
                     title={stageLabels[idx]}
+                    aria-label={`Bloco ${idx + 1}: ${shortLabel}`}
+                    aria-current={isCurrent ? 'step' : undefined}
                   >
                     <div className={cn(
                       "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black transition-all duration-300 shadow",
@@ -7201,6 +9417,23 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
             </div>
           </motion.div>
         )}
+        <AnimatePresence>
+          {user && activeTab === 'chat' && showScrollTop && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 20 }}
+              onClick={scrollToTop}
+              className="athena-scroll-top fixed bottom-24 right-4 sm:right-8 p-3 bg-brand-gold text-slate-950 rounded-full shadow-[0_10px_30px_rgba(212,175,55,0.4)] hover:scale-110 active:scale-95 transition-all z-30"
+              aria-label="Voltar ao topo"
+              title="Voltar ao topo"
+            >
+              <ChevronRight size={20} className="-rotate-90" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+        </div>
+        )}
       </main>
 
     {/* Level Up Modal */}
@@ -7210,7 +9443,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm"
+          className="athena-ui fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm"
         >
           <motion.div 
             initial={{ scale: 0.8, y: 50 }}
@@ -7326,7 +9559,9 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                 </div>
                 <div>
                   <h3 className="text-base font-serif font-bold text-slate-100">Cérebro IA ATHENA</h3>
-                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">Google Gemini 2026</p>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold">
+                    {contentProvider === 'chatgpt' ? 'ChatGPT' : 'Google Gemini'}
+                  </p>
                 </div>
               </div>
               <button
@@ -7338,15 +9573,62 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
             </div>
 
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContentProvider('gemini');
+                    setContentProviderState('gemini');
+                    setTestAiResult(null);
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    contentProvider === 'gemini'
+                      ? 'bg-brand-gold/15 border-brand-gold/60 text-white shadow-lg'
+                      : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold">Gemini</span>
+                    {contentProvider === 'gemini' && <Check size={12} className="text-brand-gold" />}
+                  </div>
+                  <p className="text-[9px] text-slate-400 leading-tight">Cérebro atual das aulas</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContentProvider('chatgpt');
+                    setContentProviderState('chatgpt');
+                    setTestAiResult(null);
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    contentProvider === 'chatgpt'
+                      ? 'bg-brand-gold/15 border-brand-gold/60 text-white shadow-lg'
+                      : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold">ChatGPT</span>
+                    {contentProvider === 'chatgpt' && <Check size={12} className="text-brand-gold" />}
+                  </div>
+                  <p className="text-[9px] text-slate-400 leading-tight">Próximas aulas e o Regerar</p>
+                </button>
+              </div>
+
               <div className="p-3.5 bg-slate-950/60 rounded-2xl border border-white/5 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cérebro IA Oficial</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    {contentProvider === 'chatgpt' ? 'ChatGPT no servidor' : 'Cérebro IA Oficial'}
+                  </span>
                   <span className="text-[9px] font-mono uppercase bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-bold">
                     Temp: 0.10 (Anti-Alucinação)
                   </span>
                 </div>
-                
-                {/* Seletor Visual de Modelo Oficial 2026 */}
+
+                {contentProvider === 'chatgpt' ? (
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    As aulas novas, o Regerar e as questões passam a ser escritos pelo ChatGPT. O Gemini continua disponível neste seletor. A chave da OpenAI não entra no aplicativo.
+                  </p>
+                ) : (
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <button
                     type="button"
@@ -7386,6 +9668,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                     <p className="text-[9px] text-slate-400 leading-tight">Raciocínio Profundo • Nível Banca / 2ª Fase</p>
                   </button>
                 </div>
+                )}
 
                 <div className="flex items-center justify-between pt-1 border-t border-white/5">
                   <span className="text-[9px] text-slate-500">Modo de Execução:</span>
@@ -7420,7 +9703,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                       : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
                   }`}>
                     <div className="flex items-center justify-between font-bold text-[11px] mb-1">
-                      <span>{testAiResult.success ? "✓ Conectado ao Google Gemini" : "✕ Falha na Comunicação"}</span>
+                      <span>{testAiResult.success ? `✓ Conectado ao ${contentEngineLabel(testAiResult.model)}` : "✕ Falha na Comunicação"}</span>
                       {testAiResult.latencyMs > 0 && (
                         <span className="text-[10px] text-slate-400 font-normal">{testAiResult.latencyMs}ms</span>
                       )}
@@ -7435,7 +9718,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
               </div>
 
               <p className="text-[10px] text-slate-400 leading-relaxed">
-                A chave da API Gemini permanece exclusivamente no servidor (variável de ambiente). O aplicativo móvel e o navegador nunca recebem nem armazenam essa credencial.
+                As chaves do Gemini e do ChatGPT ficam só no servidor. O aplicativo não recebe nem guarda essas credenciais. Alunos continuam no Gemini.
               </p>
             </div>
           </motion.div>
@@ -7520,6 +9803,245 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
     </AnimatePresence>
 
     {/* Modal de Edição de Curadoria do CEO */}
+    <LegalReviewPanel
+      open={legalReviewOpen}
+      phase={legalReviewPhase}
+      stageLabel={legalReviewStage}
+      error={legalReviewError}
+      notice={legalReviewNotice}
+      review={legalReview}
+      busy={legalReviewBusy}
+      onClose={() => {
+        if (legalReviewPollRef.current) {
+          legalReviewPollRef.current();
+          legalReviewPollRef.current = null;
+        }
+        setLegalReviewOpen(false);
+      }}
+      onRetryFetch={() => {
+        if (legalReviewDay !== null && legalReviewPart !== null) {
+          void openLegalReview(legalReviewDay, legalReviewPart, legalReviewBlock !== null ? legalReviewBlock : undefined);
+        }
+      }}
+      conflict={legalReviewConflict}
+      currentCatalogHash={legalReviewCatalogHash}
+      onReconcileCatalog={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await reconcileLegalReviewSnapshot(legalReview.id, params);
+          setLegalReview(res.review);
+          setLegalReviewConflict(false);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao processar reconciliação de catálogo.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onViewHistorical={() => setLegalReviewPhase('result')}
+      onStart={() => { void (legalReviewTestMode ? runLegalReviewTest() : runLegalReview(false)); }}
+      onForce={() => { void runLegalReview(true); }}
+      onApprove={() => { void approveOpenLegalReview(); }}
+      onReject={() => { void rejectOpenLegalReview(); }}
+      onEdit={() => setLegalReviewPhase('edit')}
+      onBack={() => setLegalReviewPhase('result')}
+      onSaveCandidate={(markdown) => { void saveOpenLegalReviewCandidate(markdown); }}
+      onReaudit={() => { void reauditOpenLegalReview(); }}
+      onResolveChange={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await resolveLegalReviewChange(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar resolução da alteração.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onResolveQuestion={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await resolveLegalReviewQuestion(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar resolução da questão coordenada.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onResolveFinding={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await resolveLegalReviewFinding(legalReview.id, params);
+          // Critério Obrigatório de Sucesso (Etapa 19.2):
+          // 1. Validar resposta positiva do endpoint
+          const resolvedKey = params.findingKey;
+          if (resolvedKey && res.review?.findingDecisions && !res.review.findingDecisions[resolvedKey]) {
+            throw new Error("A API respondeu mas a deliberação não consta no estado retornado pelo servidor.");
+          }
+
+          // 2. Confirmação obrigatória por releitura independente (read-after-write) do backend (Etapa 19.3)
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+
+            const freshRev = recheck.review;
+            // 2.1 Mesmo reviewId
+            if (freshRev.id !== legalReview.id) {
+              throw new Error(`Inconsistência de versão: a consulta independente retornou outra revisão (${freshRev.id} vs ${legalReview.id}). Persistência não confirmada.`);
+            }
+
+            // 2.2 Integridade do candidateHash
+            if (freshRev.candidateHash !== legalReview.candidateHash) {
+              throw new Error("O hash do candidato foi modificado durante a operação. Recarregue a página antes de prosseguir.");
+            }
+
+            // 2.3 Confirmação da decisão persistida
+            if (resolvedKey) {
+              const freshDec = freshRev.findingDecisions?.[resolvedKey];
+              if (!freshDec) {
+                throw new Error(`A persistência do achado '${resolvedKey}' não pôde ser confirmada na nova leitura do banco de dados.`);
+              }
+              if (freshDec.action !== params.action) {
+                throw new Error(`Divergência de ação gravada para o achado '${resolvedKey}': esperava '${params.action}', obteve '${freshDec.action}'.`);
+              }
+              if (freshDec.justification?.trim() !== params.justification?.trim()) {
+                throw new Error(`Divergência de fundamentação gravada para o achado '${resolvedKey}'. Persistência rejeitada.`);
+              }
+              if (params.expectedCandidateHash && freshDec.expectedCandidateHash !== params.expectedCandidateHash) {
+                throw new Error(`Divergência de hash esperado gravado para o achado '${resolvedKey}'.`);
+              }
+            }
+
+            setLegalReview(freshRev);
+            return;
+          }
+
+          setLegalReview(res.review);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao processar deliberação do achado jurídico.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCloseSupplement={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        try {
+          const res = await closeLegalReviewSupplement(legalReview.id, params);
+          setLegalReview(res.review);
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Erro ao processar encerramento da complementação jurídica.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCreateHumanChange={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await createHumanLegalReviewChange(legalReview.id, params);
+          if (!res.review) {
+            throw new Error("A API respondeu mas o estado atualizado da revisão não foi retornado.");
+          }
+
+          // Confirmação read-after-write por releitura fresca do backend
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+            const freshRev = recheck.review;
+            // Valida que a nova alteração humana consta em freshRev.changes
+            const matchingHumanChange = (freshRev.changes || []).find(
+              (c) => c.authorType === "HUMAN_CEO" && c.originFindingKey === params.originFindingKey
+            );
+            if (!matchingHumanChange) {
+              throw new Error("A alteração humana criada não foi confirmada na releitura fresca do banco de dados.");
+            }
+            setLegalReview(freshRev);
+            return;
+          }
+
+          setLegalReview(res.review);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao salvar alteração textual humana.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      onCreateAddendum={async (params) => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await createLegalReviewAddendum(legalReview.id, params);
+          if (!res.review) {
+            throw new Error("A API respondeu mas o estado atualizado da revisão não foi retornado.");
+          }
+
+          // Confirmação read-after-write por releitura fresca do backend
+          if (legalReviewDay !== null && legalReviewPart !== null) {
+            const recheck = await fetchLatestLegalReview(legalReviewDay, legalReviewPart, typeof legalReviewBlock === 'number' ? legalReviewBlock : undefined);
+            if (!recheck.found || !recheck.review) {
+              throw new Error("A consulta independente não encontrou a revisão jurídica ativa no backend.");
+            }
+            const freshRev = recheck.review;
+            const matchingAddendum = (freshRev.addenda || []).find(
+              (a) => a.targetFindingKey === params.targetFindingKey
+            );
+            if (!matchingAddendum) {
+              throw new Error("O aditamento criado não foi confirmado na releitura fresca do banco de dados.");
+            }
+            setLegalReview(freshRev);
+            return;
+          }
+
+          setLegalReview(res.review);
+        } catch (err: any) {
+          const msg = err?.message || "Erro ao emitir aditamento histórico.";
+          setLegalReviewError(msg);
+          throw new Error(msg);
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+      testMode={legalReviewTestMode}
+      sectionPreview={legalReviewBlock !== null && !legalReviewTestMode}
+      testDraft={legalReviewTestDraft}
+      onTestDraftChange={setLegalReviewTestDraft}
+      onEndTest={() => { void endLegalReviewTest(); }}
+      onRequestSupplement={async () => {
+        if (!legalReview?.id) return;
+        setLegalReviewBusy(true);
+        setLegalReviewError(null);
+        try {
+          const res = await requestLegalReviewSupplement(legalReview.id);
+          setLegalReview(res.review);
+          if (res.review.supplement?.status === 'reserved' || res.review.supplement?.status === 'running') {
+            startSupplementPolling(legalReview.day, legalReview.part, legalReviewBlock);
+          }
+        } catch (err: any) {
+          setLegalReviewError(err?.message || "Falha ao executar complementação jurídica.");
+        } finally {
+          setLegalReviewBusy(false);
+        }
+      }}
+    />
     <AnimatePresence>
       {isEditingLesson && (
         <motion.div
@@ -7543,7 +10065,7 @@ Por favor, me ensine a doutrina e jurisprudência envolvidas, explique de forma 
                   <h3 className="text-base font-serif font-bold text-slate-100">Editor de Curadoria do CEO</h3>
                   <p className="text-[10px] uppercase font-bold tracking-widest text-brand-gold font-mono">
                     {editingLessonIndex !== undefined && messages[editingLessonIndex]
-                      ? `Ajustar Parte ${(messages[editingLessonIndex].trilhaMaterialIndex !== undefined ? messages[editingLessonIndex].trilhaMaterialIndex + 1 : 1)} (${messages[editingLessonIndex].subject || 'Direito'}) Antes de Homologar`
+                      ? `Ajustar Bloco ${(messages[editingLessonIndex].trilhaMaterialIndex !== undefined ? messages[editingLessonIndex].trilhaMaterialIndex + 1 : 1)} (${messages[editingLessonIndex].subject || 'Direito'}) Antes de Homologar`
                       : 'Ajustar Texto da Lição Antes de Homologar'}
                   </p>
                 </div>

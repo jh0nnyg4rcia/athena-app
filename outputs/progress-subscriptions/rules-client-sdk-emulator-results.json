@@ -1,0 +1,127 @@
+{
+  "passed": 24,
+  "results": [
+    {
+      "name": "Anonimo: leitura direta de catalogo homologado bloqueada no client SDK",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Anonimo: listagem de catalogo bloqueada no client SDK",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Anonimo: leitura de sessao de aluno bloqueada no client SDK",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Anonimo: leitura de convites de teste bloqueada no client SDK",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: leitura direta de homologated_lessons bloqueada (deve usar API)",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: leitura direta de homologated_parts bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: leitura direta de suas proprias sessoes antigas bloqueada (impede extracao de corpos)",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: tentativa de ler sessao de OUTRO aluno bloqueada (cross-account read)",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: tentativa de gravar dados na conta de OUTRO aluno bloqueada (cross-account write)",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: tentativa de autoatribuir assinatura paga em access_subscriptions bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: tentativa de autoatribuir cargo de CEO/admin em access_admins bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: tentativa de autoatribuir dias concluídos em study_progress bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Gratuito: tentativa de autoinjetar role/admin no documento users/{uid} bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Assinante: leitura direta de homologated_lessons bloqueada no Firestore (deve consumir via servidor)",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Assinante: tentativa de ler sessoes de outro aluno bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Assinante: tentativa de forjar progresso na trilha legado bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Assinante: tentativa de criar convite em tester_invites bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Testador: leitura direta de catalogo homologado bloqueada no client SDK",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Testador: autoatribuicao de vigencia estendida em tester_access bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Testador: leitura de dados confidenciais em legal_reviews bloqueada",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "Testador: acesso a colecao arbitraria inexistente bloqueado por default deny",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "CEO sem registro de autorizacao no servidor e bloqueado (previne impersonacao)",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    },
+    {
+      "name": "CEO autorizado via Google + access_admins le catalogo homologado diretamente no client SDK",
+      "status": "ALLOWED_AS_EXPECTED"
+    },
+    {
+      "name": "Impostor com UID divergente ou sem login Google e bloqueado",
+      "status": "DENIED_AS_EXPECTED",
+      "code": "permission-denied"
+    }
+  ],
+  "emulatorOnly": true,
+  "activeRulesNotChanged": true,
+  "verifiedAt": "2026-10-17T03:29:01.145Z"
+}

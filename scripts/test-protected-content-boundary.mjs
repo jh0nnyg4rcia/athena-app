@@ -1,0 +1,22 @@
+import fs from'node:fs';import assert from'node:assert/strict';import {createRequire}from'node:module';
+const require=createRequire(new URL('../../athena-integration/package.json',import.meta.url)),{transformSync}=require('esbuild');
+const load=async p=>{const {code}=transformSync(fs.readFileSync(p,'utf8'),{loader:'ts',format:'esm'});return import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));};
+const root='work/athena-progress-subscriptions/';
+const {createProtectedContentDelivery}=await load(root+'src/server/protectedContentDelivery.ts');
+const {createAccountContentSession}=await load(root+'src/lib/accountContentSession.ts');
+const results=[],check=async(n,fn)=>{await fn();results.push(n);};
+const id='day_1_part_0',lesson={id,day:1,part:0,status:'approved',content:'synthetic only'},now=100;
+function boundary(options={}){let reads=0,checks=0;return {run:createProtectedContentDelivery({authenticate:async token=>{if(token!=='synthetic-authenticated')throw Error('AUTHENTICATION_REQUIRED');return{uid:'student-a'};},authorize:async(uid,lessonId)=>({uid,lessonId,allowed:options.allow!==false,revision:options.revoke&&checks++?'changed':'1',validUntil:options.expired?99:200}),readCanonical:async()=>{reads++;return {...lesson};},now:()=>now}),reads:()=>reads};}
+await check('authorized server decision returns unchanged canonical content',async()=>{const b=boundary();assert.deepEqual((await b.run({lessonId:id},'synthetic-authenticated')).lesson,lesson);});
+await check('invalid credential never reads source',async()=>{const b=boundary();await assert.rejects(b.run({lessonId:id},'invalid'));assert.equal(b.reads(),0);});
+await check('local role/subscription/progress injection rejected',async()=>{const b=boundary();await assert.rejects(b.run({lessonId:id,role:'ceo',subscription:true,completedDays:[1,2]},'synthetic-authenticated'),/INVALID_RESOURCE/);assert.equal(b.reads(),0);});
+await check('source authorization denies before reading content',async()=>{const b=boundary({allow:false});await assert.rejects(b.run({lessonId:id},'synthetic-authenticated'),/CONTENT_ACCESS_DENIED/);assert.equal(b.reads(),0);});
+await check('expired decision denies before source read',async()=>{const b=boundary({expired:true});await assert.rejects(b.run({lessonId:id},'synthetic-authenticated'));assert.equal(b.reads(),0);});
+await check('revocation during read prevents delivery',async()=>{const b=boundary({revoke:true});await assert.rejects(b.run({lessonId:id},'synthetic-authenticated'),/CONTENT_ACCESS_CHANGED/);});
+await check('arbitrary resource rejected',async()=>{const b=boundary();await assert.rejects(b.run({lessonId:'../../users'},'synthetic-authenticated'));assert.equal(b.reads(),0);});
+await check('each read checks server and offline never returns cached content',async()=>{let count=0;const c=createAccountContentSession(async()=>{count++;return{uid:'a',lesson,validUntil:200};},()=>100);c.setAccount('a');await c.read(id);await c.read(id);assert.equal(count,2);c.setOnline(false);assert.equal(c.size(),0);await assert.rejects(c.read(id));});
+await check('account switch rejects late response and clears session view',async()=>{let resolve;const c=createAccountContentSession(()=>new Promise(r=>resolve=r),()=>100);c.setAccount('a');const pending=c.read(id);c.setAccount('b');resolve({uid:'a',lesson,validUntil:200});await assert.rejects(pending);assert.equal(c.size(),0);});
+await check('wrong account envelope rejected',async()=>{const c=createAccountContentSession(async()=>({uid:'b',lesson,validUntil:200}),()=>100);c.setAccount('a');await assert.rejects(c.read(id));});
+await check('subscription expiry envelope rejected',async()=>{const c=createAccountContentSession(async()=>({uid:'a',lesson,validUntil:99}),()=>100);c.setAccount('a');await assert.rejects(c.read(id));});
+await check('logout clears active view and blocks reading',async()=>{const c=createAccountContentSession(async()=>({uid:'a',lesson,validUntil:200}),()=>100);c.setAccount('a');await c.read(id);c.setAccount(null);assert.equal(c.size(),0);await assert.rejects(c.read(id));});
+fs.mkdirSync('outputs/progress-subscriptions',{recursive:true});fs.writeFileSync('outputs/progress-subscriptions/boundary-tests.json',JSON.stringify({passed:results.length,results,syntheticOnly:true,emulator:false,progressionPolicyNotImplemented:true,productionChanges:0},null,2));console.log(JSON.stringify({passed:results.length,results}));

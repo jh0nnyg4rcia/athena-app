@@ -1,14 +1,65 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithCredential, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import {
+  getAuth,
+  initializeAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  signOut,
+  connectAuthEmulator,
+} from 'firebase/auth';
+import { getFirestore, doc, getDocFromServer, connectFirestoreEmulator } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
+export const isLocalHost = typeof window !== 'undefined' && (
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1'
+);
+
+// Quando acessado em localhost (conferência humana isolada), usa estritamente o projeto demo
+// com emuladores locais. O prefixo demo- impede qualquer requisição de atingir o Google Cloud.
+const effectiveConfig = isLocalHost
+  ? {
+      ...firebaseConfig,
+      projectId: 'demo-athena-client-safe',
+      apiKey: 'fake-api-key',
+      authDomain: 'localhost'
+    }
+  : firebaseConfig;
+
+const app = initializeApp(effectiveConfig);
+export const db = isLocalHost
+  ? getFirestore(app)
+  : getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+function createAuth() {
+  if (typeof window === 'undefined') {
+    return getAuth(app);
+  }
+  try {
+    return initializeAuth(app, {
+      persistence: Capacitor.isNativePlatform()
+        ? [indexedDBLocalPersistence]
+        : [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+    });
+  } catch {
+    return getAuth(app);
+  }
+}
+
+export const auth = createAuth();
+
+if (isLocalHost) {
+  try {
+    connectFirestoreEmulator(db, '127.0.0.1', 8197);
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    console.info('[ATHENA Isolamento] Conectado exclusivamente aos emuladores locais (demo-athena-client-safe). Banco de produção 100% blindado.');
+  } catch (err) {
+    console.warn('[ATHENA Isolamento] Emuladores já conectados ou erro ao conectar:', err);
+  }
+}
 
 async function testConnection() {
   try {
@@ -140,42 +191,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.warn(`[Firestore Resilient Fallback] Path: ${path}, Op: ${operationType}. Message:`, errInfo.error);
   // Do NOT throw error: allow local persistence / offline state to keep the application 100% functional without crashes
 }
-
-export const signInWithGoogle = async () => {
-  if (Capacitor.isNativePlatform()) {
-    // 1. Native Google Sign-In using Android Play Services / Credential Manager
-    const result = await FirebaseAuthentication.signInWithGoogle();
-    let idToken = result.credential?.idToken;
-    if (!idToken) {
-      const tokenResult = await FirebaseAuthentication.getIdToken();
-      idToken = tokenResult?.token;
-    }
-    if (idToken) {
-      const credential = GoogleAuthProvider.credential(idToken);
-      return await signInWithCredential(auth, credential);
-    }
-    return result;
-  } else {
-    // 2. Web browser popup sign-in
-    return await signInWithPopup(auth, googleProvider);
-  }
-};
-
-export const checkAndSyncNativeAuth = async () => {
-  if (!Capacitor.isNativePlatform()) return;
-  try {
-    const nativeRes = await FirebaseAuthentication.getCurrentUser();
-    if (nativeRes?.user && !auth.currentUser) {
-      const tokenResult = await FirebaseAuthentication.getIdToken();
-      if (tokenResult?.token) {
-        const credential = GoogleAuthProvider.credential(tokenResult.token);
-        await signInWithCredential(auth, credential);
-      }
-    }
-  } catch (e) {
-    console.warn("[checkAndSyncNativeAuth warning]:", e);
-  }
-};
 
 export const logOut = async () => {
   if (Capacitor.isNativePlatform()) {

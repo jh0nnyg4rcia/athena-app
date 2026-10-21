@@ -28,6 +28,17 @@
       "firebase.json",
       "**/node_modules/**"
     ],
+    "headers": [
+      {
+        "source": "**/*.apk",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/vnd.android.package-archive"
+          }
+        ]
+      }
+    ],
     "rewrites": [
       {
         "source": "/api/**",
@@ -41,5 +52,18 @@
         "destination": "/index.html"
       }
     ]
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099,
+      "host": "127.0.0.1"
+    },
+    "firestore": {
+      "port": 8197,
+      "host": "127.0.0.1"
+    },
+    "ui": {
+      "enabled": false
+    }
   }
 }
