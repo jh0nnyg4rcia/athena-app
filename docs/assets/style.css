@@ -348,3 +348,14 @@ footer .about{color:var(--muted);font-size:.98rem;margin-top:1rem;max-width:360p
   .legal .section-card,.legal .card{padding:1.25rem 1.05rem}
   .legal .meta-bar{flex-direction:column;align-items:center;gap:.45rem}
 }
+
+/* Planos (Kiwify) */
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.4rem;align-items:stretch}
+.plan{padding:2rem 1.6rem;display:flex;flex-direction:column;gap:.8rem;text-align:center}
+.plan h3{font-size:1.1rem;color:var(--gold2)}
+.plan .price{font-family:var(--head);font-size:1.9rem;font-weight:700;color:#F3EBD6}
+.plan .price small{font-size:.85rem;color:var(--muted);margin-left:.25rem;font-weight:500}
+.plan .inst{color:var(--muted);font-size:.95rem;margin-top:-.4rem}
+.plan .btn{margin-top:auto}
+.plan-hi{border-color:var(--gold);box-shadow:0 0 40px rgba(200,169,81,.18)}
+.plan-hi .tag{align-self:center}
