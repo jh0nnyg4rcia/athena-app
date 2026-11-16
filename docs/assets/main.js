@@ -87,16 +87,6 @@
   document.querySelectorAll('.reveal').forEach(function(el){ obs ? obs.observe(el) : el.classList.add('in'); });
   if(!obs) document.querySelectorAll('[data-type]').forEach(type);
 
-  /* Quiz */
-  var quiz=document.getElementById('quiz');
-  if (quiz) quiz.addEventListener('click', function(e){
-    var b=e.target.closest('.opt'); if(!b) return;
-    var opts=quiz.querySelectorAll('.opt');
-    opts.forEach(function(o){ o.disabled=true; if(o.dataset.ok==='1') o.classList.add('correct'); });
-    if (b.dataset.ok!=='1') b.classList.add('wrong');
-    document.getElementById('explain').classList.add('show');
-  });
-
   /* Mobile menu */
   var mb=document.getElementById('menuBtn'), dr=document.getElementById('drawer');
   if (mb && dr){
