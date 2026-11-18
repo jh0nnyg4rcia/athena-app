@@ -35,6 +35,7 @@ main,header,footer{position:relative;z-index:1}
 .nav ul{display:flex;gap:1.6rem;list-style:none}
 .nav ul a{color:var(--muted);text-decoration:none;font-size:.95rem;font-weight:500;transition:color .2s}
 .nav ul a:hover{color:var(--gold2)}
+.nav ul a[href="#planos"]{color:var(--gold2)}
 .menu-btn{display:none;background:transparent;border:1px solid var(--gold-dim);color:var(--gold2);width:44px;height:44px;border-radius:10px;cursor:pointer}
 .drawer{display:none}
 
